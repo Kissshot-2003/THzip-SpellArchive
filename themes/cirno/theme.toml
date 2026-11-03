@@ -1,0 +1,54 @@
+schema = 1
+
+[meta]
+name = "琪露诺 · 冰晶"
+author = "SpellArchive Design"
+version = "1.0"
+license = "CC-BY-NC-SA-4.0"
+description = "冷蓝冰翼。素材来自 assets/ 同人资源包。"
+sampling_pixel = true
+scale = 2
+
+[text_map]
+extract = "解除符卡封印"
+pack = "构筑封印结界"
+new_archive = "构筑新结界"
+test = "结界稳固性检测"
+task_running = "咏唱进行中…"
+task_done = "符卡咏唱完成"
+
+[resource]
+IconArchive7z = "png/icon-archive.png"
+IconArchiveZip = "png/icon-archive.png"
+IconArchiveZst = "png/icon-archive.png"
+IconArchiveEncrypted = "png/icon-archive.png"
+IconFile = "png/icon-file.png"
+IconFolder = "png/icon-folder.png"
+IconFileUnknown = "png/icon-file.png"
+ProgressSpellBg = "png/progress-base.png"
+ProgressSpellFill = "png/progress-fill.png"
+BtnExtract = "png/icon-extract.png"
+BtnPack = "png/icon-archive.png"
+BtnAddFile = "png/icon-add.png"
+BtnDelete = "png/icon-delete.png"
+BtnSettings = "png/icon-settings.png"
+BtnSearch = "png/icon-search.png"
+BtnPause = "png/icon-pause.png"
+BtnResume = "png/icon-play.png"
+BtnClose = "png/icon-close.png"
+BtnMinimize = "png/icon-minimize.png"
+BtnTheme = "png/icon-theme.png"
+StateOk = "png/icon-success.png"
+StateWarn = "png/icon-warning.png"
+StateError = "png/icon-error.png"
+AvatarMain = "png/avatar.png"
+
+[color]
+accent = "#52B8F5"
+accent_soft = "#1A3347"
+bg_window = "#171A2E"
+bg_panel = "#1F213B"
+bg_hover = "#292B47"
+border = "#404263"
+text_normal = "#F5F2E8"
+text_sub = "#A6A6BD"

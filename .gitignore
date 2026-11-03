@@ -1,0 +1,5 @@
+/target
+*.pdb
+*.tmp
+.spellarchive.*
+config/

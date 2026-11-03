@@ -1,0 +1,97 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::plan::ExtractPlan;
+use crate::reader::ExtractReport;
+use crate::types::EntryId;
+
+pub type TaskId = u64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskPhase {
+    Pending,
+    Planning,
+    AwaitingDecision,
+    Running,
+    Paused,
+    Done,
+    Failed,
+}
+
+impl TaskPhase {
+    pub fn label(self) -> &'static str {
+        match self {
+            TaskPhase::Pending => "排队中",
+            TaskPhase::Planning => "预检中",
+            TaskPhase::AwaitingDecision => "等待确认",
+            TaskPhase::Running => "进行中",
+            TaskPhase::Paused => "已暂停",
+            TaskPhase::Done => "已完成",
+            TaskPhase::Failed => "失败",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken(Arc<AtomicBool>);
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TaskEvent {
+    PhaseChanged {
+        task: TaskId,
+        phase: TaskPhase,
+    },
+    Started {
+        task: TaskId,
+        total_bytes: u64,
+        total_entries: u32,
+    },
+    Progress {
+        task: TaskId,
+        processed_compressed: u64,
+        written: u64,
+        entry: Option<EntryId>,
+    },
+    Warning {
+        task: TaskId,
+        text: String,
+    },
+    NeedDecision {
+        task: TaskId,
+        plan: Arc<ExtractPlan>,
+    },
+    EntryFailed {
+        task: TaskId,
+        entry: EntryId,
+        error: String,
+    },
+    Finished {
+        task: TaskId,
+        report: Arc<ExtractReport>,
+    },
+    Failed {
+        task: TaskId,
+        error: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct ArchiveOpened {
+    pub task: TaskId,
+    pub path: PathBuf,
+}

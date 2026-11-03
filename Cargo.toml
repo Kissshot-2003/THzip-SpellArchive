@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/spell-core", "crates/spell-app", "crates/spell-cli"]
+default-members = ["crates/spell-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["SpellArchive contributors"]
+
+[workspace.dependencies]
+spell-core = { path = "crates/spell-core" }
+thiserror = "2"
+zeroize = "1"
+encoding_rs = "0.8"
+windows-sys = "0.61"
+eframe = "0.37"
+egui = "0.37"
+egui_extras = "0.37"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+strip = "none"

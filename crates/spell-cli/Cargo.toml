@@ -1,0 +1,13 @@
+[package]
+name = "spell-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "spell"
+path = "src/main.rs"
+
+[dependencies]
+spell-core.workspace = true

@@ -1,4 +1,5 @@
 pub mod archive_view;
+pub mod dialogs;
 pub mod file_browser;
 pub mod settings;
 pub mod spell_progress;
@@ -73,7 +74,7 @@ pub fn top_bar(app: &mut SpellApp, root: &mut egui::Ui) {
 
             let open = app.tr.t(TextKey::Open);
             if action_button(ui, app, ResKey::IconArchive7z, open).clicked() {
-                app.status = "骨架阶段：文件对话框与 zip/7z 后端待接入".to_owned();
+                app.open_archive_dialog();
             }
 
             let extract = app.tr.t(TextKey::Extract);
@@ -82,17 +83,17 @@ pub fn top_bar(app: &mut SpellApp, root: &mut egui::Ui) {
                 .on_hover_text(extract_standard)
                 .clicked()
             {
-                app.status = format!("骨架阶段：{} 需要格式后端", extract_standard);
+                app.begin_extract_dialog();
             }
 
             let pack = app.tr.t(TextKey::Pack);
             if action_button(ui, app, ResKey::BtnPack, pack).clicked() {
-                app.status = "骨架阶段：压缩写入后端待接入".to_owned();
+                app.open_pack_dialog();
             }
 
             let test = app.tr.t(TextKey::TestArchive);
             if action_button(ui, app, ResKey::StateOk, test).clicked() {
-                app.status = "骨架阶段：完整性测试待接入".to_owned();
+                app.start_test();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let settings = app.tr.t(TextKey::Settings);
@@ -160,6 +161,42 @@ pub fn status_bar(app: &mut SpellApp, root: &mut egui::Ui) {
                 });
             });
         });
+}
+
+/// zip 的 DOS 时间按「墙钟数字当 UTC」存放；这里按同样的语义格式化，数字不会漂移。
+pub fn format_time(time: Option<std::time::SystemTime>) -> String {
+    let Some(time) = time else {
+        return "—".to_owned();
+    };
+    let Ok(duration) = time.duration_since(std::time::UNIX_EPOCH) else {
+        return "—".to_owned();
+    };
+    let secs = duration.as_secs() as i64;
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    if !(1..=9999).contains(&year) {
+        return "—".to_owned();
+    }
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        rem / 3_600,
+        (rem % 3_600) / 60
+    )
+}
+
+/// Howard Hinnant 的 civil_from_days。
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
 pub fn format_bytes(bytes: u64) -> String {

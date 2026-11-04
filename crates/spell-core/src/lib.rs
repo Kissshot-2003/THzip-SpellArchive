@@ -25,4 +25,7 @@ pub use plan::{DecisionTable, ExtractPlan, OverwritePolicy};
 pub use reader::{ArchiveReader, ExtractReport, ExtractSink};
 pub use secret::SecretString;
 pub use types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
-pub use writer::ArchiveWriter;
+pub use writer::{
+    ArchiveWriter, FinishReport, PackEntry, PackKind, normalize_entry_name, scan_inputs,
+    write_entries,
+};

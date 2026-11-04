@@ -1,48 +1,81 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use spell_core::ArchiveError;
 use spell_core::backend;
+use spell_core::limits::Limits;
+use spell_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy, PlanWarning};
+use spell_core::safety::{ExtractDirSink, VerifySink};
+use spell_core::secret::SecretString;
 use spell_core::task::CancelToken;
-use spell_core::types::ArchiveKind;
+use spell_core::types::{ArchiveKind, EntryId, Method};
+use spell_core::writer::{scan_inputs, write_entries};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    match args.as_slice() {
-        [flag] if flag == "--help" || flag == "-h" => {
+    match args.first().map(String::as_str) {
+        Some("--help" | "-h") | None => {
             usage();
-            ExitCode::SUCCESS
+            if args.is_empty() {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
         }
-        [flag] if flag == "--version" || flag == "-V" => {
+        Some("--version" | "-V") => {
             println!("spell {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        [command, path] if command == "sniff" => sniff(Path::new(path)),
-        [command, path] if command == "list" => list(Path::new(path)),
-        [command, path] if command == "test" => test(Path::new(path)),
-        [command, path] if command == "extract" => {
-            println!("骨架阶段：{} 的解压后端尚未接入", path);
-            ExitCode::SUCCESS
-        }
-        _ => {
+        Some("sniff") => with_path(&args, sniff),
+        Some("list") => with_path(&args, |path| list(path, password_from(&args))),
+        Some("test") => with_path(&args, |path| test(path, password_from(&args))),
+        Some("extract") => extract(&args),
+        Some("pack") => pack(&args),
+        Some(other) => {
+            eprintln!("未知命令: {other}");
             usage();
             ExitCode::FAILURE
         }
     }
 }
 
+fn with_path(args: &[String], run: impl FnOnce(&Path) -> ExitCode) -> ExitCode {
+    match args.get(1) {
+        Some(path) => run(Path::new(path)),
+        None => {
+            usage();
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn password_from(args: &[String]) -> Option<SecretString> {
+    args.iter()
+        .position(|arg| arg == "--password" || arg == "-p")
+        .and_then(|index| args.get(index + 1))
+        .map(|pw| SecretString::new(pw.as_str()))
+}
+
 fn usage() {
     println!(
-        "spell — SpellArchive 命令行（骨架阶段）
+        "spell — SpellArchive 命令行
 
 用法:
-  spell sniff <文件>     识别归档格式（magic bytes）
-  spell list  <文件>     列出条目（需格式后端）
-  spell test  <文件>     完整性测试（需格式后端）
-  spell extract <文件>   解压（需格式后端）
+  spell sniff   <文件>                    识别归档格式（magic bytes）
+  spell list    <文件> [--password <pw>]  列出条目
+  spell test    <文件> [--password <pw>]  完整性测试（CRC 校验）
+  spell extract <文件> [目标目录] [--force] [--password <pw>]
+                                          安全解压；默认不覆盖已有文件
+  spell pack    <输出.zip> <输入...> [--store] [--force] [--append] [--password <pw>]
+                                          创建/追加 zip；--password 使用 AES-256 加密
   spell --version
 
-说明: 格式后端（zip/7z/tar）尚未接入，list/test/extract 目前只验证接口与错误路径。"
+说明:
+  - 不带目标目录时解压到「文件所在目录/去扩展名」。
+  - --force 等价于覆盖策略「全部覆盖」；否则冲突条目会被跳过。
+  - 支持 zip 读取与创建；7z / tar 尚未接入。
+  - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
 }
 
@@ -65,8 +98,8 @@ fn sniff(path: &Path) -> ExitCode {
     }
 }
 
-fn list(path: &Path) -> ExitCode {
-    match backend::open(path, None) {
+fn list(path: &Path, password: Option<SecretString>) -> ExitCode {
+    match backend::open(path, password.as_ref()) {
         Ok(reader) => {
             println!(
                 "{}（{}）共 {} 条",
@@ -75,36 +108,54 @@ fn list(path: &Path) -> ExitCode {
                 reader.entries().len()
             );
             for entry in reader.entries() {
+                let flag = if entry.encrypted { " 🔒" } else { "" };
+                let kind = if entry.kind.is_dir() { "d" } else { "-" };
                 println!(
-                    "{:>12}  {}  {}",
+                    "{kind} {:>12}  {:>12}  {:<8}  {}{}",
                     entry.size,
+                    entry
+                        .packed
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| "—".to_owned()),
                     entry.method.label(),
-                    entry.display
+                    entry.display,
+                    flag
                 );
             }
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("打开失败: {err}");
+            report_open_error(&err);
             ExitCode::FAILURE
         }
     }
 }
 
-fn test(path: &Path) -> ExitCode {
-    match backend::open(path, None) {
+fn test(path: &Path, password: Option<SecretString>) -> ExitCode {
+    match backend::open(path, password.as_ref()) {
         Ok(mut reader) => {
             let cancel = CancelToken::new();
-            let mut sink = CountingSink::default();
+            let mut sink = VerifySink::with_limits(Limits::default());
             match reader.test(&cancel, &mut sink) {
                 Ok(report) => {
                     println!(
-                        "测试完成：成功 {} 条，失败 {} 条，写出 {} 字节",
+                        "测试完成：成功 {} 条，失败 {} 条，CRC 不符 {} 条，读取 {} 字节",
                         report.succeeded.len(),
                         report.failed.len(),
+                        report.crc_mismatch.len(),
                         report.bytes_written
                     );
-                    ExitCode::SUCCESS
+                    for (id, error) in &report.failed {
+                        println!("  条目 {id} 失败: {error}");
+                    }
+                    for id in &report.crc_mismatch {
+                        println!("  条目 {id} CRC 不符");
+                    }
+                    if report.failed.is_empty() && report.crc_mismatch.is_empty() {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::FAILURE
+                    }
                 }
                 Err(err) => {
                     eprintln!("测试失败: {err}");
@@ -113,40 +164,281 @@ fn test(path: &Path) -> ExitCode {
             }
         }
         Err(err) => {
-            eprintln!("打开失败: {err}");
+            report_open_error(&err);
             ExitCode::FAILURE
         }
     }
 }
 
-#[derive(Default)]
-struct CountingSink {
-    bytes: u64,
+fn extract(args: &[String]) -> ExitCode {
+    let Some(input) = args.get(1) else {
+        usage();
+        return ExitCode::FAILURE;
+    };
+    let force = args.iter().any(|arg| arg == "--force" || arg == "-f");
+    let password = password_from(args);
+    let input = Path::new(input);
+
+    let target = match args.get(2) {
+        Some(arg) if !arg.starts_with('-') => PathBuf::from(arg),
+        _ => default_target(input),
+    };
+
+    let mut reader = match backend::open(input, password.as_ref()) {
+        Ok(reader) => reader,
+        Err(err) => {
+            report_open_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let limits = Limits::default();
+    let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
+    let plan = match reader.plan(&ids, &target, &limits) {
+        Ok(plan) => plan,
+        Err(err) => {
+            eprintln!("预检失败: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    print_plan(&plan, &target);
+
+    let decisions = DecisionTable {
+        default: if force {
+            OverwritePolicy::Overwrite
+        } else {
+            OverwritePolicy::Skip
+        },
+        per_entry: Default::default(),
+    };
+
+    let cancel = CancelToken::new();
+    let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
+
+    match reader.extract(&plan, &decisions, &cancel, &mut sink) {
+        Ok(report) => {
+            println!(
+                "解压完成：成功 {} 条，跳过 {} 条，失败 {} 条，CRC 不符 {} 条，写出 {} 字节，耗时 {:.2?}",
+                report.succeeded.len(),
+                report.skipped.len(),
+                report.failed.len(),
+                report.crc_mismatch.len(),
+                report.bytes_written,
+                report.elapsed
+            );
+            for (id, error) in &report.failed {
+                println!("  条目 {id} 失败: {error}");
+            }
+            for id in &report.crc_mismatch {
+                println!("  条目 {id} CRC 不符（文件已保留）");
+            }
+            if report.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            eprintln!("解压中止: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-impl spell_core::ExtractSink for CountingSink {
-    fn on_entry_begin(
-        &mut self,
-        _id: spell_core::EntryId,
-        _entry: &spell_core::ArchiveEntry,
-    ) -> Result<(), spell_core::SinkError> {
-        Ok(())
+fn print_plan(plan: &ExtractPlan, target: &Path) {
+    println!(
+        "预检：{} 个条目，解压后 {} 字节，最大单文件 {} 字节",
+        plan.items.len(),
+        plan.total_bytes,
+        plan.largest_entry
+    );
+    println!("目标目录: {}", target.display());
+    if let Some(free) = plan.free_space {
+        println!("目标盘剩余: {free} 字节");
+    }
+    if plan.needs_password {
+        println!("注意：包含加密条目，需要 --password");
+    }
+    if !plan.conflicts.is_empty() {
+        println!(
+            "冲突: {} 个（默认跳过，--force 覆盖）",
+            plan.conflicts.len()
+        );
+        for conflict in plan.conflicts.iter().take(10) {
+            println!("  {:?}: {}", conflict.kind, conflict.path.display());
+        }
+    }
+    for warning in &plan.warnings {
+        match warning {
+            PlanWarning::UnsafePath { id, detail } => {
+                println!("  不安全路径（条目 {id}）: {detail}")
+            }
+            PlanWarning::SuspiciousDisplayName { id, detail } => {
+                println!("  可疑文件名（条目 {id}）: {detail}")
+            }
+            PlanWarning::SymlinkSkipped { id } => println!("  跳过链接（条目 {id}）"),
+            PlanWarning::DuplicatePath { id, renamed_to } => {
+                println!("  重名（条目 {id}）→ {renamed_to}")
+            }
+            PlanWarning::BombSuspected { reason } => println!("  疑似炸弹: {reason}"),
+            PlanWarning::UnsupportedMethod { id, method } => {
+                println!("  不支持的压缩方法（条目 {id}）: {method}")
+            }
+            PlanWarning::LongPath => println!("  存在超长路径"),
+        }
+    }
+}
+
+fn pack(args: &[String]) -> ExitCode {
+    let Some(output) = args.get(1).filter(|arg| !arg.starts_with('-')) else {
+        usage();
+        return ExitCode::FAILURE;
+    };
+    let output = Path::new(output);
+    let store = args.iter().any(|arg| arg == "--store" || arg == "-s");
+    let force = args.iter().any(|arg| arg == "--force" || arg == "-f");
+    let append = args.iter().any(|arg| arg == "--append" || arg == "-a");
+    let password = password_from(args);
+    let mut inputs = Vec::new();
+    let mut skip_value = false;
+    for arg in args.iter().skip(2) {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if arg == "--password" || arg == "-p" {
+            skip_value = true;
+            continue;
+        }
+        if arg.starts_with('-') {
+            continue;
+        }
+        inputs.push(PathBuf::from(arg));
     }
 
-    fn on_data(
-        &mut self,
-        _id: spell_core::EntryId,
-        chunk: &[u8],
-    ) -> Result<(), spell_core::SinkError> {
-        self.bytes = self.bytes.saturating_add(chunk.len() as u64);
-        Ok(())
+    if inputs.is_empty() {
+        eprintln!("请至少指定一个要打包的文件或目录");
+        usage();
+        return ExitCode::FAILURE;
     }
 
-    fn on_entry_end(
-        &mut self,
-        _id: spell_core::EntryId,
-        _ok: bool,
-    ) -> Result<(), spell_core::SinkError> {
-        Ok(())
+    let ext = output
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("zip")
+        .to_ascii_lowercase();
+    if ext != "zip" {
+        eprintln!("暂不支持创建 .{ext}；目前只能创建 zip");
+        return ExitCode::FAILURE;
+    }
+
+    if append && password.is_some() {
+        eprintln!("追加模式暂不支持设置新密码");
+        return ExitCode::FAILURE;
+    }
+    if append {
+        if !output.is_file() {
+            eprintln!("追加模式要求目标 zip 已存在：{}", output.display());
+            return ExitCode::FAILURE;
+        }
+    } else if output.exists() && !force {
+        eprintln!(
+            "目标已存在：{}（加 --force 覆盖，或 --append 追加）",
+            output.display()
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let limits = Limits::default();
+    let entries = match scan_inputs(&inputs, &limits) {
+        Ok(entries) => entries,
+        Err(err) => {
+            eprintln!("扫描输入失败: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let total: u64 = entries.iter().map(|entry| entry.size).sum();
+
+    println!(
+        "{}：{} 个条目，原始 {} 字节 → {}（{}{}）",
+        if append { "追加" } else { "打包" },
+        entries.len(),
+        total,
+        output.display(),
+        if store { "Store" } else { "Deflate" },
+        if password.is_some() && !append {
+            " + AES-256"
+        } else {
+            ""
+        }
+    );
+
+    let method = if store {
+        Method::Store
+    } else {
+        Method::Deflate
+    };
+    let created = if append {
+        backend::create_writer_append(output, ArchiveKind::Zip, method)
+    } else {
+        backend::create_writer_with(output, ArchiveKind::Zip, method, password.as_ref())
+    };
+    let mut writer = match created {
+        Ok(writer) => writer,
+        Err(err) => {
+            eprintln!("创建写入器失败: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let cancel = CancelToken::new();
+    let last_report = std::cell::Cell::new(0u64);
+    let progress = |done: u64| {
+        if done.saturating_sub(last_report.get()) >= 64 * 1024 * 1024 {
+            last_report.set(done);
+            println!("  已读 {done} / {total} 字节");
+        }
+    };
+
+    if let Err(err) = write_entries(writer.as_mut(), &entries, Some(method), &cancel, &progress) {
+        eprintln!("打包中止: {err}");
+        return ExitCode::FAILURE;
+    }
+
+    match writer.finish() {
+        Ok(report) => {
+            println!(
+                "完成：{} 个条目，读入 {} 字节，写出 {} 字节，耗时 {:.2?}",
+                report.entries, report.bytes_in, report.bytes_out, report.elapsed
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("收尾失败: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn default_target(input: &Path) -> PathBuf {
+    let parent = input.parent().filter(|p| !p.as_os_str().is_empty());
+    let stem = input
+        .file_stem()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("output"));
+    match parent {
+        Some(parent) => parent.join(stem),
+        None => stem,
+    }
+}
+
+fn report_open_error(err: &ArchiveError) {
+    match err {
+        ArchiveError::PasswordRequired => {
+            eprintln!("需要密码：请加 --password <密码>");
+        }
+        ArchiveError::BadPassword => eprintln!("密码错误"),
+        other => eprintln!("打开失败: {other}"),
     }
 }

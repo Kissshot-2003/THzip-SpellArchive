@@ -16,24 +16,29 @@ const TIME_W: f32 = 110.0;
 
 pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let palette = app.themes.current().palette;
-    let title = app.archive_name.clone();
-    let demo_badge = app.tr.t(TextKey::DemoBadge);
+    let title = if app.archive_name.is_empty() {
+        app.tr.t(TextKey::EmptyArchive)
+    } else {
+        app.archive_name.clone()
+    };
+    let kind = app.archive_kind.map(|kind| kind.label()).unwrap_or("—");
+    let path_hint = app
+        .archive_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
     let search_hint = app.tr.t(TextKey::SearchHint);
     let empty_text = app.tr.t(TextKey::EmptyArchive);
 
     egui::CentralPanel::default().show(root, |ui| {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(title.clone()).strong());
+            ui.label(egui::RichText::new(title.clone()).strong())
+                .on_hover_text(path_hint);
             ui.label(
-                egui::RichText::new("· 7z")
+                egui::RichText::new(format!("· {kind}"))
                     .size(12.0)
                     .color(palette.text_sub),
-            );
-            ui.label(
-                egui::RichText::new(format!("· {demo_badge}"))
-                    .size(12.0)
-                    .color(palette.warning),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -56,6 +61,18 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             ui.add_space(24.0);
             ui.vertical_centered(|ui| {
                 ui.label(egui::RichText::new(empty_text).color(palette.text_sub));
+                ui.add_space(8.0);
+                if app.reader.is_none() {
+                    let open = app.tr.t(TextKey::Open);
+                    if crate::ui::action_button(ui, app, ResKey::IconArchive7z, open).clicked() {
+                        app.open_archive_dialog();
+                    }
+                    ui.label(
+                        egui::RichText::new("也可以双击左侧列表中的 zip / 7z，或把文件拖到窗口")
+                            .size(12.0)
+                            .color(palette.text_sub),
+                    );
+                }
             });
             return;
         }
@@ -109,6 +126,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                     let index = rows[row.index()];
                     let entry = &entries[index];
                     let selected = app.selected == Some(index);
+                    let guard = spell_core::safety::guard_display(&entry.display);
 
                     row.col(|ui| {
                         let icon_id = if entry.kind.is_dir() {
@@ -142,10 +160,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                                     .rect_filled(dot, egui::CornerRadius::same(2), color);
                             }
                         }
-                        if ui
-                            .selectable_label(selected, entry.display.to_string())
-                            .clicked()
-                        {
+                        if ui.selectable_label(selected, guard.text.clone()).clicked() {
                             clicked = Some(index);
                         }
                     });
@@ -173,13 +188,13 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                         ui.label(entry.method.label());
                     });
                     row.col(|ui| {
-                        ui.label("—");
+                        ui.label(crate::ui::format_time(entry.mtime));
                     });
                     row.col(|ui| {
                         if entry.encrypted && lock_icon.is_none() {
                             ui.label(egui::RichText::new("锁").color(palette.warning));
                         }
-                        if entry.display.contains("U+202E") {
+                        if guard.suspicious {
                             ui.label(egui::RichText::new("伪装").color(palette.error))
                                 .on_hover_text(
                                     "文件名包含双向控制字符，显示的扩展名可能与真实扩展名不同",

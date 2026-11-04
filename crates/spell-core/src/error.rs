@@ -41,6 +41,9 @@ pub enum SinkError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    #[error("触发安全限制: {0}")]
+    Limit(&'static str),
+
     #[error("{0}")]
     Other(String),
 }

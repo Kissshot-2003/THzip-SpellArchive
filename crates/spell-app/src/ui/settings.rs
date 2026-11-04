@@ -95,7 +95,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             );
             ui.label(
                 egui::RichText::new(
-                    "已实现：theme.toml 解析 + PNG 纹理、路径净化、显示名防护、限额计数、原子覆盖、CJK 字体、i18n 回退。\n待接入：zip/7z/tar 后端、文件对话框、任务线程池。",
+                    "已实现：zip 打开 / 预检 / 安全解压 / CRC 测试 / 创建 / 追加 / AES-256 加密、\n后台任务线程池、取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、原子覆盖。\n待接入：7z / tar 后端、设置持久化。",
                 )
                 .size(12.0)
                 .color(theme.palette.text_sub),

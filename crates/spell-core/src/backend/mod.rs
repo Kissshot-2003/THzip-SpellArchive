@@ -3,6 +3,7 @@ pub mod sevenz;
 pub mod tar;
 pub mod volume;
 pub mod zip;
+pub mod zip_write;
 
 use std::fs::File;
 use std::io::Read;
@@ -11,7 +12,8 @@ use std::path::Path;
 use crate::error::ArchiveError;
 use crate::reader::ArchiveReader;
 use crate::secret::SecretString;
-use crate::types::ArchiveKind;
+use crate::types::{ArchiveKind, Method};
+use crate::writer::ArchiveWriter;
 
 const SNIFF_LEN: usize = 600;
 
@@ -88,11 +90,11 @@ pub fn classify(header: &[u8], ext: Option<&str>) -> ArchiveKind {
 
 pub fn open(
     path: &Path,
-    _password: Option<&SecretString>,
+    password: Option<&SecretString>,
 ) -> Result<Box<dyn ArchiveReader>, ArchiveError> {
     let kind = sniff_file(path).map_err(|err| ArchiveError::Open(err.to_string()))?;
     match kind {
-        ArchiveKind::Zip => Ok(Box::new(zip::ZipReader::new(path))),
+        ArchiveKind::Zip => Ok(Box::new(zip::ZipReader::new(path, password)?)),
         ArchiveKind::SevenZ => Ok(Box::new(sevenz::SevenZReader::new(path))),
         ArchiveKind::Tar
         | ArchiveKind::TarGz
@@ -114,5 +116,49 @@ pub fn open(
         ArchiveKind::Unknown => Err(ArchiveError::Unsupported(
             "无法识别归档格式（magic bytes 不匹配）".to_owned(),
         )),
+    }
+}
+
+/// 创建归档写入器。目前只支持 zip；7z/tar 仍是占位。
+pub fn create_writer(
+    path: &Path,
+    kind: ArchiveKind,
+    method: Method,
+) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
+    create_writer_with(path, kind, method, None)
+}
+
+/// 创建归档；`password` 非空时 zip 条目使用 AES-256 加密。
+pub fn create_writer_with(
+    path: &Path,
+    kind: ArchiveKind,
+    method: Method,
+    password: Option<&SecretString>,
+) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
+    match kind {
+        ArchiveKind::Zip => Ok(Box::new(zip_write::ZipArchiveWriter::create_with(
+            path,
+            method,
+            password.cloned(),
+        )?)),
+        other => Err(ArchiveError::Unsupported(format!(
+            "暂不支持创建 {} 归档",
+            other.label()
+        ))),
+    }
+}
+
+/// 追加到现有 zip。目标必须已存在。
+pub fn create_writer_append(
+    path: &Path,
+    kind: ArchiveKind,
+    method: Method,
+) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
+    match kind {
+        ArchiveKind::Zip => Ok(Box::new(zip_write::ZipArchiveWriter::append(path, method)?)),
+        other => Err(ArchiveError::Unsupported(format!(
+            "暂不支持追加到 {} 归档",
+            other.label()
+        ))),
     }
 }

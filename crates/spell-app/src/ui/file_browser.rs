@@ -39,6 +39,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             ui.add_space(2.0);
 
             let mut navigate_to = None;
+            let mut open_to = None;
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -53,20 +54,30 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                         } else {
                             palette.text_sub
                         };
-                        if ui
-                            .selectable_label(false, egui::RichText::new(label).color(color))
-                            .clicked()
-                        {
+                        let response =
+                            ui.selectable_label(false, egui::RichText::new(label).color(color));
+                        if response.double_clicked() && !*is_dir {
+                            open_to = Some(app.dir.join(name));
+                        } else if response.clicked() {
                             if *is_dir {
                                 navigate_to = Some(app.dir.join(name));
                             } else {
-                                app.status = format!("选中：{name}（骨架阶段不解压）");
+                                let path = app.dir.join(name);
+                                app.status = match spell_core::backend::sniff_file(&path) {
+                                    Ok(kind) if kind != spell_core::types::ArchiveKind::Unknown => {
+                                        format!("{name} · {} · 双击打开", kind.label())
+                                    }
+                                    _ => format!("选中：{name}"),
+                                };
                             }
                         }
                     }
                 });
             if let Some(path) = navigate_to {
                 app.navigate(path);
+            }
+            if let Some(path) = open_to {
+                app.open_path(path, None);
             }
         });
 }

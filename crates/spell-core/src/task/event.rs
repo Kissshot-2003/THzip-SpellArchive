@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::plan::ExtractPlan;
-use crate::reader::ExtractReport;
-use crate::types::EntryId;
+use crate::reader::{ArchiveReader, ExtractReport};
+use crate::types::{ArchiveEntry, ArchiveKind, EntryId};
+use crate::writer::FinishReport;
 
 pub type TaskId = u64;
 
@@ -50,8 +52,21 @@ impl CancelToken {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum TaskEvent {
+    /// 后台成功打开归档。`reader` 保留给后续预检 / 解压 / 测试使用。
+    Opened {
+        task: TaskId,
+        path: PathBuf,
+        kind: ArchiveKind,
+        entries: Arc<[ArchiveEntry]>,
+        reader: Arc<Mutex<Box<dyn ArchiveReader>>>,
+    },
+    /// 需要密码才能继续（打开被中止，等待 UI 重试）。
+    NeedPassword {
+        task: TaskId,
+        path: PathBuf,
+    },
     PhaseChanged {
         task: TaskId,
         phase: TaskPhase,
@@ -83,6 +98,11 @@ pub enum TaskEvent {
     Finished {
         task: TaskId,
         report: Arc<ExtractReport>,
+    },
+    PackFinished {
+        task: TaskId,
+        report: Arc<FinishReport>,
+        append: bool,
     },
     Failed {
         task: TaskId,

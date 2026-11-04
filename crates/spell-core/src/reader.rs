@@ -31,6 +31,16 @@ pub trait ExtractSink {
     fn on_entry_begin(&mut self, id: EntryId, entry: &ArchiveEntry) -> Result<(), SinkError>;
     fn on_data(&mut self, id: EntryId, chunk: &[u8]) -> Result<(), SinkError>;
     fn on_entry_end(&mut self, id: EntryId, ok: bool) -> Result<(), SinkError>;
+
+    /// 实际写出的字节数（计数/内存型 sink 可为 0）。
+    fn bytes_written(&self) -> u64 {
+        0
+    }
+
+    /// 结束后取出 CRC 不符的条目，由后端写入 `ExtractReport`。
+    fn take_crc_mismatch(&mut self) -> Vec<EntryId> {
+        Vec::new()
+    }
 }
 
 pub trait ArchiveReader: Send {

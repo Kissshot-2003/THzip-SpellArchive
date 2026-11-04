@@ -1,7 +1,7 @@
 # SpellArchive 交接文档
 
 > 面向接手的开发者。读完本文件应能：跑起来、看懂现有哪些是真实现、哪些是占位、按既定路线继续写。
-> 最后更新：2026-11（骨架 + 主题/素材接入完成后）
+> 最后更新：2026-11（P0-2 任务队列 / P0-3 打开与预检 / P0-4 zip 创建、追加与 AES 加密完成）
 
 ## 0. 先读这三份
 
@@ -15,9 +15,9 @@
 
 ## 1. 当前状态一句话
 
-**可运行的 GUI 骨架 + 已接入四套美术主题；归档后端（zip/7z/tar）尚未接入，解压/打包/列表都是占位。**
+**zip 已能在 GUI 里完成「打开 → 看条目 → 预检 → 解压 / 测试 / 取消」以及「选文件/文件夹 → 创建 / 追加 / AES 加密 zip」；后台任务线程池、密码重试、覆盖策略已接通。7z/tar 仍是占位。**
 
-界面里的文件列表和任务队列是硬编码演示数据，不是真实归档内容。
+已删除全部演示数据。启动参数 `spell_archive.exe <归档>` 会直接打开文件（Windows「打开方式」可用）。
 
 ---
 
@@ -30,16 +30,21 @@
 - MSVC Build Tools（`zstd`/`bzip2` 将来要用，当前依赖已可编译）
 - 素材源目录：`C:\Users\karl2\Desktop\SpellArchive\assets`（与工程同级）
 
-> 工程目前**不是 git 仓库**。接手第一件事建议 `git init` 并提交当前基线。
+> 工程已有 git 仓库（初始提交 `36842a2`）。当前批次改动尚未提交，接手后先确认 `git status`。
 
 ### 命令
 
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
-cargo test --workspace          # 26 个测试
+cargo test --workspace          # 47 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p spell-app          # GUI
-cargo run -p spell-cli -- sniff <文件>   # 格式嗅探（唯一可用的 CLI 功能）
+cargo run -p spell-app -- <归档>  # 启动并直接打开
+cargo run -p spell-cli -- sniff <文件>            # 格式嗅探
+cargo run -p spell-cli -- list <zip>              # 列出条目
+cargo run -p spell-cli -- test <zip>              # CRC 完整性测试
+cargo run -p spell-cli -- extract <zip> <目录>     # 安全解压（--force 覆盖）
+cargo run -p spell-cli -- pack <输出.zip> <输入...>  # 创建/追加（--append / --store / --force / --password）
 ```
 
 ### 验收“环境没问题”
@@ -47,8 +52,11 @@ cargo run -p spell-cli -- sniff <文件>   # 格式嗅探（唯一可用的 CLI 
 1. GUI 能开，左上角是灵梦像素头像，工具栏按钮有图标。
 2. 主题下拉框有 5 项：灵梦 / 魔理沙 / 早苗 / 琪露诺 / 素体。
 3. `spell sniff` 对任意 zip 输出 `zip`。
-4. 列表列头与数据行对齐，任务队列两条进度条等长。
-5. `cargo test` 全绿、clippy 无告警。
+4. 打开任意 zip 后条目真实显示；点「解除符卡封印」可选目录并弹出预检；运行中任务有取消按钮。
+5. 点「构筑封印结界」能添加文件/文件夹、创建 zip，任务队列显示压缩前后大小。
+6. 试一次追加：对已存在的 zip 勾选「追加到现有 zip」，原条目应保留。
+7. 试一次加密：勾选 AES-256 设密码创建，再用密码解压应无 CRC 误报。
+8. `cargo test` 全绿（47）、clippy 无告警。
 
 ---
 
@@ -63,17 +71,24 @@ cargo run -p spell-cli -- sniff <文件>   # 格式嗅探（唯一可用的 CLI 
 | `limits` | 完成 | 严格/默认/宽松三档 |
 | `plan` | 完成 | `ExtractPlan` / `PlannedItem` / `PlanAction` / `DecisionTable` |
 | `reader` | 完成（契约） | `ArchiveReader::{plan, extract, test}` + `ExtractSink` |
-| `writer` | 完成（契约） | `ArchiveWriter`，默认返回 `Unsupported` |
+| `writer` | **完成** | `ArchiveWriter` + 目录扫描 `scan_inputs` + 批量写入 `write_entries`；跳过链接、拒绝重名 |
+| `backend::zip_write` | **完成** | Store / Deflate、目录条目、zip64、本地 DOS 时间、`AtomicFile` 原子替换；带测试 |
 | `backend::sniff` | 完成 | magic bytes 优先，扩展名只区分 tar.gz / gz 等复合容器 |
-| `backend::open` | 分派完成、实现为占位 | 会返回 `ZipReader` 等结构，但 `entries` 为空、`extract` 返回 `Unsupported` |
+| `backend::zip` | **完成（读）** | 中央目录解析、名字编码还原、plan 预检、流式解压、`test()` / CRC；AES 解压（跳过 AES CRC=0 误报）；同名 `~1` 改名 |
+| `backend::open` | zip 已接实现 | 其余格式（7z/tar/单文件流）仍是占位 |
 | `backend::name_codec` | 完成 | UTF-8 → GBK / Shift-JIS 择优，带测试 |
 | `backend::volume` | 完成 | `.7z.001` 识别与收集，带测试 |
 | `safety::path_sanitize` | **完成** | `..`、绝对路径、ADS、保留名、尾随点空格、深度/长度；带测试 |
 | `safety::display_guard` | **完成** | U+202E 等 bidi/零宽字符替换为可见标记；带测试 |
 | `safety::bomb::Budget` | **完成** | 总量/单条/条目数/流式倍率；带测试 |
-| `safety::atomic_fs` | **完成** | 临时文件 + `ReplaceFileW` / `MoveFileExW`；带测试（失败不毁原文件） |
-| `task::event` | 完成 | 事件枚举 + `CancelToken` |
-| `task::manager` | 部分 | 内存任务表，**没有线程调度** |
+| `safety::atomic_fs` | **完成** | `AtomicFile` 流式写 + `ReplaceFileW` / `MoveFileExW`、reparse point 检测；带测试 |
+| `safety::safe_extract` | **完成** | `ExtractDirSink`：唯一写盘入口，预算/CRC/原子覆盖/junction 拒绝 |
+| `safety::verify_sink` | **完成** | 只算 CRC 不落盘，`test()` 与 CLI 共用 |
+| `safety::disk` | 完成 | `available_space`（GetDiskFreeSpaceExW） |
+| `plan::resolve_all` | 完成 | 决策表 → 最终动作；后端与 sink 共用，保证路径一致 |
+| `task::event` | 完成 | 事件枚举（含 `Opened` / `NeedPassword`）+ `CancelToken` |
+| `task::runner` | **完成** | 2 条后台 worker、`crossbeam-channel` 双向通道、进度节流、取消、panic 兜底；带集成测试 |
+| `task::manager` | 完成（备用） | 内存任务表；GUI 实际使用 `runner` 的事件流 |
 | `task::worker::guarded` | 完成 | `catch_unwind` 转任务失败；带测试 |
 | `secret` | 完成 | `Zeroizing<String>` + Debug 打码 |
 
@@ -81,22 +96,23 @@ cargo run -p spell-cli -- sniff <文件>   # 格式嗅探（唯一可用的 CLI 
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
-| `main` | 完成 | 1280×820，原生标题栏 |
-| `app` | 完成（含演示数据） | 状态、目录浏览、演示任务动画、待删除的 `demo_entries` / `demo_tasks` |
+| `main` | 完成 | 1280×820，原生标题栏；支持 `<归档>` 启动参数 |
+| `app` | **完成（真实数据）** | 归档打开、事件泵、任务表、密码重试、解压预检、速度估算；无演示代码 |
 | `i18n` | 完成 | 内置 zh-CN/en-US + 主题覆盖 + “显示标准术语”开关 |
 | `theme::loader` | 完成 | 扫描 `theme.toml`、解析、PNG 载入、路径逃逸校验；带测试 |
 | `theme::mod` | 完成 | `ResKey`、`Palette`、`ThemeStore`、全局样式应用 |
-| `ui::archive_view` | 完成（演示数据） | `egui_extras::TableBuilder` 虚拟化表格、图标、搜索、选中、标记列 |
-| `ui::file_browser` | 完成（基础） | 本地目录进入/返回，隐藏 `.` 开头项，最多 300 项 |
-| `ui::task_panel` | 完成（演示） | 固定列宽 + 符阵进度条 + 重播按钮 |
+| `ui::archive_view` | **完成（真实数据）** | `TableBuilder` 虚拟化表格、真实 mtime、图标、搜索、选中、空状态打开按钮 |
+| `ui::file_browser` | 完成（基础） | 本地目录进入/返回；单击嗅探格式，双击打开归档 |
+| `ui::task_panel` | **完成（真实任务）** | 固定列宽 + 符阵进度条 + 速度 + 取消 + 清除已完成 |
+| `ui::dialogs` | **完成** | 解压预检、密码重试、创建 zip（添加文件/文件夹、输出路径、仅存储、覆盖确认） |
 | `ui::spell_progress` | 完成 | 底图 + 填充贴图（UV 与矩形同时裁剪），缺图回退 10 段纯色 |
 | `ui::settings` | 完成（基础） | 主题/语言/术语开关/限额展示；不持久化 |
 | `ui::mod` | 完成 | 工具栏（头像 + 图标按钮）、状态栏、首启提示 |
 
 ### 3.3 未开始
 
-文件对话框、右键菜单、托盘、单实例、拖拽、设置持久化、主题热重载/导入、
-压缩创建、加密、分卷、包内预览、RAR、九宫格、SVG、粒子。
+右键菜单、托盘、单实例、拖拽、设置持久化、主题热重载/导入、
+7z/tar 创建、7z 加密写入、分卷、包内预览、RAR、九宫格、SVG、粒子。
 
 ---
 
@@ -119,7 +135,7 @@ spell_archive/
 └── target/
 ```
 
-约 3300 行 Rust。
+约 7400 行 Rust（含测试）。
 
 ---
 
@@ -142,39 +158,62 @@ main
          ├─ install_cjk_fonts        # simhei.ttf → 回退 Deng.ttf
          ├─ ThemeStore::load(ctx)    # 扫描 + 解析 + 载入 PNG 纹理
          ├─ themes.apply(ctx)        # ThemePreference::Dark + all_styles_mut
-         └─ refresh_dir()            # 演示 entries / tasks
+         ├─ TaskRunner::new(2)       # 两条后台 worker + 双向通道
+         ├─ refresh_dir()            # 本地文件列表
+         └─ open_path(arg)           # 有启动参数时立即提交 Open 任务
 ```
 
 ### 5.3 每帧
 
 ```text
 App::ui(root_ui)
- ├─ tick(ctx)                     # 演示进度动画（仅演示）
+ ├─ tick()                        # 排空 TaskEvent + 速度估算
  ├─ hint_banner → Panel::top
  ├─ top_bar     → Panel::top
  ├─ status_bar  → Panel::bottom
  ├─ file_browser→ Panel::left
  ├─ task_panel  → Panel::bottom
  ├─ archive_view→ CentralPanel
+ ├─ dialogs     → Window（预检 / 密码；需要 ctx）
  └─ settings    → Window（需要 ctx，不是 root ui）
 ```
 
+有活动任务时末尾 `request_repaint_after(33ms)`，空闲时完全不请求重绘。
+
 面板必须按“先 top/bottom，再 left/right，最后 CentralPanel”的顺序挂到同一个 root `Ui` 上。
 
-### 5.4 后端接入后的目标流（尚未实现）
+### 5.4 当前真实数据流（已实现）
 
 ```text
-打开文件
- └─ backend::open(path, password?)
-     ├─ Err(PasswordRequired) → 密码框 → 重试
-     └─ Ok(reader)
-         └─ 快照 entries → 列表
-             └─ 用户点解压
-                 ├─ reader.plan(ids, target, limits) → 预检面板（冲突/炸弹/空间）
-                 ├─ UI 填 DecisionTable
-                 └─ task_manager.spawn(reader, plan, decisions, cancel, sink)
-                     └─ TaskEvent → UI（30fps 节流）
+打开文件（按钮 / 启动参数 / 左侧双击）
+ └─ TaskRunner::submit(TaskOp::Open)
+     └─ worker: backend::open(path, password?)
+         ├─ Err(PasswordRequired) → TaskEvent::NeedPassword → 密码框 → 重新提交
+         └─ Ok(reader) → TaskEvent::Opened { entries, Arc<Mutex<reader>> }
+             └─ UI 快照 entries → 表格
+                 └─ 用户点解压
+                     ├─ rfd 选目标目录
+                     ├─ reader.try_lock().plan(ids, target, limits) → 预检弹窗
+                     ├─ UI 选覆盖策略 → DecisionTable
+                     └─ TaskRunner::submit(TaskOp::Extract { reader, plan, decisions, limits })
+                         ├─ worker: ExtractDirSink + ProgressSink
+                         └─ TaskEvent::{Started, Progress, Finished, Failed} → UI
 ```
+
+`Arc<Mutex<Box<dyn ArchiveReader>>>` 让 UI 与 worker 共享同一个 reader；UI 侧预检必须
+`try_lock`，避免解压进行中把界面卡死。测试任务同理（`TaskOp::Test` + `VerifySink`）。
+
+创建 zip：
+
+```text
+打包弹窗（添加文件 / 添加文件夹 / 输出路径 / 仅存储）
+ └─ TaskRunner::submit(TaskOp::Pack { output, inputs, method })
+     └─ worker: scan_inputs → create_writer(zip_write) → write_entries
+         ├─ Progress → UI
+         └─ PackFinished { report } / Failed
+```
+
+`scan_inputs` 与 `write_entries` 都返回普通错误；`write_entries` 的进度是**全部输入累计字节**。
 
 ---
 
@@ -324,10 +363,10 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
-| 1 | 没有 `LICENSE` 文件 | NOTICE 引用了它，发布不合规 | 补 MIT 全文 |
-| 2 | `demo_entries` / `demo_tasks` 硬编码在 `app.rs` | 与真实功能混淆 | 接后端时删除 |
-| 3 | 列表/任务无真实数据源 | 无法验收真实解压 | 先接 zip |
-| 4 | `task_panel` 每帧 `clone()` 整个 Theme（含纹理 HashMap） | 轻微浪费 | `Arc<Theme>` 或只克隆纹理 id |
+| 1 | `task_panel` 每帧 `clone()` 整个 Theme（含纹理 HashMap） | 轻微浪费 | `Arc<Theme>` 或只克隆纹理 id |
+| 2 | 解压冲突的 `Rename/AutoNumber` 策略没有真正改名 | 只能选跳过 / 覆盖 | 在 `resolve_all` 里对已存在文件生成 `~n` |
+| 3 | 预检在 UI 线程执行（大目录/慢盘会短暂卡顿） | 大量冲突时体感差 | 改成 `TaskOp::Plan` 后台任务 |
+| 4 | 单条选择只能解压一个条目，没有多选 / 全选反选 | 大批量操作不顺手 | 表格加多选集合 |
 | 5 | 进度条底图被拉伸到任意宽高 | 像素素材非整数缩放，边缘不完美 | 按 `theme.scale` 吸附到整数倍 |
 | 6 | 主题加载全部 4 套（约 96 个纹理） | 启动内存/时间偏高 | 懒加载，切换时再解码 |
 | 7 | 搜索只做小写子串；排序是字典序 | 无自然序（file10 在 file2 前） | 实现 natural sort |
@@ -337,57 +376,60 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 | 11 | 无设置持久化 | 每次启动重置 | `settings.toml` + schema 迁移 |
 | 12 | 无单实例 / 右键 / 托盘 | 不像桌面工具 | v0.1 后半段补 |
 | 13 | `themes/*/png` 是复制品 | 素材更新需跑同步脚本 | 已有 `scripts/sync-themes.ps1` |
-| 14 | 未初始化 git | 无历史可回滚 | 立刻 `git init` |
+| 14 | 当前批次改动未提交 | 无回滚点 | 确认测试后提交（不要混入临时文件） |
 | 15 | 无 `build.rs`（图标/版本/manifest） | exe 无图标、长路径未声明 | v0.1 发布前补 |
+| 16 | zip 创建只支持 Store / Deflate | 不能选 Deflate64 / bzip2 / zstd 等 | 按需启用 zip features 并补 `map_method` |
+| 17 | 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 需要增量时再研究原地追加（风险高，不建议） |
+| 18 | 打包扫描跳过符号链接 | 链接内容不会进包 | 需要时提供“跟随链接”选项并做环检测 |
+| 19 | 追加模式不允许设置新密码 | 不能给旧包批量改密 | 先解包再重建，或后续实现重写加密 |
 
 ---
 
 ## 10. 下一步路线（按依赖顺序）
 
-### P0-1 接 zip 后端（1–2 天）
+### ✅ P0-1 zip 后端（已完成）
 
-文件：`crates/spell-core/src/backend/zip.rs`，依赖加 `zip = { version = "4", features = ["aes-crypto"] }`（版本以 crates.io 为准）。
+已实现于 `crates/spell-core/src/backend/zip.rs` + `safety/safe_extract.rs`：
 
-实现要点：
+- `zip = 4.6`（`deflate` / `aes-crypto`），名字用 `name_raw()` + `name_codec` 还原（不吃 CP437）。
+- `plan()`：`sanitize_rel` → `resolve_under`，冲突/重解析点/超长/链接/可疑显示名全部进 `ExtractPlan`。
+- `extract()`：`resolve_all` 统一决策 → 64 KiB 流式读取 → `ExtractDirSink`（Budget + CRC + AtomicFile）。
+- `test()`：`VerifySink` 只算 CRC，不落盘。
+- CLI：`list` / `test` / `extract [目标] [--force] [--password]`。
+- 测试：`crates/spell-core/tests/zip_backend.rs`（往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC）。
 
-1. `ZipReader::new`：
-   - `BufReader::with_capacity(256*1024, File::open(path))`
-   - `ZipArchive::new`
-   - 遍历 `0..len()`，用 `by_index_raw(i)` 只读元数据（不解压）
-   - 名字：若 UTF-8 标志位 → `decode_strict_utf8`；否则 `name_codec::decode`
-   - `display = display_guard(...).text`；`kind` 由 `is_dir()` 判定
-2. `plan()`：
-   - 对每个选中 id 调 `sanitize_rel(display)` + `resolve_under(target)`
-   - 检查目标是否已存在 → `Conflict`
-   - 累加 `total_bytes`、记录 `largest_entry`
-   - `free_space` 用 `fs2::available_space`
-3. `extract()`：
-   - 用 `by_index_decrypt` 打开条目（密码错误映射 `BadPassword`）
-   - `sink.on_entry_begin` → 循环 `read`（64 KiB 缓冲）→ `sink.on_data` → `on_entry_end`
-   - 每次 `on_data` 前 `cancel.is_cancelled()`
-   - 单条失败记入 `ExtractReport.failed` 继续下一条
-4. `WriteSink`（放 `spell-core/src/safety/safe_extract.rs`）：
-   - `on_data` 里调用 `Budget::on_write`（熔断）
-   - 写盘用 `write_atomic`（覆盖安全）+ `path_sanitize`
-   - CRC 校验用 `crc32fast`
-5. 测试：`tests/backend_roundtrip.rs` 用 `zip` crate 现场造包；安全用例见 `docs/security` 清单。
+**尚未做**：bzip2/zstd/lzma 压缩方法的解码（当前未启用对应 feature，遇到会报 `Unsupported`）。
 
-验收：`spell-cli list` 能列出条目；`spell-cli extract` 能安全解出文件；`cargo test` 新增往返 + 路径攻击用例。
+### ✅ P0-2 真实任务队列（已完成）
 
-### P0-2 真实任务队列（1–2 天）
+- `task/runner.rs`：`crossbeam-channel` + 2 条 worker；`TaskOp::{Open, Extract, Test, Pack}`。
+- worker 内 `guarded()`；事件 `try_recv` 批量排空，`ProgressSink` 按 100ms / 1 MiB 节流。
+- 取消按钮写入 `CancelToken`；每帧活动任务 `request_repaint_after(33ms)`。
+- 集成测试：`crates/spell-core/tests/task_runner.rs`（打开→计划→解压、失败事件）。
 
-- `task/manager.rs`：加 `crossbeam-channel` + 1~2 条 heavy worker。
-- `TaskTable::spawn(kind, payload)`；worker 内 `guarded(|| ...)`。
-- `TaskEvent` → UI：`try_recv` 批量取，合并进度，`ctx.request_repaint()` 节流 30fps。
-- 删除 `demo_tasks` 与 `tick()` 里的演示动画。
+### ✅ P0-3 打开归档 + 预检（已完成）
 
-验收：解压 1 GiB 包时 UI 不卡；取消在 200ms 内生效；任务失败有具体条目。
+- `rfd` 文件 / 目录对话框；启动参数直接打开。
+- `TaskEvent::Opened` 携带 `Arc<Mutex<Box<dyn ArchiveReader>>>`，条目快照进表格。
+- 预检弹窗展示条目数 / 总大小 / 最大单文件 / 冲突 / 警告 / 剩余空间 / 加密提示，
+  可选「跳过已有 / 覆盖已有」，再提交 `TaskOp::Extract`。
+- `NeedPassword` → 密码弹窗 → 重新提交 `TaskOp::Open`。
 
-### P0-3 打开归档 + 预检（1 天）
+### ✅ P0-4 zip 创建与追加（已完成）
 
-- 加 `rfd`，工具栏“打开归档”接文件对话框。
-- `backend::open` → `entries` 快照 → 表格；删除 `demo_entries`。
-- 预检弹窗：条目数 / 总大小 / 最大单文件 / 冲突 / 密码 / 剩余空间。
+- `backend/zip_write.rs`：`ZipArchiveWriter` 接 `zip::ZipWriter<AtomicFile>`（给 `AtomicFile` 实现了 `Write/Seek`）。
+- `writer::scan_inputs`：目录递归、空目录条目、跳过符号链接、大小写重名拒绝。
+- `writer::write_entries`：统一进度（累计字节），`ArchiveWriter::add` 内 64 KiB 流式写。
+- Store / Deflate；zip64 大文件；本地 DOS 时间（Windows 走 `FileTimeToLocalFileTime`）。
+- 取消 / 出错时 `AtomicFile` 自动删临时文件，原目标保持不变。
+- CLI `pack`、GUI 创建 zip 弹窗、`tests/zip_write.rs` + `task_runner::packs_through_worker`。
+- 追加模式：`AtomicFile::create_copy_of` 复制原包 → `ZipWriter::new_append` → 追加后原子替换；
+  保留原条目并拒绝大小写重名。
+- 加密写入：`with_aes_encryption(AesMode::Aes256, …)`；密码走 `SecretString`，CLI `--password`、
+  GUI 勾选 AES-256。追加模式暂不允许设置新密码。
+- 读取 AES 条目时 CRC 字段为 0，不能参与 CRC 比较；`test()` / 解压依赖 AE-2 认证码。
+
+**下一步建议**：7z 后端（P1-1），或补充 GUI 设置持久化 / 桌面集成。
 
 ### P1-1 7z 后端（3–5 天）
 
@@ -416,15 +458,17 @@ Win11 注册表菜单只会进“显示更多选项”，README 先说明。
 
 接手当天逐条勾：
 
-- [ ] `cargo test --workspace`（26 通过）
+- [ ] `cargo test --workspace`（47 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo run -p spell-app` 出界面，5 个主题可切换，图标/头像/进度条正常
+- [ ] `cargo run -p spell-app -- <zip>` 直接打开归档，条目、时间、图标正常
+- [ ] 试一次解压：选目录 → 预检 → 开始 → 进度/速度/完成状态正确
+- [ ] 试一次取消：大包解压中点 ×，任务在数百毫秒内失败为「已取消」
+- [ ] 试一次创建：添加文件夹 → 输出 zip → 完成后用 `spell list` 验证条目
 - [ ] `cargo run -p spell-cli -- sniff <zip>` 输出 `zip`
 - [ ] 读过 `docs/theme_spec.md` 与设计文档 v2.1
-- [ ] 知道 `demo_entries` / `demo_tasks` 是假数据
-- [ ] 知道 zip/7z/tar 后端是占位（`list` 返回 0 条）
+- [ ] 知道 7z/tar 后端仍是占位；zip 读写已可用（GUI + CLI）
 - [ ] 确认 `spell-core` 依赖树无 egui
-- [ ] 补 `LICENSE`（MIT）并 `git init`
+- [ ] `LICENSE` 已补；确认是否提交当前批次改动
 
 ---
 
@@ -435,7 +479,8 @@ Win11 注册表菜单只会进“显示更多选项”，README 先说明。
    而且会吃掉换行。
 2. **不要开 `panic = "abort"`**（release profile 已固定 unwind）。
 3. **不要用文件名定位条目**，用 `EntryId`。
-4. **不要绕过 `safety::path_sanitize` / `write_atomic`**。
+4. **不要绕过 `safety::path_sanitize` / `write_atomic`**。创建归档也只能走
+   `ArchiveWriter`（内部已包 `AtomicFile`），不要直接 `File::create` 输出目标。
 5. **不要给 `spell-core` 加 UI 依赖**。
 6. **压缩不要用 rayon 全局池**；rayon 只做扫描、分类、将来的 7z 分块编码。
 7. **时间语义**：zip = 本地时间（无时区），7z = UTC；混用会漂移。
@@ -444,6 +489,8 @@ Win11 注册表菜单只会进“显示更多选项”，README 先说明。
 10. **符号链接**：Windows 创建需特权/开发者模式，默认跳过是正确行为。
 11. **主题文案**：可以改措辞，但 tooltip 必须给标准术语，且不能隐藏错误信息。
 12. **素材许可证**：代码 MIT，内置素材 CC BY-NC-SA 4.0；商用需替换素材。
+13. **打包扫描**：目录递归默认跳过符号链接；归档内名字统一由
+    `writer::normalize_entry_name` 净化，用户输入不能直接进 zip。
 
 ---
 

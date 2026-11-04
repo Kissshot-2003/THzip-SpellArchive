@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use crate::types::{EntryId, EntryKind};
 
@@ -42,6 +42,8 @@ pub enum PlanWarning {
     SymlinkSkipped { id: EntryId },
     SuspiciousDisplayName { id: EntryId, detail: String },
     UnsupportedMethod { id: EntryId, method: String },
+    UnsafePath { id: EntryId, detail: String },
+    DuplicatePath { id: EntryId, renamed_to: String },
     LongPath,
 }
 
@@ -94,5 +96,162 @@ impl Default for DecisionTable {
 impl DecisionTable {
     pub fn resolve(&self, id: EntryId) -> OverwritePolicy {
         self.per_entry.get(&id).copied().unwrap_or(self.default)
+    }
+}
+
+/// 决策表 + 预检结果解析出的最终动作。后端与 sink 各自调用一次
+/// [`resolve_all`]，得到完全一致的结果（`plan.items` 顺序确定）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedAction {
+    /// 写入（或覆盖）到该路径。目录条目走同一条分支。
+    Write {
+        path: PathBuf,
+        overwrite: bool,
+    },
+    Skip,
+    Reject(String),
+}
+
+pub fn resolve_all(
+    plan: &ExtractPlan,
+    decisions: &DecisionTable,
+) -> HashMap<EntryId, ResolvedAction> {
+    let conflicted: HashSet<EntryId> = plan.conflicts.iter().map(|c| c.id).collect();
+    let mut used: HashSet<String> = HashSet::new();
+    let mut resolved = HashMap::with_capacity(plan.items.len());
+
+    for item in &plan.items {
+        let action = match &item.action {
+            PlanAction::Reject(reason) => ResolvedAction::Reject(reason.clone()),
+            PlanAction::Skip => ResolvedAction::Skip,
+            PlanAction::Create | PlanAction::Overwrite | PlanAction::Rename(_) => {
+                let mut path = item.rel_path.clone();
+                let mut overwrite = item.action == PlanAction::Overwrite;
+
+                if conflicted.contains(&item.id) {
+                    match decisions.resolve(item.id) {
+                        // worker 无法同步询问，未决的 Ask 一律按跳过处理。
+                        OverwritePolicy::Ask | OverwritePolicy::Skip => {
+                            resolved.insert(item.id, ResolvedAction::Skip);
+                            continue;
+                        }
+                        OverwritePolicy::Overwrite => overwrite = true,
+                        OverwritePolicy::Rename | OverwritePolicy::AutoNumber => {
+                            overwrite = false;
+                        }
+                    }
+                }
+
+                // 包内同名 / 大小写冲突：始终改名，不能静默丢文件。
+                let mut candidate = path.clone();
+                let mut n = 0u32;
+                while used.contains(&collision_key(&candidate)) {
+                    n += 1;
+                    candidate = with_suffix(&path, n);
+                }
+                if n > 0 {
+                    overwrite = false;
+                }
+                used.insert(collision_key(&candidate));
+                path = candidate;
+
+                ResolvedAction::Write { path, overwrite }
+            }
+        };
+        resolved.insert(item.id, action);
+    }
+
+    resolved
+}
+
+fn collision_key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
+}
+
+/// 在扩展名前插入 `~n`：`a/b.txt` → `a/b~1.txt`。
+pub fn with_suffix(path: &Path, n: u32) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match path.extension() {
+        Some(ext) => format!("{stem}~{n}.{}", ext.to_string_lossy()),
+        None => format!("{stem}~{n}"),
+    };
+    match path.parent() {
+        Some(parent) => parent.join(name),
+        None => PathBuf::from(name),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DecisionTable, ExtractPlan, OverwritePolicy, PlanAction, PlannedItem, ResolvedAction,
+        resolve_all,
+    };
+    use crate::plan::Conflict;
+    use crate::types::EntryKind;
+    use std::path::PathBuf;
+
+    fn item(id: u32, name: &str, action: PlanAction) -> PlannedItem {
+        PlannedItem {
+            id,
+            rel_path: PathBuf::from(name),
+            kind: EntryKind::File,
+            size: 0,
+            action,
+        }
+    }
+
+    #[test]
+    fn skips_unresolved_conflicts() {
+        let mut plan = ExtractPlan::default();
+        plan.items
+            .push(item(0, "C:/out/a.txt", PlanAction::Overwrite));
+        plan.conflicts.push(Conflict {
+            id: 0,
+            path: PathBuf::from("C:/out/a.txt"),
+            kind: crate::plan::ConflictKind::ExistingFile,
+        });
+
+        let resolved = resolve_all(&plan, &DecisionTable::default());
+        assert_eq!(resolved[&0], ResolvedAction::Skip);
+
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Overwrite,
+            ..Default::default()
+        };
+        let resolved = resolve_all(&plan, &decisions);
+        assert_eq!(
+            resolved[&0],
+            ResolvedAction::Write {
+                path: PathBuf::from("C:/out/a.txt"),
+                overwrite: true,
+            }
+        );
+    }
+
+    #[test]
+    fn renames_duplicates_without_overwriting() {
+        let mut plan = ExtractPlan::default();
+        plan.items.push(item(0, "a.txt", PlanAction::Create));
+        plan.items.push(item(1, "a.txt", PlanAction::Create));
+
+        let resolved = resolve_all(&plan, &DecisionTable::default());
+        assert!(matches!(
+            resolved[&0],
+            ResolvedAction::Write {
+                overwrite: false,
+                ..
+            }
+        ));
+        assert_eq!(
+            resolved[&1],
+            ResolvedAction::Write {
+                path: PathBuf::from("a~1.txt"),
+                overwrite: false,
+            }
+        );
     }
 }

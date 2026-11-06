@@ -30,6 +30,16 @@ zip = { version = "4.6", default-features = false, features = [
 crc32fast = "1"
 crossbeam-channel = "0.5"
 rfd = "0.15"
+sevenz-rust2 = { version = "0.20", features = ["deflate", "zstd", "lz4"] }
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.6"
+lzma-rust2 = { version = "0.16", features = ["xz", "encoder"] }
+zstd = "0.13"
+lz4_flex = { version = "0.12", features = ["frame"] }
+single-instance = "0.3"
+tray-icon = "0.24"
+winreg = "0.56"
 
 [profile.release]
 opt-level = 3

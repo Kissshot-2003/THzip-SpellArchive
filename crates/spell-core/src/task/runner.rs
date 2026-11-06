@@ -38,6 +38,7 @@ pub enum TaskOp {
     Pack {
         output: PathBuf,
         inputs: Vec<PathBuf>,
+        kind: ArchiveKind,
         method: Method,
         append: bool,
         password: Option<SecretString>,
@@ -272,6 +273,7 @@ fn run_task(
         TaskOp::Pack {
             output,
             inputs,
+            kind,
             method,
             append,
             password,
@@ -318,9 +320,9 @@ fn run_task(
             );
 
             let created = if append {
-                backend::create_writer_append(&output, ArchiveKind::Zip, method)
+                backend::create_writer_append(&output, kind, method)
             } else {
-                backend::create_writer_with(&output, ArchiveKind::Zip, method, password.as_ref())
+                backend::create_writer_with(&output, kind, method, password.as_ref())
             };
             let mut writer = match created {
                 Ok(writer) => writer,

@@ -3,17 +3,17 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::backend::common::detect_conflict;
 use crate::backend::name_codec;
 use crate::error::ArchiveError;
 use crate::limits::Limits;
 use crate::plan::{
-    Conflict, ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem,
-    resolve_all,
+    ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, resolve_all,
 };
 use crate::reader::{ArchiveReader, ExtractReport, ExtractSink, SkipReason};
+use crate::safety::available_space;
 use crate::safety::display_guard::guard_display;
 use crate::safety::path_sanitize::{resolve_under, sanitize_rel};
-use crate::safety::{available_space, is_reparse_point};
 use crate::secret::SecretString;
 use crate::task::CancelToken;
 use crate::types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
@@ -392,41 +392,6 @@ fn finish_entry(
             Ok(())
         }
     }
-}
-
-fn detect_conflict(
-    id: EntryId,
-    path: &Path,
-    kind: EntryKind,
-) -> Result<Option<Conflict>, ArchiveError> {
-    if is_reparse_point(path)? {
-        return Ok(Some(Conflict {
-            id,
-            path: path.to_path_buf(),
-            kind: ConflictKind::ReparsePoint,
-        }));
-    }
-
-    let meta = match std::fs::symlink_metadata(path) {
-        Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(ArchiveError::Io(err)),
-    };
-
-    let existing_is_dir = meta.is_dir();
-    let conflict_kind = if existing_is_dir && kind.is_dir() {
-        return Ok(None);
-    } else if existing_is_dir {
-        ConflictKind::ExistingDir
-    } else {
-        ConflictKind::ExistingFile
-    };
-
-    Ok(Some(Conflict {
-        id,
-        path: path.to_path_buf(),
-        kind: conflict_kind,
-    }))
 }
 
 fn entry_kind(file: &zip::read::ZipFile<'_, BufReader<File>>) -> EntryKind {

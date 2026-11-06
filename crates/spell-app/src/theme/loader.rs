@@ -53,6 +53,44 @@ fn default_scale() -> u32 {
     1
 }
 
+/// 主题文件签名：数量 + 最新修改时间。用于热重载轮询。
+pub fn signature() -> Option<(u64, std::time::SystemTime)> {
+    let root = theme_root()?;
+    let mut count = 0u64;
+    let mut latest: Option<std::time::SystemTime> = None;
+    let mut note = |path: &Path| {
+        if let Ok(meta) = std::fs::metadata(path)
+            && let Ok(modified) = meta.modified()
+        {
+            count += 1;
+            latest = Some(match latest {
+                Some(current) if current >= modified => current,
+                _ => modified,
+            });
+        }
+    };
+
+    for entry in std::fs::read_dir(&root).ok()?.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let manifest = dir.join("theme.toml");
+        if manifest.is_file() {
+            note(&manifest);
+        }
+        if let Ok(pngs) = std::fs::read_dir(dir.join("png")) {
+            for png in pngs.flatten() {
+                if png.path().is_file() {
+                    note(&png.path());
+                }
+            }
+        }
+    }
+
+    latest.map(|latest| (count, latest))
+}
+
 pub fn load_all(ctx: &egui::Context) -> Vec<Theme> {
     let Some(root) = theme_root() else {
         return Vec::new();

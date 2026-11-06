@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::i18n::{Locale, TextKey, Translator};
 use crate::theme::ThemeStore;
+use crate::tray::{Tray, TrayAction};
 use eframe::egui;
 use spell_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
 use spell_core::secret::SecretString;
@@ -98,23 +99,46 @@ pub struct SpellApp {
 
     pub status: String,
     pub limits: spell_core::Limits,
+
+    settings_dirty: bool,
+    last_settings_save: Instant,
+    next_handoff_check: Instant,
+    theme_signature: Option<(u64, SystemTime)>,
+    next_theme_check: Instant,
+    tray: Option<Tray>,
+    quitting: bool,
 }
 
 impl SpellApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_cjk_fonts(&cc.egui_ctx);
 
-        let themes = ThemeStore::load(&cc.egui_ctx);
+        let prefs = crate::prefs::Prefs::load();
+        let mut themes = ThemeStore::load(&cc.egui_ctx);
+        if let Some(theme) = prefs.theme.as_deref() {
+            themes.select_by_id(theme);
+        }
+        let locale = Locale::from_code(&prefs.locale).unwrap_or(Locale::ZhCn);
         let mut tr = Translator::new();
+        tr.locale = locale;
+        tr.prefer_standard = prefs.prefer_standard;
         tr.set_theme(themes.current());
+
+        let dir = prefs
+            .last_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        let theme_signature = crate::theme::loader::signature();
 
         let mut app = Self {
             tr,
             themes,
-            locale: Locale::ZhCn,
+            locale,
             show_settings: false,
-            show_first_run_hint: true,
-            dir: std::env::current_dir().unwrap_or_else(|_| ".".into()),
+            show_first_run_hint: prefs.show_hint,
+            dir,
             dir_items: Vec::new(),
             archive_name: String::new(),
             archive_kind: None,
@@ -131,6 +155,13 @@ impl SpellApp {
             pack_state: PackState::default(),
             status: "就绪".to_owned(),
             limits: spell_core::Limits::default(),
+            settings_dirty: false,
+            last_settings_save: Instant::now(),
+            next_handoff_check: Instant::now(),
+            theme_signature,
+            next_theme_check: Instant::now() + Duration::from_secs(1),
+            tray: Tray::new(),
+            quitting: false,
         };
 
         app.themes.apply(&cc.egui_ctx);
@@ -143,7 +174,122 @@ impl SpellApp {
             self.tr.set_theme(self.themes.current());
             self.themes.apply(ctx);
             self.status = format!("主题已切换：{}", self.themes.current().name);
+            self.touch_settings();
         }
+    }
+
+    pub fn touch_settings(&mut self) {
+        self.settings_dirty = true;
+    }
+
+    fn show_window(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    fn hide_window(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    }
+
+    fn poll_tray(&mut self, ctx: &egui::Context) {
+        let Some(tray) = self.tray.as_ref() else {
+            return;
+        };
+        let actions = tray.poll();
+        for action in actions {
+            match action {
+                TrayAction::Show => self.show_window(ctx),
+                TrayAction::Hide => self.hide_window(ctx),
+                TrayAction::Quit => {
+                    self.quitting = true;
+                    self.show_window(ctx);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+    }
+
+    /// 第二实例把要打开的文件写进 handoff.txt；这里定期取走。
+    fn poll_handoff(&mut self, ctx: &egui::Context) {
+        if self.next_handoff_check > Instant::now() {
+            return;
+        }
+        self.next_handoff_check = Instant::now() + Duration::from_millis(250);
+
+        let Some(path) = crate::prefs::handoff_path() else {
+            return;
+        };
+        let Ok(meta) = std::fs::metadata(&path) else {
+            return;
+        };
+        if meta
+            .modified()
+            .ok()
+            .and_then(|time| time.elapsed().ok())
+            .is_some_and(|age| age > Duration::from_secs(15))
+        {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_file(&path);
+        let text = text.trim();
+        self.show_window(ctx);
+        if text.is_empty() {
+            return;
+        }
+        let target = PathBuf::from(text);
+        if target.is_dir() {
+            self.navigate(target);
+        } else {
+            self.open_path(target, None);
+        }
+    }
+
+    /// 每秒检查主题文件是否有变化；有变化就重载并保持当前主题 id。
+    fn poll_theme(&mut self, ctx: &egui::Context) {
+        if self.next_theme_check > Instant::now() {
+            return;
+        }
+        self.next_theme_check = Instant::now() + Duration::from_secs(1);
+
+        let Some(signature) = crate::theme::loader::signature() else {
+            return;
+        };
+        if self.theme_signature == Some(signature) {
+            return;
+        }
+        self.theme_signature = Some(signature);
+
+        let current_id = self.themes.current_id().to_owned();
+        let mut themes = ThemeStore::load(ctx);
+        themes.select_by_id(&current_id);
+        self.themes = themes;
+        self.tr.set_theme(self.themes.current());
+        self.themes.apply(ctx);
+        self.status = "主题文件已重新加载".to_owned();
+    }
+
+    fn maybe_save_settings(&mut self) {
+        if !self.settings_dirty {
+            return;
+        }
+        if self.last_settings_save.elapsed() < Duration::from_millis(400) {
+            return;
+        }
+
+        let prefs = crate::prefs::Prefs {
+            schema: 1,
+            theme: Some(self.themes.current_id().to_owned()),
+            locale: self.locale.code().to_owned(),
+            prefer_standard: self.tr.prefer_standard,
+            show_hint: self.show_first_run_hint,
+            last_dir: Some(self.dir.display().to_string()),
+        };
+        let _ = prefs.save();
+        self.settings_dirty = false;
+        self.last_settings_save = Instant::now();
     }
 
     pub fn refresh_dir(&mut self) {
@@ -171,6 +317,7 @@ impl SpellApp {
         if let Some(parent) = self.dir.parent() {
             self.dir = parent.to_path_buf();
             self.refresh_dir();
+            self.touch_settings();
         }
     }
 
@@ -178,6 +325,7 @@ impl SpellApp {
         self.dir = path;
         self.refresh_dir();
         self.status = format!("目录：{}", self.dir.display());
+        self.touch_settings();
     }
 
     pub fn filtered_entries(&self) -> Vec<usize> {
@@ -371,22 +519,25 @@ impl SpellApp {
         if output.extension().is_none() {
             output.set_extension("zip");
         }
-        let ext = output
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if ext != "zip" {
-            self.pack_state.error = Some(format!("暂不支持创建 .{ext}；目前只能创建 zip"));
+        let Some(kind) = kind_for_output(&output) else {
+            self.pack_state.error = Some(
+                "不支持的输出格式；可用 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4"
+                    .to_owned(),
+            );
             return;
-        }
+        };
 
         if output.is_dir() {
-            self.pack_state.error = Some("输出路径是一个文件夹，请指定 .zip 文件".to_owned());
+            self.pack_state.error = Some("输出路径是一个文件夹，请指定文件名".to_owned());
             return;
         }
 
         let append = self.pack_state.append;
+        if append && kind != ArchiveKind::Zip {
+            self.pack_state.error = Some("追加模式只支持 zip".to_owned());
+            return;
+        }
+
         if append {
             if !output.is_file() {
                 self.pack_state.error = Some("追加模式要求目标 zip 已存在".to_owned());
@@ -399,6 +550,10 @@ impl SpellApp {
         }
 
         let encrypt = self.pack_state.encrypt;
+        if encrypt && !matches!(kind, ArchiveKind::Zip | ArchiveKind::SevenZ) {
+            self.pack_state.error = Some("只有 zip / 7z 支持加密写入".to_owned());
+            return;
+        }
         if append && encrypt {
             self.pack_state.error = Some("追加模式暂不支持设置新密码".to_owned());
             return;
@@ -427,6 +582,7 @@ impl SpellApp {
         let handle = self.runner.submit(TaskOp::Pack {
             output,
             inputs: self.pack_state.sources.clone(),
+            kind,
             method,
             append,
             password,
@@ -660,6 +816,35 @@ impl SpellApp {
 impl eframe::App for SpellApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+
+        if ctx.input(|input| input.viewport().close_requested())
+            && self.tray.is_some()
+            && !self.quitting
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.hide_window(&ctx);
+        }
+
+        let dropped: Vec<PathBuf> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .map(|file| file.path().to_path_buf())
+                .collect()
+        });
+        for path in dropped {
+            if path.is_dir() {
+                self.navigate(path);
+            } else {
+                self.open_path(path, None);
+                break;
+            }
+        }
+
+        self.poll_tray(&ctx);
+        self.poll_handoff(&ctx);
+        self.poll_theme(&ctx);
         self.tick();
 
         crate::ui::hint_banner(self, ui);
@@ -670,10 +855,17 @@ impl eframe::App for SpellApp {
         crate::ui::archive_view::show(self, ui);
         crate::ui::dialogs::show(self, &ctx);
         crate::ui::settings::show(self, ui);
+        crate::ui::drag_overlay(self, &ctx);
 
-        if self.has_active_tasks() {
-            ctx.request_repaint_after(Duration::from_millis(33));
-        }
+        self.maybe_save_settings();
+
+        // 活动任务时 30fps；空闲时也保持低频唤醒，便于 250ms 轮询第二实例的 handoff。
+        let delay = if self.has_active_tasks() || self.settings_dirty {
+            Duration::from_millis(33)
+        } else {
+            Duration::from_millis(500)
+        };
+        ctx.request_repaint_after(delay);
     }
 }
 
@@ -681,6 +873,31 @@ fn file_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+pub(crate) fn kind_for_output(path: &std::path::Path) -> Option<ArchiveKind> {
+    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+    for (suffix, kind) in [
+        (".tar.gz", ArchiveKind::TarGz),
+        (".tgz", ArchiveKind::TarGz),
+        (".tar.bz2", ArchiveKind::TarBz2),
+        (".tbz2", ArchiveKind::TarBz2),
+        (".tbz", ArchiveKind::TarBz2),
+        (".tar.xz", ArchiveKind::TarXz),
+        (".txz", ArchiveKind::TarXz),
+        (".tar.zst", ArchiveKind::TarZst),
+        (".tzst", ArchiveKind::TarZst),
+        (".tar.lz4", ArchiveKind::TarLz4),
+        (".tlz4", ArchiveKind::TarLz4),
+        (".zip", ArchiveKind::Zip),
+        (".7z", ArchiveKind::SevenZ),
+        (".tar", ArchiveKind::Tar),
+    ] {
+        if name.ends_with(suffix) {
+            return Some(kind);
+        }
+    }
+    None
 }
 
 fn install_cjk_fonts(ctx: &egui::Context) {

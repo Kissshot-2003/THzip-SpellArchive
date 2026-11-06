@@ -10,6 +10,10 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     }
 
     let ctx = root.ctx().clone();
+    let prev_locale = app.locale;
+    let prev_standard = app.tr.prefer_standard;
+    let shell_installed = crate::shell_menu::is_installed();
+    let mut shell_want = shell_installed;
     let mut open = true;
     let title = app.tr.t(TextKey::Settings);
     let theme_label = app.tr.t(TextKey::Theme);
@@ -73,6 +77,14 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 ui.selectable_value(&mut app.locale, Locale::EnUs, "English");
             });
 
+            if cfg!(windows) {
+                ui.add_space(6.0);
+                ui.checkbox(
+                    &mut shell_want,
+                    "资源管理器右键菜单（Win11 在“显示更多选项”里）",
+                );
+            }
+
             ui.separator();
             ui.label(
                 egui::RichText::new(format!(
@@ -95,15 +107,44 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             );
             ui.label(
                 egui::RichText::new(
-                    "已实现：zip 打开 / 预检 / 安全解压 / CRC 测试 / 创建 / 追加 / AES-256 加密、\n后台任务线程池、取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、原子覆盖。\n待接入：7z / tar 后端、设置持久化。",
+                    "已实现：zip / 7z / tar 读写、单文件流读取、AES-256、预检、CRC、后台任务、\n取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、原子覆盖、设置持久化、\n单实例、托盘、右键菜单。\n待接入：RAR、7z 分卷拼接、拖拽多文件同时打开。",
                 )
                 .size(12.0)
                 .color(theme.palette.text_sub),
             );
+            if let Some(path) = crate::prefs::config_path() {
+                ui.label(
+                    egui::RichText::new(format!("设置文件：{}", path.display()))
+                        .size(11.0)
+                        .color(theme.palette.text_sub),
+                );
+            }
         });
 
     if selected != app.themes.current_index() {
         app.set_theme(selected, &ctx);
     }
+    if app.locale != app.tr.locale {
+        app.tr.locale = app.locale;
+    }
+    if app.locale != prev_locale || app.tr.prefer_standard != prev_standard {
+        app.touch_settings();
+    }
+
+    if shell_want != shell_installed {
+        let result = if shell_want {
+            std::env::current_exe()
+                .map_err(|err| std::io::Error::other(format!("取 exe 路径失败: {err}")))
+                .and_then(|exe| crate::shell_menu::install(&exe))
+        } else {
+            crate::shell_menu::uninstall()
+        };
+        app.status = match result {
+            Ok(()) if shell_want => "已添加资源管理器右键菜单".to_owned(),
+            Ok(()) => "已移除资源管理器右键菜单".to_owned(),
+            Err(err) => format!("右键菜单更新失败: {err}"),
+        };
+    }
+
     app.show_settings = open;
 }

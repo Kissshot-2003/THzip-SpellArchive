@@ -43,6 +43,7 @@ pub fn hint_banner(app: &mut SpellApp, root: &mut egui::Ui) {
             ui.label(egui::RichText::new(text).color(palette.text_sub));
             if ui.small_button(dismiss).clicked() {
                 app.show_first_run_hint = false;
+                app.touch_settings();
             }
         });
     });
@@ -104,6 +105,8 @@ pub fn top_bar(app: &mut SpellApp, root: &mut egui::Ui) {
                 let language = app.locale.label();
                 if ui.button(language).clicked() {
                     app.locale = app.locale.toggled();
+                    app.tr.locale = app.locale;
+                    app.touch_settings();
                 }
 
                 let names = app.themes.names();
@@ -197,6 +200,71 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
+/// 文件拖到窗口上方时的全屏提示；不拦截鼠标事件。
+pub fn drag_overlay(app: &SpellApp, ctx: &egui::Context) {
+    let hovered: Vec<std::path::PathBuf> = ctx.input(|input| {
+        input
+            .raw
+            .hovered_files
+            .iter()
+            .filter_map(|file| file.path.clone())
+            .collect()
+    });
+    if hovered.is_empty() {
+        return;
+    }
+
+    let palette = app.themes.current().palette;
+    let rect = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::unique("drag_overlay"),
+    ));
+
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::ZERO,
+        egui::Color32::from_black_alpha(150),
+    );
+    let inner = rect.shrink(28.0);
+    painter.rect_stroke(
+        inner,
+        egui::CornerRadius::same(10),
+        egui::Stroke::new(2.0, palette.accent),
+        egui::StrokeKind::Inside,
+    );
+
+    let first_is_dir = hovered.iter().any(|path| path.is_dir());
+    let title = if first_is_dir {
+        "松开以浏览文件夹".to_owned()
+    } else {
+        "松开以打开归档".to_owned()
+    };
+    let subtitle = if hovered.len() == 1 {
+        hovered[0]
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "1 个文件".to_owned())
+    } else {
+        format!("{} 个项目", hovered.len())
+    };
+
+    painter.text(
+        rect.center() - egui::vec2(0.0, 14.0),
+        egui::Align2::CENTER_CENTER,
+        title,
+        egui::FontId::proportional(22.0),
+        palette.text_normal,
+    );
+    painter.text(
+        rect.center() + egui::vec2(0.0, 18.0),
+        egui::Align2::CENTER_CENTER,
+        subtitle,
+        egui::FontId::proportional(14.0),
+        palette.text_sub,
+    );
 }
 
 pub fn format_bytes(bytes: u64) -> String {

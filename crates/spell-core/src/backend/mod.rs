@@ -1,6 +1,11 @@
+mod common;
+mod decoder;
 pub mod name_codec;
 pub mod sevenz;
+pub mod sevenz_write;
+pub mod stream;
 pub mod tar;
+pub mod tar_write;
 pub mod volume;
 pub mod zip;
 pub mod zip_write;
@@ -21,16 +26,61 @@ pub fn sniff_file(path: &Path) -> std::io::Result<ArchiveKind> {
     let mut file = File::open(path)?;
     let mut buf = [0u8; SNIFF_LEN];
     let read = file.read(&mut buf)?;
-    Ok(classify(
+    let kind = classify(
         &buf[..read],
-        path.extension().and_then(|e| e.to_str()),
-    ))
+        path.file_name().and_then(|name| name.to_str()),
+    );
+
+    // 扩展名没写 tar 的单文件流：解压前 1 KiB 看内层是不是 tar。
+    let tar_kind = match kind {
+        ArchiveKind::Gz => Some(ArchiveKind::TarGz),
+        ArchiveKind::Bz2 => Some(ArchiveKind::TarBz2),
+        ArchiveKind::Xz => Some(ArchiveKind::TarXz),
+        ArchiveKind::Zstd => Some(ArchiveKind::TarZst),
+        ArchiveKind::Lz4 => Some(ArchiveKind::TarLz4),
+        _ => None,
+    };
+    if let Some(tar_kind) = tar_kind {
+        if looks_like_tar(path, kind) {
+            return Ok(tar_kind);
+        }
+    }
+
+    Ok(kind)
 }
 
-/// magic bytes 优先，扩展名只用于区分复合容器（tar.gz vs gz）。
-pub fn classify(header: &[u8], ext: Option<&str>) -> ArchiveKind {
-    let ext = ext.unwrap_or("").to_ascii_lowercase();
-    let ext_is = |needle: &str| ext == needle || ext.ends_with(&format!(".{needle}"));
+fn looks_like_tar(path: &Path, kind: ArchiveKind) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut reader: Box<dyn Read> = match kind {
+        ArchiveKind::Gz => Box::new(flate2::read::GzDecoder::new(file)),
+        ArchiveKind::Bz2 => Box::new(bzip2::read::BzDecoder::new(file)),
+        ArchiveKind::Xz => Box::new(lzma_rust2::XzReader::new(file, false)),
+        ArchiveKind::Zstd => match zstd::stream::read::Decoder::new(file) {
+            Ok(decoder) => Box::new(decoder),
+            Err(_) => return false,
+        },
+        ArchiveKind::Lz4 => Box::new(lz4_flex::frame::FrameDecoder::new(file)),
+        _ => return false,
+    };
+
+    let mut header = [0u8; 1024];
+    let mut filled = 0;
+    while filled < header.len() {
+        match reader.read(&mut header[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(_) => return false,
+        }
+    }
+    filled > 262 && &header[257..262] == b"ustar"
+}
+
+/// magic bytes 优先，文件名只用于区分复合容器（tar.gz vs gz）。
+pub fn classify(header: &[u8], name: Option<&str>) -> ArchiveKind {
+    let name = name.unwrap_or("").to_ascii_lowercase();
+    let name_is = |needle: &str| name == needle || name.ends_with(&format!(".{needle}"));
 
     if header.starts_with(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]) {
         return ArchiveKind::SevenZ;
@@ -48,41 +98,41 @@ pub fn classify(header: &[u8], ext: Option<&str>) -> ArchiveKind {
         return ArchiveKind::Tar;
     }
     if header.starts_with(&[0x1F, 0x8B]) {
-        return if ext_is("tar.gz") || ext_is("tgz") {
+        return if name_is("tar.gz") || name_is("tgz") {
             ArchiveKind::TarGz
         } else {
             ArchiveKind::Gz
         };
     }
     if header.starts_with(b"BZh") {
-        return if ext_is("tar.bz2") || ext_is("tbz2") || ext_is("tbz") {
+        return if name_is("tar.bz2") || name_is("tbz2") || name_is("tbz") {
             ArchiveKind::TarBz2
         } else {
             ArchiveKind::Bz2
         };
     }
     if header.starts_with(&[0xFD, b'7', b'z', b'X', b'Z', 0x00]) {
-        return if ext_is("tar.xz") || ext_is("txz") {
+        return if name_is("tar.xz") || name_is("txz") {
             ArchiveKind::TarXz
         } else {
             ArchiveKind::Xz
         };
     }
     if header.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
-        return if ext_is("tar.zst") || ext_is("tzst") {
+        return if name_is("tar.zst") || name_is("tzst") {
             ArchiveKind::TarZst
         } else {
             ArchiveKind::Zstd
         };
     }
     if header.starts_with(&[0x04, 0x22, 0x4D, 0x18]) {
-        return if ext_is("tar.lz4") || ext_is("tlz4") {
+        return if name_is("tar.lz4") || name_is("tlz4") {
             ArchiveKind::TarLz4
         } else {
             ArchiveKind::Lz4
         };
     }
-    if ext_is("tar") {
+    if name_is("tar") {
         return ArchiveKind::Tar;
     }
     ArchiveKind::Unknown
@@ -95,13 +145,13 @@ pub fn open(
     let kind = sniff_file(path).map_err(|err| ArchiveError::Open(err.to_string()))?;
     match kind {
         ArchiveKind::Zip => Ok(Box::new(zip::ZipReader::new(path, password)?)),
-        ArchiveKind::SevenZ => Ok(Box::new(sevenz::SevenZReader::new(path))),
+        ArchiveKind::SevenZ => Ok(Box::new(sevenz::SevenZReader::new(path, password)?)),
         ArchiveKind::Tar
         | ArchiveKind::TarGz
         | ArchiveKind::TarBz2
         | ArchiveKind::TarXz
         | ArchiveKind::TarZst
-        | ArchiveKind::TarLz4 => Ok(Box::new(tar::TarReader::new(path, kind))),
+        | ArchiveKind::TarLz4 => Ok(Box::new(tar::TarReader::new(path, kind)?)),
         ArchiveKind::Rar => Err(ArchiveError::Unsupported(
             "RAR 仅提供可选解压特性，默认构建不支持".to_owned(),
         )),
@@ -109,10 +159,7 @@ pub fn open(
         | ArchiveKind::Bz2
         | ArchiveKind::Xz
         | ArchiveKind::Zstd
-        | ArchiveKind::Lz4 => Err(ArchiveError::Unsupported(format!(
-            "单文件流容器（{}）尚未接入",
-            kind.label()
-        ))),
+        | ArchiveKind::Lz4 => Ok(Box::new(stream::StreamReader::new(path, kind)?)),
         ArchiveKind::Unknown => Err(ArchiveError::Unsupported(
             "无法识别归档格式（magic bytes 不匹配）".to_owned(),
         )),
@@ -141,6 +188,24 @@ pub fn create_writer_with(
             method,
             password.cloned(),
         )?)),
+        ArchiveKind::SevenZ => Ok(Box::new(sevenz_write::SevenZArchiveWriter::create(
+            path,
+            method,
+            password.cloned(),
+        )?)),
+        ArchiveKind::Tar
+        | ArchiveKind::TarGz
+        | ArchiveKind::TarBz2
+        | ArchiveKind::TarXz
+        | ArchiveKind::TarZst
+        | ArchiveKind::TarLz4 => {
+            if password.is_some() {
+                return Err(ArchiveError::Unsupported(
+                    "tar 家族暂不支持加密写入".to_owned(),
+                ));
+            }
+            Ok(Box::new(tar_write::TarArchiveWriter::create(path, kind)?))
+        }
         other => Err(ArchiveError::Unsupported(format!(
             "暂不支持创建 {} 归档",
             other.label()

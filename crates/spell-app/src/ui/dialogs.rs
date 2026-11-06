@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use eframe::egui;
 use spell_core::plan::OverwritePolicy;
 use spell_core::secret::SecretString;
+use spell_core::types::ArchiveKind;
 
 use crate::app::SpellApp;
 use crate::i18n::TextKey;
@@ -92,23 +93,42 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
                     browse = true;
                 }
             });
-            ui.checkbox(&mut app.pack_state.store, "仅存储（不压缩）");
-            if ui
-                .checkbox(&mut app.pack_state.append, "追加到现有 zip（保留原有条目）")
-                .changed()
-            {
-                app.pack_state.confirm_overwrite = false;
-                app.pack_state.error = None;
-                if app.pack_state.append {
-                    app.pack_state.encrypt = false;
-                    app.pack_state.password.clear();
-                }
+            let output_path = PathBuf::from(app.pack_state.output.trim());
+            let output_kind = crate::app::kind_for_output(&output_path);
+            let is_zip = matches!(output_kind, Some(ArchiveKind::Zip));
+            let supports_encrypt =
+                matches!(output_kind, Some(ArchiveKind::Zip | ArchiveKind::SevenZ));
+            if !is_zip && app.pack_state.append {
+                app.pack_state.append = false;
+                app.pack_state.encrypt = false;
+                app.pack_state.password.clear();
+            }
+            if !supports_encrypt {
+                app.pack_state.encrypt = false;
+                app.pack_state.password.clear();
             }
 
-            ui.add_enabled_ui(!app.pack_state.append, |ui| {
+            ui.add_enabled_ui(supports_encrypt, |ui| {
+                ui.checkbox(&mut app.pack_state.store, "仅存储（不压缩）");
+            });
+            ui.add_enabled_ui(is_zip, |ui| {
+                if ui
+                    .checkbox(&mut app.pack_state.append, "追加到现有 zip（保留原有条目）")
+                    .changed()
+                {
+                    app.pack_state.confirm_overwrite = false;
+                    app.pack_state.error = None;
+                    if app.pack_state.append {
+                        app.pack_state.encrypt = false;
+                        app.pack_state.password.clear();
+                    }
+                }
+            });
+
+            ui.add_enabled_ui(supports_encrypt && !app.pack_state.append, |ui| {
                 ui.checkbox(&mut app.pack_state.encrypt, "AES-256 加密");
             });
-            if app.pack_state.encrypt && !app.pack_state.append {
+            if supports_encrypt && app.pack_state.encrypt && !app.pack_state.append {
                 ui.add(
                     egui::TextEdit::singleline(&mut app.pack_state.password)
                         .password(true)
@@ -117,7 +137,14 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
                 );
             }
 
-            let output_path = PathBuf::from(app.pack_state.output.trim());
+            ui.label(
+                egui::RichText::new(
+                    "支持 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4",
+                )
+                .size(11.0)
+                .color(palette.text_sub),
+            );
+
             if output_path.is_file() {
                 let text = if app.pack_state.append {
                     "将追加到现有 zip；完成后原子替换原文件。"

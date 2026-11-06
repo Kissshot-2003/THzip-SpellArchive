@@ -214,6 +214,7 @@ fn packs_through_worker() {
     let handle = runner.submit(TaskOp::Pack {
         output: archive.clone(),
         inputs: vec![src],
+        kind: spell_core::ArchiveKind::Zip,
         method: spell_core::Method::Deflate,
         append: false,
         password: None,

@@ -1,10 +1,10 @@
 # SpellArchive
 
-东方 Project 同人主题归档管理器。当前为**zip 已可在 GUI 中打开、解压、测试、创建、追加与 AES 加密**的阶段：
+东方 Project 同人主题归档管理器。当前为**zip / 7z / tar 家族读写 + 单文件流读取**的阶段：
 
-- `spell-core`：零 UI 依赖的核心（类型、trait、安全解压、限额、任务线程池、zip 读写）
-- `spell-app`：egui 三栏界面（主题、i18n、自绘进度条、虚拟化列表、打开/预检/解压/测试）
-- `spell-cli`：复用 core 的命令行入口（zip 的 list / test / extract / pack / 追加可用）
+- `spell-core`：零 UI 依赖的核心（类型、trait、安全解压、限额、任务线程池、zip/7z/tar 读写、单文件流读取）
+- `spell-app`：egui 三栏界面（主题、i18n、自绘进度条、虚拟化列表、打开/预检/解压/测试/创建/设置）
+- `spell-cli`：复用 core 的命令行入口（zip / 7z / tar 的 list / test / extract / pack）
 
 ## 运行
 
@@ -12,11 +12,11 @@
 cargo run -p spell-app                           # 启动 GUI
 cargo run -p spell-app -- <归档路径>              # 启动并直接打开归档
 cargo run -p spell-cli -- sniff <文件>            # 格式嗅探
-cargo run -p spell-cli -- list <zip>             # 列出条目
-cargo run -p spell-cli -- test <zip>             # CRC 完整性测试
-cargo run -p spell-cli -- extract <zip> <目录>    # 安全解压（--force 覆盖）
-cargo run -p spell-cli -- pack <输出.zip> <输入...>  # 创建 / 追加（--append / --password）
-cargo test --workspace                           # 47 个单元 / 集成 / zip 攻击用例
+cargo run -p spell-cli -- list <归档>            # 列出条目（zip / 7z / tar 家族）
+cargo run -p spell-cli -- test <归档>            # CRC 完整性测试
+cargo run -p spell-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
+cargo run -p spell-cli -- pack <输出> <输入...>      # 格式由扩展名决定（zip/7z/tar 家族）
+cargo test --workspace                           # 59 个单元 / 集成 / 归档格式用例
 ```
 
 ## 当前状态
@@ -27,10 +27,15 @@ cargo test --workspace                           # 47 个单元 / 集成 / zip �
 | 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护 | 可用，含测试 |
 | zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；同名自动 `~1` 改名 |
 | zip 写 | **可用**：Store / Deflate、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
-| 7z / tar 后端 | 接口与占位实现，待接入 sevenz-rust2、tar |
-| CLI | `sniff` / `list` / `test` / `extract` / `pack` 可用（zip） |
+| 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密 |
+| 7z 写 | **可用**：LZMA2 / COPY、AES-256 头加密、原子替换 |
+| tar 家族读 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4；符号链接跳过；无扩展名的压缩包会探测内层 tar |
+| 单文件流读 | **可用**：`.gz` / `.bz2` / `.xz` / `.zst` / `.lz4`，自动去掉压缩扩展名作为文件名 |
+| tar 家族写 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4，原子替换 |
+| CLI | `sniff` / `list` / `test` / `extract`（全部已支持格式）、`pack`（zip + 7z + tar 家族） |
 | 任务线程池 | **可用**：2 条后台 worker、`crossbeam-channel` 事件、进度节流、取消、panic 兜底 |
-| GUI | **可用**：打开 zip、真实条目列表、解压预检、覆盖策略、密码重试、完整性测试、任务取消、创建 zip |
+| GUI | **可用**：打开任意支持格式、预检/解压/测试/取消、创建 zip/7z/tar、追加 zip、AES-256 |
+| 桌面集成 | **可用**：设置持久化、拖拽打开与悬停提示、单实例转交、关闭到托盘、托盘菜单、资源管理器右键菜单、主题热重载 |
 | 主题引擎 | 可扫描 `themes/*/theme.toml`，载入 PNG 纹理与配色；缺资源回退内置主题 |
 | 字体 | 自动加载系统 CJK 字体（simhei / Deng） |
 

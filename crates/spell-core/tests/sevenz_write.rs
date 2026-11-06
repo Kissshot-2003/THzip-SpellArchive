@@ -1,0 +1,135 @@
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use spell_core::backend;
+use spell_core::limits::Limits;
+use spell_core::plan::{DecisionTable, OverwritePolicy};
+use spell_core::safety::ExtractDirSink;
+use spell_core::task::CancelToken;
+use spell_core::types::{ArchiveKind, EntryId, Method};
+use spell_core::writer::{scan_inputs, write_entries};
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "spellarchive-7zwrite-{tag}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn build_source(root: &Path) -> PathBuf {
+    let src = root.join("素材");
+    std::fs::create_dir_all(src.join("子目录")).unwrap();
+    std::fs::create_dir_all(src.join("空目录")).unwrap();
+    std::fs::write(src.join("说明.txt"), "灵梦 7z 写入".as_bytes()).unwrap();
+    std::fs::write(src.join("子目录/data.bin"), [1u8, 2, 3]).unwrap();
+    src
+}
+
+fn extract_all(archive: &Path, target: &Path, password: Option<&str>) -> spell_core::ExtractReport {
+    let limits = Limits::default();
+    let secret = password.map(spell_core::SecretString::new);
+    let mut reader = backend::open(archive, secret.as_ref()).unwrap();
+    let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
+    let plan = reader.plan(&ids, target, &limits).unwrap();
+    let decisions = DecisionTable {
+        default: OverwritePolicy::Overwrite,
+        ..Default::default()
+    };
+    let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
+    reader
+        .extract(&plan, &decisions, &CancelToken::new(), &mut sink)
+        .unwrap()
+}
+
+fn pack(archive: &Path, src: &Path, password: Option<&str>) {
+    let limits = Limits::default();
+    let entries = scan_inputs(&[src.to_path_buf()], &limits).unwrap();
+    let secret = password.map(spell_core::SecretString::new);
+    let mut writer = backend::create_writer_with(
+        archive,
+        ArchiveKind::SevenZ,
+        Method::Deflate,
+        secret.as_ref(),
+    )
+    .unwrap();
+    write_entries(
+        writer.as_mut(),
+        &entries,
+        Some(Method::Deflate),
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+}
+
+#[test]
+fn sevenz_writes_and_extracts() {
+    let dir = TempDir::new("plain");
+    let src = build_source(dir.path());
+    let archive = dir.path().join("created.7z");
+    pack(&archive, &src, None);
+
+    let reader = backend::open(&archive, None).unwrap();
+    assert_eq!(reader.kind(), ArchiveKind::SevenZ);
+    assert!(
+        reader
+            .entries()
+            .iter()
+            .any(|entry| entry.display.as_ref() == "素材/说明.txt")
+    );
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target, None);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("素材/说明.txt")).unwrap(),
+        "灵梦 7z 写入".as_bytes()
+    );
+    assert_eq!(
+        std::fs::read(target.join("素材/子目录/data.bin")).unwrap(),
+        vec![1u8, 2, 3]
+    );
+    assert!(target.join("素材/空目录").is_dir());
+}
+
+#[test]
+fn sevenz_encrypted_roundtrip() {
+    let dir = TempDir::new("encrypted");
+    let src = build_source(dir.path());
+    let archive = dir.path().join("secret.7z");
+    pack(&archive, &src, Some("hunter2"));
+
+    assert!(matches!(
+        backend::open(&archive, None),
+        Err(spell_core::ArchiveError::PasswordRequired)
+    ));
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target, Some("hunter2"));
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("素材/说明.txt")).unwrap(),
+        "灵梦 7z 写入".as_bytes()
+    );
+}

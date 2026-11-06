@@ -22,6 +22,21 @@ impl Locale {
             Locale::EnUs => Locale::ZhCn,
         }
     }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Locale::ZhCn => "zh-CN",
+            Locale::EnUs => "en-US",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "zh-CN" | "zh" => Some(Locale::ZhCn),
+            "en-US" | "en" => Some(Locale::EnUs),
+            _ => None,
+        }
+    }
 }
 
 #[allow(dead_code)]

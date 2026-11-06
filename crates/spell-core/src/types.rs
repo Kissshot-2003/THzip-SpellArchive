@@ -75,6 +75,7 @@ impl ArchiveKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Method {
     Store,
+    Gzip,
     Deflate,
     Deflate64,
     Lzma,
@@ -91,6 +92,7 @@ impl Method {
     pub fn label(self) -> &'static str {
         match self {
             Method::Store => "Store",
+            Method::Gzip => "GZip",
             Method::Deflate => "Deflate",
             Method::Deflate64 => "Deflate64",
             Method::Lzma => "LZMA",

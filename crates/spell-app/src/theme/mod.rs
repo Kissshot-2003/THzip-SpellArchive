@@ -232,6 +232,18 @@ impl ThemeStore {
         self.current
     }
 
+    pub fn current_id(&self) -> &str {
+        &self.current().id
+    }
+
+    /// 按主题 id 选择；返回是否真的切换了。
+    pub fn select_by_id(&mut self, id: &str) -> bool {
+        if let Some(index) = self.themes.iter().position(|theme| theme.id == id) {
+            return self.set(index);
+        }
+        false
+    }
+
     pub fn names(&self) -> Vec<String> {
         self.themes.iter().map(|theme| theme.name.clone()).collect()
     }

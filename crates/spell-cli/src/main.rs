@@ -67,14 +67,15 @@ fn usage() {
   spell test    <文件> [--password <pw>]  完整性测试（CRC 校验）
   spell extract <文件> [目标目录] [--force] [--password <pw>]
                                           安全解压；默认不覆盖已有文件
-  spell pack    <输出.zip> <输入...> [--store] [--force] [--append] [--password <pw>]
-                                          创建/追加 zip；--password 使用 AES-256 加密
+  spell pack    <输出> <输入...> [--store] [--force] [--append] [--password <pw>]
+                                          创建 zip / tar 家族；--password 仅用于 zip AES-256
   spell --version
 
 说明:
   - 不带目标目录时解压到「文件所在目录/去扩展名」。
   - --force 等价于覆盖策略「全部覆盖」；否则冲突条目会被跳过。
-  - 支持 zip 读取与创建；7z / tar 尚未接入。
+  - 支持 zip / 7z / tar 家族读写；7z 与 zip 可加密。
+  - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
   - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
 }
@@ -84,7 +85,7 @@ fn sniff(path: &Path) -> ExitCode {
         Ok(kind) => {
             println!("{}: {}", path.display(), kind.label());
             if kind.is_single_stream() {
-                println!("  （单文件流容器，不是归档）");
+                println!("  （单文件流容器，会解压为单个文件）");
             }
             if kind == ArchiveKind::Unknown {
                 println!("  提示：magic bytes 未命中，可能是加密头或未知格式");
@@ -323,16 +324,21 @@ fn pack(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let ext = output
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("zip")
-        .to_ascii_lowercase();
-    if ext != "zip" {
-        eprintln!("暂不支持创建 .{ext}；目前只能创建 zip");
+    let Some(kind) = kind_for_output(output) else {
+        eprintln!(
+            "不支持的输出格式；可用 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4"
+        );
+        return ExitCode::FAILURE;
+    };
+
+    if append && kind != ArchiveKind::Zip {
+        eprintln!("追加模式只支持 zip");
         return ExitCode::FAILURE;
     }
-
+    if password.is_some() && !matches!(kind, ArchiveKind::Zip | ArchiveKind::SevenZ) {
+        eprintln!("加密写入只支持 zip / 7z");
+        return ExitCode::FAILURE;
+    }
     if append && password.is_some() {
         eprintln!("追加模式暂不支持设置新密码");
         return ExitCode::FAILURE;
@@ -360,18 +366,30 @@ fn pack(args: &[String]) -> ExitCode {
     };
     let total: u64 = entries.iter().map(|entry| entry.size).sum();
 
+    let detail = match kind {
+        ArchiveKind::Zip => {
+            let mut detail = format!("zip · {}", if store { "Store" } else { "Deflate" });
+            if password.is_some() && !append {
+                detail.push_str(" + AES-256");
+            }
+            detail
+        }
+        ArchiveKind::SevenZ => {
+            let mut detail = format!("7z · {}", if store { "COPY" } else { "LZMA2" });
+            if password.is_some() {
+                detail.push_str(" + AES-256");
+            }
+            detail
+        }
+        other => other.label().to_owned(),
+    };
     println!(
-        "{}：{} 个条目，原始 {} 字节 → {}（{}{}）",
+        "{}：{} 个条目，原始 {} 字节 → {}（{}）",
         if append { "追加" } else { "打包" },
         entries.len(),
         total,
         output.display(),
-        if store { "Store" } else { "Deflate" },
-        if password.is_some() && !append {
-            " + AES-256"
-        } else {
-            ""
-        }
+        detail
     );
 
     let method = if store {
@@ -380,9 +398,9 @@ fn pack(args: &[String]) -> ExitCode {
         Method::Deflate
     };
     let created = if append {
-        backend::create_writer_append(output, ArchiveKind::Zip, method)
+        backend::create_writer_append(output, kind, method)
     } else {
-        backend::create_writer_with(output, ArchiveKind::Zip, method, password.as_ref())
+        backend::create_writer_with(output, kind, method, password.as_ref())
     };
     let mut writer = match created {
         Ok(writer) => writer,
@@ -419,6 +437,31 @@ fn pack(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn kind_for_output(path: &Path) -> Option<ArchiveKind> {
+    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+    for (suffix, kind) in [
+        (".tar.gz", ArchiveKind::TarGz),
+        (".tgz", ArchiveKind::TarGz),
+        (".tar.bz2", ArchiveKind::TarBz2),
+        (".tbz2", ArchiveKind::TarBz2),
+        (".tbz", ArchiveKind::TarBz2),
+        (".tar.xz", ArchiveKind::TarXz),
+        (".txz", ArchiveKind::TarXz),
+        (".tar.zst", ArchiveKind::TarZst),
+        (".tzst", ArchiveKind::TarZst),
+        (".tar.lz4", ArchiveKind::TarLz4),
+        (".tlz4", ArchiveKind::TarLz4),
+        (".zip", ArchiveKind::Zip),
+        (".7z", ArchiveKind::SevenZ),
+        (".tar", ArchiveKind::Tar),
+    ] {
+        if name.ends_with(suffix) {
+            return Some(kind);
+        }
+    }
+    None
 }
 
 fn default_target(input: &Path) -> PathBuf {

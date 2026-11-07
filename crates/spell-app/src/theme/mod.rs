@@ -177,6 +177,8 @@ pub struct Theme {
     /// 主题文案覆盖（theme.toml `[text_map]`）。
     pub text_map: BTreeMap<String, String>,
     pub resources: HashMap<ResKey, egui::TextureHandle>,
+    /// 九宫格切片（左/上/右/下，单位 1x 像素）。
+    pub nine_patch: HashMap<ResKey, [u32; 4]>,
     /// 解析后的纹理路径；切换主题时再解码，避免启动加载全部主题。
     pub(crate) paths: HashMap<ResKey, std::path::PathBuf>,
 }
@@ -205,6 +207,7 @@ impl Theme {
             palette,
             text_map,
             resources: HashMap::new(),
+            nine_patch: HashMap::new(),
             paths: HashMap::new(),
         }
     }

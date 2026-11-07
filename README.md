@@ -39,7 +39,7 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 | GUI | **可用**：多标签页、打开任意支持格式、后台预检、解压/测试/取消、创建 zip/7z/tar（zip 可选 BZip2/Zstd）、追加 zip、AES-256、后台主题包导入、多选与表头排序、冲突跳过/覆盖/改名/自动编号 |
 | 桌面集成 | **可用**：设置持久化（schema 3，含排序键）、关闭到托盘开关、多文件拖拽多标签页、单实例转交、本地化托盘菜单、资源管理器右键菜单（启动自检 exe 路径）、主题热重载 |
 | 日志 | `%APPDATA%\SpellArchive\spellarchive.log`（5 MiB 轮转）+ panic hook |
-| 主题引擎 | 可扫描 `themes/*/theme.toml`，按需载入 PNG 纹理与配色；缺资源回退内置主题 |
+| 主题引擎 | 可扫描 `themes/*/theme.toml`，按需载入 PNG 纹理与配色、九宫格背景；缺资源回退内置主题 |
 | 字体 | 自动加载系统 CJK 字体（simhei / Deng） |
 | Windows 资源 | `build.rs`：exe 图标、版本信息、DPI/长路径 manifest；release 隐藏控制台 |
 

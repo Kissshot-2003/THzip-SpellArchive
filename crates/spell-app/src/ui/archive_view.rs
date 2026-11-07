@@ -30,8 +30,13 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let search_hint = app.tr.t(TextKey::SearchHint);
     let empty_text = app.tr.t(TextKey::EmptyArchive);
     let rows = app.filtered_entries();
+    let panel_bg =
+        crate::ui::nine_patch::NinePatch::from_theme(app.themes.current(), ResKey::PanelBg);
 
     egui::CentralPanel::default().show(root, |ui| {
+        if let Some(bg) = panel_bg {
+            bg.paint(ui, ui.max_rect(), egui::Color32::WHITE);
+        }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(title.clone()).strong())

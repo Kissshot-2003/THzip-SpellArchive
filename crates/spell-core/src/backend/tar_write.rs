@@ -146,7 +146,12 @@ impl ArchiveWriter for TarArchiveWriter {
             let mut header = tar::Header::new_gnu();
             header.set_entry_type(tar::EntryType::Regular);
             header.set_size(meta.len());
-            header.set_mode(0o644);
+            // 保留只读属性；其余统一 644（跨平台没有统一 Unix mode）。
+            header.set_mode(if meta.permissions().readonly() {
+                0o444
+            } else {
+                0o644
+            });
             header.set_mtime(mtime_secs(meta.modified().ok()));
             header.set_cksum();
 
@@ -172,17 +177,30 @@ impl ArchiveWriter for TarArchiveWriter {
         result
     }
 
-    fn add_dir(&mut self, name_in_archive: &str) -> Result<(), ArchiveError> {
+    fn add_dir(&mut self, src: &Path, name_in_archive: &str) -> Result<(), ArchiveError> {
         let result = (|| -> Result<(), ArchiveError> {
             let name = normalize_entry_name(name_in_archive)?;
             let name = format!("{name}/");
             self.reserve_name(&name)?;
 
+            let meta = std::fs::symlink_metadata(src).ok();
+            let mode = meta
+                .as_ref()
+                .map(|meta| {
+                    if meta.permissions().readonly() {
+                        0o555
+                    } else {
+                        0o755
+                    }
+                })
+                .unwrap_or(0o755);
+            let mtime = meta.as_ref().and_then(|meta| meta.modified().ok());
+
             let mut header = tar::Header::new_gnu();
             header.set_entry_type(tar::EntryType::Directory);
             header.set_size(0);
-            header.set_mode(0o755);
-            header.set_mtime(mtime_secs(Some(SystemTime::now())));
+            header.set_mode(mode);
+            header.set_mtime(mtime_secs(mtime));
             header.set_cksum();
             self.sink()?
                 .append(&mut header, Path::new(&name), io::empty())?;

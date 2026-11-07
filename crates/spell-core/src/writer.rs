@@ -184,7 +184,7 @@ pub fn write_entries(
             return Err(ArchiveError::Cancelled);
         }
         if entry.is_dir() {
-            writer.add_dir(&entry.name)?;
+            writer.add_dir(&entry.source, &entry.name)?;
             continue;
         }
 
@@ -212,7 +212,7 @@ pub trait ArchiveWriter: Send {
         ))
     }
 
-    fn add_dir(&mut self, _name_in_archive: &str) -> Result<(), ArchiveError> {
+    fn add_dir(&mut self, _src: &Path, _name_in_archive: &str) -> Result<(), ArchiveError> {
         Err(ArchiveError::Unsupported(
             "该格式的写入后端尚未接入（骨架阶段）".to_owned(),
         ))

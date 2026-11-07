@@ -201,6 +201,19 @@ fn load_theme(dir: &Path, manifest: &Path) -> Result<Theme, String> {
         paths.insert(key, path);
     }
 
+    let mut nine_patch = std::collections::HashMap::new();
+    for (key_name, slice) in &manifest.resource_nine_patch {
+        let Some(key) = ResKey::from_name(key_name) else {
+            eprintln!("[theme] {id}: 未知九宫格 key `{key_name}`，已忽略");
+            continue;
+        };
+        if paths.contains_key(&key) {
+            nine_patch.insert(key, *slice);
+        } else {
+            eprintln!("[theme] {id}: 九宫格 `{key_name}` 没有对应贴图，已忽略");
+        }
+    }
+
     Ok(Theme {
         id,
         name: manifest.meta.name,
@@ -213,6 +226,7 @@ fn load_theme(dir: &Path, manifest: &Path) -> Result<Theme, String> {
         palette,
         text_map: manifest.text_map,
         resources: std::collections::HashMap::new(),
+        nine_patch,
         paths,
     })
 }

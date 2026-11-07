@@ -192,7 +192,7 @@ spell_archive/
 | `prefs.rs` | schema 3 配置（含排序键）、handoff、日志路径 |
 | `logging.rs` | 文本日志 + panic hook，5 MiB 轮转 |
 | `i18n/mod.rs` | zh-CN / en-US + 主题覆盖 + 标准术语开关 + 托盘文案 |
-| `theme/{mod,loader}.rs` | 主题扫描、纹理路径解析、按需解码、签名轮询、主题目录定位 |
+| `theme/{mod,loader}.rs` | 主题扫描、纹理路径解析、按需解码、九宫格切片、签名轮询、主题目录定位 |
 | `tray.rs` | 托盘图标与本地化菜单 |
 | `shell_menu.rs` | HKCU 资源管理器右键菜单；启动时自检并修正 exe 路径 |
 | `ui/*` | 工具栏、标签栏、文件浏览、归档表、任务行、预检/密码/打包对话框、设置、进度条、拖拽遮罩 |
@@ -351,7 +351,7 @@ UI 选目标目录
 写入：
 
 - tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4。
-- 文件权限固定 644，目录 755；目录 mtime 用当前时间。
+- 文件权限按只读属性映射 444/644，目录 555/755；文件与目录 mtime 取源 metadata。
 - 不支持加密与追加。
 
 ### 4.4 RAR
@@ -721,7 +721,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 6 | 已修复 | `ThemeStore` 只解码当前主题，切换时 `ensure_loaded` |
 | 7 | 部分修复 | 排序键/方向已写入 prefs schema 3；搜索支持小写子串与 `*`/`?` 通配 |
 | 8 | 无 SVG 支持 | plain 主题只能用纯色 | 开 `egui_extras` svg |
-| 9 | `[resource_nine_patch]` 解析但未使用 | 面板背景不能九宫格 | `ui/nine_patch.rs` |
+| 9 | 已修复 | `ui/nine_patch.rs` 支持九宫格；`PanelBg` 已用于归档主面板背景 |
 | 10 | 日志是简单文本，没有级别/模块 | 排查复杂问题不够 | 需要时换 `tracing` |
 | 11 | 已修复 | schema 3；缺失字段由 serde default 补齐，读入后升级版本号 |
 | 12 | 已修复 | 多文件拖入/多标签页；每个归档独立 reader、搜索与选中集 |
@@ -737,7 +737,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 22 | 7z 写入固定 LZMA2/COPY 与默认参数 | 不能调固实块、字典大小 | 暴露 `EncoderConfiguration` |
 | 23 | 已修复 | 缺卷时错误信息列出缺失卷号 |
 | 24 | 单文件流打开时先解压一遍求大小 | 大文件打开/解压读两遍 | 列表尺寸懒加载或显示“未知” |
-| 25 | 部分修复 | 解压统一恢复文件 mtime；tar 写入仍固定 644/755 |
+| 25 | 部分修复 | 解压统一恢复 mtime；tar 写入按只读属性生成 444/644、目录 555/755，并保留目录 mtime |
 | 26 | tar 家族不支持追加与加密 | 只能新建 | 追加需重写整包 |
 | 27 | RAR 单条上限 512 MiB、不支持多卷 | 超大条目/多卷包失败 | 后续可改用 unrar 回调流式解压 |
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |

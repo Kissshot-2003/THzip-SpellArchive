@@ -185,7 +185,7 @@ impl ArchiveWriter for ZipArchiveWriter {
         self.abort_on(result)
     }
 
-    fn add_dir(&mut self, name_in_archive: &str) -> Result<(), ArchiveError> {
+    fn add_dir(&mut self, _src: &Path, name_in_archive: &str) -> Result<(), ArchiveError> {
         let result = (|| -> Result<(), ArchiveError> {
             let name = normalize_entry_name(name_in_archive)?;
             self.reserve_name(&name)?;

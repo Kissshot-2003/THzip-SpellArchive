@@ -18,6 +18,8 @@ struct Manifest {
     #[serde(default)]
     resource: BTreeMap<String, String>,
     #[serde(default)]
+    effects: Effects,
+    #[serde(default)]
     resource_nine_patch: BTreeMap<String, [u32; 4]>,
     #[serde(default)]
     color: BTreeMap<String, String>,
@@ -39,6 +41,12 @@ struct Meta {
     sampling_pixel: bool,
     #[serde(default = "default_scale")]
     scale: u32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Effects {
+    #[serde(default)]
+    particles: bool,
 }
 
 fn schema_version() -> u32 {
@@ -227,6 +235,7 @@ fn load_theme(dir: &Path, manifest: &Path) -> Result<Theme, String> {
         text_map: manifest.text_map,
         resources: std::collections::HashMap::new(),
         nine_patch,
+        particles: manifest.effects.particles,
         paths,
     })
 }
@@ -252,12 +261,53 @@ pub(crate) fn load_texture(
     options: egui::TextureOptions,
     name: &str,
 ) -> Result<egui::TextureHandle, String> {
-    let image = image::open(path)
-        .map_err(|err| format!("{}: {err}", path.display()))?
-        .to_rgba8();
-    let size = [image.width() as usize, image.height() as usize];
-    let color = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+    let is_svg = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
+    let color = if is_svg {
+        load_svg(path)?
+    } else {
+        let image = image::open(path)
+            .map_err(|err| format!("{}: {err}", path.display()))?
+            .to_rgba8();
+        let size = [image.width() as usize, image.height() as usize];
+        egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw())
+    };
     Ok(ctx.load_texture(name.to_owned(), color, options))
+}
+
+/// SVG 光栅化：不加载外部资源，单文件上限 8 MiB，最长边上限 2048。
+fn load_svg(path: &Path) -> Result<egui::ColorImage, String> {
+    const MAX_BYTES: u64 = 8 * 1024 * 1024;
+    const MAX_DIM: u32 = 2048;
+
+    let meta = std::fs::metadata(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    if meta.len() > MAX_BYTES {
+        return Err(format!("{}: SVG 超过 8 MiB", path.display()));
+    }
+    let data = std::fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default())
+        .map_err(|err| format!("{}: SVG 解析失败: {err}", path.display()))?;
+
+    let size = tree.size().to_int_size();
+    let width = size.width().max(1);
+    let height = size.height().max(1);
+    let scale = (MAX_DIM as f32 / width.max(height) as f32).min(1.0);
+    let width = ((width as f32 * scale).round() as u32).max(1);
+    let height = ((height as f32 * scale).round() as u32).max(1);
+
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| format!("{}: SVG 尺寸无效", path.display()))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    Ok(egui::ColorImage::from_rgba_unmultiplied(
+        [width as usize, height as usize],
+        pixmap.data(),
+    ))
 }
 
 fn pick(map: &BTreeMap<String, String>, key: &str, fallback: Color32) -> Color32 {
@@ -287,9 +337,24 @@ fn parse_hex(raw: &str) -> Option<Color32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_hex, resolve};
+    use super::{load_texture, parse_hex, resolve};
     use eframe::egui::Color32;
     use std::path::Path;
+
+    #[test]
+    fn rasterizes_svg_icons() {
+        let path =
+            std::env::temp_dir().join(format!("spellarchive-icon-{}.svg", std::process::id()));
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#f03d52"/></svg>"##,
+        )
+        .unwrap();
+        let ctx = eframe::egui::Context::default();
+        let texture = load_texture(&ctx, &path, eframe::egui::TextureOptions::NEAREST, "test");
+        assert!(texture.is_ok(), "{:?}", texture.err());
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn parses_rgb_hex() {

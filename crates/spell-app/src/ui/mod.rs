@@ -2,6 +2,7 @@ pub mod archive_view;
 pub mod dialogs;
 pub mod file_browser;
 pub mod nine_patch;
+pub mod particles;
 pub mod settings;
 pub mod spell_progress;
 pub mod task_panel;

@@ -48,6 +48,17 @@ impl SortKey {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct Particle {
+    pub pos: egui::Pos2,
+    pub vy: f32,
+    pub sway: f32,
+    pub phase: f32,
+    pub size: f32,
+    pub life: f32,
+    pub max_life: f32,
+}
+
 #[derive(Default)]
 pub struct ArchiveTab {
     pub name: String,
@@ -172,6 +183,9 @@ pub struct SpellApp {
     /// 非活动标签页的快照；`tabs[active_tab]` 是空占位，活动数据在字段里。
     pub tabs: Vec<ArchiveTab>,
     pub active_tab: usize,
+    pub particles: Vec<Particle>,
+    pub particle_seed: u32,
+    pub particle_accum: f32,
 
     pub runner: TaskRunner,
     pub tasks: Vec<TaskView>,
@@ -242,6 +256,12 @@ impl SpellApp {
             sort_asc: prefs.sort_asc,
             tabs: vec![ArchiveTab::default()],
             active_tab: 0,
+            particles: Vec::new(),
+            particle_seed: SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.subsec_nanos() ^ duration.as_secs() as u32)
+                .unwrap_or(0x9E37_79B9),
+            particle_accum: 0.0,
             runner: TaskRunner::new(2),
             tasks: Vec::new(),
             pending_password: None,
@@ -1192,6 +1212,7 @@ impl eframe::App for SpellApp {
         crate::ui::dialogs::show(self, &ctx);
         crate::ui::settings::show(self, ui);
         crate::ui::drag_overlay(self, &ctx);
+        crate::ui::particles::draw(self, &ctx);
 
         self.maybe_save_settings();
 

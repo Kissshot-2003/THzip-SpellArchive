@@ -179,6 +179,8 @@ pub struct Theme {
     pub resources: HashMap<ResKey, egui::TextureHandle>,
     /// 九宫格切片（左/上/右/下，单位 1x 像素）。
     pub nine_patch: HashMap<ResKey, [u32; 4]>,
+    /// 是否启用花瓣/星屑粒子。
+    pub particles: bool,
     /// 解析后的纹理路径；切换主题时再解码，避免启动加载全部主题。
     pub(crate) paths: HashMap<ResKey, std::path::PathBuf>,
 }
@@ -208,6 +210,7 @@ impl Theme {
             text_map,
             resources: HashMap::new(),
             nine_patch: HashMap::new(),
+            particles: false,
             paths: HashMap::new(),
         }
     }

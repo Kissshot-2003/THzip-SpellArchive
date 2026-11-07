@@ -17,6 +17,9 @@ test = "结界稳固性检测"
 task_running = "咏唱进行中…"
 task_done = "符卡咏唱完成"
 
+[effects]
+particles = true
+
 [resource]
 IconArchive7z = "png/icon-archive.png"
 IconArchiveZip = "png/icon-archive.png"
@@ -42,6 +45,8 @@ StateOk = "png/icon-success.png"
 StateWarn = "png/icon-warning.png"
 StateError = "png/icon-error.png"
 AvatarMain = "png/avatar.png"
+ParticleSakura = "png/particle_sakura.png"
+ParticleSparkle = "png/particle_star.png"
 
 [color]
 accent = "#3DC794"

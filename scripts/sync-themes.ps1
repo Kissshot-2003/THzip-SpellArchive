@@ -19,6 +19,8 @@ foreach ($skin in @('reimu', 'marisa', 'sanae', 'cirno')) {
     Copy-Item (Join-Path $Assets 'progress\progress-base.png') $dst -Force
     Copy-Item (Join-Path $Assets "progress\progress-fill-$skin.png") (Join-Path $dst 'progress-fill.png') -Force
     Copy-Item (Join-Path $Assets "avatars\$skin-256.png") (Join-Path $dst 'avatar.png') -Force
+    Copy-Item (Join-Path $Assets 'particles\particle_sakura.png') (Join-Path $dst 'particle_sakura.png') -Force
+    Copy-Item (Join-Path $Assets 'particles\particle_star.png') (Join-Path $dst 'particle_star.png') -Force
 }
 
 Write-Host "Synced PNG assets into $themesRoot"

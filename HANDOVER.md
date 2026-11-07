@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（85）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（86）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读且单条上限 512 MiB；zip XZ 与加密 LZMA 未支持；exe 未签名。
@@ -42,7 +42,7 @@
 SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
 当前 **zip / 7z / tar 家族可读写，RAR 可读，单文件流可读**；GUI 覆盖打开、后台预检、解压、测试、取消、
 冲突跳过/覆盖/改名/自动编号、创建/追加、zip 多压缩方法、密码、后台主题包导入、主题懒加载、
-多标签页、多选与表头排序（持久化）、设置持久化、拖拽打开与悬停提示、单实例转交、
+多标签页、主题粒子、多选与表头排序（持久化）、设置持久化、拖拽打开与悬停提示、单实例转交、
 关闭到托盘、本地化托盘菜单、右键菜单自检、主题热重载、日志/崩溃落盘。
 
 ### 1.2 能力矩阵
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 85 个测试
+cargo test --workspace                 # 86 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 85 通过；clippy 无告警。
+12. `cargo test --workspace` 86 通过；clippy 无告警。
 
 ---
 
@@ -639,7 +639,7 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 
 注意：`assets/tokens/tokens.json` 里的文件名多数不存在；实际可用的是
 `icons/icon-*.png`、`avatars/*-256.png`、`progress/*.png`。
-PanelBg / 粒子 / 失败态进度图尚未提供，主题里故意缺失并走回退。
+PanelBg / 失败态进度图尚未提供；粒子贴图已从 assets/particles 同步并在 4 个主题启用。
 
 ### 8.2 新增主题
 
@@ -663,7 +663,7 @@ PanelBg / 粒子 / 失败态进度图尚未提供，主题里故意缺失并走�
 
 - 主题根目录：`./themes` → `<exe>/themes` → `<exe>/../../themes`。
 - 路径必须相对、无 `..`，canonicalize 后仍在主题目录内。
-- `sampling_pixel = true` → NEAREST，否则 LINEAR。
+- `sampling_pixel = true` → NEAREST，否则 LINEAR。\n- 资源路径可以是 PNG（image crate）或 SVG（resvg 光栅化，禁止外部资源）。\n- `[effects] particles = true` 且存在 `ParticleSakura` / `ParticleSparkle` 时显示飘落粒子。
 - `schema > 1` 只警告，不 panic。
 - `ThemeStore::load` 只解析 manifest 与路径；`ensure_loaded(ctx)` 才解码当前主题。
 - 主题包导入已执行 500 文件 / 8 MiB 单文件 / 64 MiB 总量限制，并拒绝 exe/dll/bat 等可执行扩展名。
@@ -679,14 +679,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **85** 个测试。
+当前共 **86** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
 | `spell-core` 单元测试 | 40 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接 |
-| `spell-app` 单元测试 | 6 | theme loader 2、prefs 解析/排序 2、自然排序 1、通配匹配 1 |
+| `spell-app` 单元测试 | 7 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配匹配 1 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64 fixtures、XZ 跳过、mtime |\n| `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
@@ -720,7 +720,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 5 | 进度条底图拉伸到任意宽高 | 像素素材边缘不完美 | 按 `theme.scale` 吸附整数倍 |
 | 6 | 已修复 | `ThemeStore` 只解码当前主题，切换时 `ensure_loaded` |
 | 7 | 部分修复 | 排序键/方向已写入 prefs schema 3；搜索支持小写子串与 `*`/`?` 通配 |
-| 8 | 无 SVG 支持 | plain 主题只能用纯色 | 开 `egui_extras` svg |
+| 8 | 已修复 | 资源加载支持 SVG 光栅化（8 MiB / 最长边 2048，不加载外部资源） |
 | 9 | 已修复 | `ui/nine_patch.rs` 支持九宫格；`PanelBg` 已用于归档主面板背景 |
 | 10 | 日志是简单文本，没有级别/模块 | 排查复杂问题不够 | 需要时换 `tracing` |
 | 11 | 已修复 | schema 3；缺失字段由 serde default 补齐，读入后升级版本号 |
@@ -826,7 +826,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（85 通过）
+- [ ] `cargo test --workspace`（86 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

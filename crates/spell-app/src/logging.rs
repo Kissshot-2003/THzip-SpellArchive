@@ -7,6 +7,25 @@ const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
 static LOG: OnceLock<Mutex<Option<File>>> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    Error,
+    Warn,
+    Info,
+    Debug,
+}
+
+impl Level {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warn => "WARN",
+            Self::Info => "INFO",
+            Self::Debug => "DEBUG",
+        }
+    }
+}
+
 pub fn init() {
     let file = crate::prefs::log_path().and_then(|path| {
         if let Some(parent) = path.parent() {
@@ -28,18 +47,39 @@ pub fn init() {
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        write(&format!("PANIC {info}"));
+        log(Level::Error, "panic", &format!("{info}"));
         default_hook(info);
     }));
 
-    write(&format!(
-        "startup version={} pid={}",
-        env!("CARGO_PKG_VERSION"),
-        std::process::id()
-    ));
+    log(
+        Level::Info,
+        "startup",
+        &format!(
+            "version={} pid={}",
+            env!("CARGO_PKG_VERSION"),
+            std::process::id()
+        ),
+    );
 }
 
+/// 兼容旧调用：默认 INFO / app。
 pub fn write(message: &str) {
+    log(Level::Info, "app", message);
+}
+
+pub fn warn(module: &str, message: &str) {
+    log(Level::Warn, module, message);
+}
+
+pub fn error(module: &str, message: &str) {
+    log(Level::Error, module, message);
+}
+
+pub fn debug(module: &str, message: &str) {
+    log(Level::Debug, module, message);
+}
+
+pub fn log(level: Level, module: &str, message: &str) {
     let Some(lock) = LOG.get() else {
         return;
     };
@@ -53,6 +93,23 @@ pub fn write(message: &str) {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
-    let _ = writeln!(file, "[{seconds}] {message}");
+    let _ = writeln!(file, "{}", format_line(seconds, level, module, message));
     let _ = file.flush();
+}
+
+fn format_line(seconds: u64, level: Level, module: &str, message: &str) -> String {
+    format!("[{seconds}] [{} {module}] {message}", level.label())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Level, format_line};
+
+    #[test]
+    fn formats_level_and_module() {
+        assert_eq!(
+            format_line(42, Level::Warn, "prefs", "save failed"),
+            "[42] [WARN prefs] save failed"
+        );
+    }
 }

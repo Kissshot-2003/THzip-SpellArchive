@@ -283,7 +283,7 @@ impl SpellApp {
         app.refresh_dir();
         // exe 移动或升级后，右键菜单里的旧路径自动修正。
         if let Err(err) = crate::shell_menu::refresh_if_installed() {
-            crate::logging::write(&format!("shell menu refresh failed: {err}"));
+            crate::logging::warn("shell_menu", &format!("refresh failed: {err}"));
         }
         app
     }
@@ -505,6 +505,7 @@ impl SpellApp {
             return;
         }
         self.theme_signature = Some(signature);
+        crate::logging::debug("theme", "signature changed, reloading");
 
         let current_id = self.themes.current_id().to_owned();
         let mut themes = ThemeStore::load();
@@ -536,7 +537,7 @@ impl SpellApp {
             sort_asc: self.sort_asc,
         };
         if let Err(err) = prefs.save() {
-            crate::logging::write(&format!("prefs save failed: {err}"));
+            crate::logging::warn("prefs", &format!("save failed: {err}"));
         }
         self.settings_dirty = false;
         self.last_settings_save = Instant::now();
@@ -1118,7 +1119,7 @@ impl SpellApp {
                 self.next_theme_check = Instant::now();
             }
             TaskEvent::Failed { task, error } => {
-                crate::logging::write(&format!("task {task} failed: {error}"));
+                crate::logging::error("task", &format!("{task} failed: {error}"));
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Failed;
                     view.detail = Some(error.clone());

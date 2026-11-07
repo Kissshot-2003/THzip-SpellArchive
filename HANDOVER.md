@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（86）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（87）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读且单条上限 512 MiB；zip XZ 与加密 LZMA 未支持；exe 未签名。
@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 13821 行（含测试）。
+- Rust 约 14042 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 86 个测试
+cargo test --workspace                 # 87 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 86 通过；clippy 无告警。
+12. `cargo test --workspace` 87 通过；clippy 无告警。
 
 ---
 
@@ -608,7 +608,7 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 
 ### 7.14 日志与自然排序
 
-- `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`；启动、任务失败、设置保存失败、
+- `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`（级别/模块前缀）；启动、任务失败、设置保存失败、
   主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
 - 文件浏览器使用 `natural_cmp`：`file2` 排在 `file10` 前，数字段按数值比较。
 - 归档表支持表头排序与多选；排序键和方向写入 `prefs.toml`，重启后保持。\n- 搜索框支持小写子串；含 `*` 或 `?` 时按通配符匹配（不区分大小写）。
@@ -679,14 +679,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **86** 个测试。
+当前共 **87** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
 | `spell-core` 单元测试 | 40 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接 |
-| `spell-app` 单元测试 | 7 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配匹配 1 |
+| `spell-app` 单元测试 | 8 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配匹配 1、日志格式 1 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64 fixtures、XZ 跳过、mtime |\n| `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
@@ -722,7 +722,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 7 | 部分修复 | 排序键/方向已写入 prefs schema 3；搜索支持小写子串与 `*`/`?` 通配 |
 | 8 | 已修复 | 资源加载支持 SVG 光栅化（8 MiB / 最长边 2048，不加载外部资源） |
 | 9 | 已修复 | `ui/nine_patch.rs` 支持九宫格；`PanelBg` 已用于归档主面板背景 |
-| 10 | 日志是简单文本，没有级别/模块 | 排查复杂问题不够 | 需要时换 `tracing` |
+| 10 | 部分修复 | 文本日志已带级别/模块（INFO/WARN/ERROR/DEBUG），未引入 `tracing` |
 | 11 | 已修复 | schema 3；缺失字段由 serde default 补齐，读入后升级版本号 |
 | 12 | 已修复 | 多文件拖入/多标签页；每个归档独立 reader、搜索与选中集 |
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
@@ -826,7 +826,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（86 通过）
+- [ ] `cargo test --workspace`（87 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

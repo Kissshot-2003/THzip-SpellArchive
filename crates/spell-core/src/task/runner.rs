@@ -496,6 +496,11 @@ fn run_task(
                 return Ok(());
             }
 
+            if let Err(error) = validate_theme_entries(reader.entries()) {
+                send(tx, TaskEvent::Failed { task, error });
+                return Ok(());
+            }
+
             let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
             let plan = match reader.plan(&ids, &target, &limits) {
                 Ok(plan) => plan,
@@ -561,6 +566,48 @@ fn run_task(
                     );
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// 主题包安全限制：总数 / 单文件 / 解压总量 / 禁止可执行扩展名。
+fn validate_theme_entries(entries: &[ArchiveEntry]) -> Result<(), String> {
+    const MAX_FILES: usize = 500;
+    const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+    const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+    const FORBIDDEN: &[&str] = &[
+        "exe", "dll", "bat", "cmd", "com", "msi", "ps1", "scr", "vbs", "js", "jse", "wsf", "lnk",
+    ];
+
+    if entries.len() > MAX_FILES {
+        return Err(format!(
+            "主题包条目过多：{}（上限 {MAX_FILES}）",
+            entries.len()
+        ));
+    }
+
+    let mut total = 0u64;
+    for entry in entries {
+        if entry.kind.is_dir() {
+            continue;
+        }
+        if entry.size > MAX_FILE_BYTES {
+            return Err(format!(
+                "主题文件 {} 超过 8 MiB（{} 字节）",
+                entry.display, entry.size
+            ));
+        }
+        total = total.saturating_add(entry.size);
+        if total > MAX_TOTAL_BYTES {
+            return Err("主题包解压后超过 64 MiB".to_owned());
+        }
+        let name = entry.display.to_ascii_lowercase();
+        if let Some(ext) = name.rsplit('.').next()
+            && name.contains('.')
+            && FORBIDDEN.contains(&ext)
+        {
+            return Err(format!("主题包包含不允许的文件类型：{}", entry.display));
         }
     }
     Ok(())

@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（76）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（78）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 未实现；多文件拖拽只开第一个；zip XZ 与加密 LZMA 未支持；exe 未签名。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 76 个测试
+cargo test --workspace                 # 78 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 76 通过；clippy 无告警。
+12. `cargo test --workspace` 78 通过；clippy 无告警。
 
 ---
 
@@ -586,8 +586,8 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 ### 7.13 主题包导入
 
 - 设置页“导入主题包…”选择 zip；要求包内是 `<主题目录>/theme.toml`。
-- 后台 `TaskOp::InstallTheme` 执行：打开、校验 manifest、预检、解压到 `themes/`；
-  冲突策略默认 Skip，UI 不阻塞。
+- 后台 `TaskOp::InstallTheme` 执行：打开、校验 manifest、安全限制（500 文件 / 8 MiB 单文件 /
+  64 MiB 总量、禁止可执行扩展名）、预检、解压到 `themes/`；冲突策略默认 Skip，UI 不阻塞。
 - 完成事件 `ThemeInstalled` 会把 `next_theme_check` 提前，下一次热重载轮询立即生效。
 
 ### 7.14 日志与自然排序
@@ -650,7 +650,7 @@ PanelBg / 粒子 / 失败态进度图尚未提供，主题里故意缺失并走�
 - `sampling_pixel = true` → NEAREST，否则 LINEAR。
 - `schema > 1` 只警告，不 panic。
 - `ThemeStore::load` 只解析 manifest 与路径；`ensure_loaded(ctx)` 才解码当前主题。
-- 尚未执行 8 MiB / 64 MiB / 500 文件限制；主题包导入前必须补。
+- 主题包导入已执行 500 文件 / 8 MiB 单文件 / 64 MiB 总量限制，并拒绝 exe/dll/bat 等可执行扩展名。
 
 ---
 
@@ -663,7 +663,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **76** 个测试。
+当前共 **78** 个测试。
 
 ### 9.2 测试分布
 
@@ -673,7 +673,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `spell-app` 单元测试 | 5 | theme loader 2、prefs 解析/排序 2、自然排序 1 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64 fixtures、XZ 跳过、mtime |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
-| `tests/task_runner.rs` | 7 | Open→Plan→Extract、取消、Pack、主题导入/拒绝、失败事件 |
+| `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
 | `tests/tar_write.rs` | 2 | 6 种 tar 容器创建往返、密码拒绝 |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
@@ -810,7 +810,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（76 通过）
+- [ ] `cargo test --workspace`（78 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / tar.gz / 单文件 gz，条目真实显示

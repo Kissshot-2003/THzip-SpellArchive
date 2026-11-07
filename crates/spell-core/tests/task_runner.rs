@@ -363,6 +363,75 @@ fn rejects_theme_without_manifest() {
 }
 
 #[test]
+fn rejects_theme_with_executables() {
+    let dir = TempDir::new("theme-exe");
+    let archive = dir.path().join("bad.zip");
+    write_zip(
+        &archive,
+        &[
+            ("mytheme/theme.toml", b"schema = 1\n"),
+            ("mytheme/evil.exe", b"MZ"),
+        ],
+    );
+    let target = dir.path().join("themes");
+    std::fs::create_dir_all(&target).unwrap();
+
+    let mut runner = TaskRunner::new(1);
+    let handle = runner.submit(TaskOp::InstallTheme {
+        archive,
+        target,
+        limits: spell_core::Limits::default(),
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::ThemeInstalled { task, .. } | TaskEvent::Failed { task, .. }
+                if *task == handle.id
+        )
+    });
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TaskEvent::Failed { error, .. } if error.contains("不允许")
+    )));
+}
+
+#[test]
+fn rejects_theme_with_too_many_entries() {
+    let dir = TempDir::new("theme-many");
+    let archive = dir.path().join("many.zip");
+    let file = std::fs::File::create(&archive).unwrap();
+    let mut writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default();
+    writer.start_file("mytheme/theme.toml", options).unwrap();
+    for index in 0..500 {
+        writer
+            .start_file(format!("mytheme/png/{index}.png"), options)
+            .unwrap();
+    }
+    writer.finish().unwrap();
+
+    let target = dir.path().join("themes");
+    std::fs::create_dir_all(&target).unwrap();
+    let mut runner = TaskRunner::new(1);
+    let handle = runner.submit(TaskOp::InstallTheme {
+        archive,
+        target,
+        limits: spell_core::Limits::default(),
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::ThemeInstalled { task, .. } | TaskEvent::Failed { task, .. }
+                if *task == handle.id
+        )
+    });
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TaskEvent::Failed { error, .. } if error.contains("条目过多")
+    )));
+}
+
+#[test]
 fn missing_password_reports_need_password() {
     let dir = TempDir::new("password");
     let archive = dir.path().join("empty.zip");

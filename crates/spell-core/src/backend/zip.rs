@@ -27,6 +27,25 @@ pub struct ZipReader {
     password: Option<SecretString>,
 }
 
+/// zip 条目读取器。LZMA（方法 14）由 lzma-rust2 自行解码：
+/// zip crate 的 LZMA 解压器不认识 ZIP 内部头，会把合法条目误判为格式错误。
+enum ZipEntryReader<'a> {
+    Plain(Box<zip::read::ZipFile<'a, BufReader<File>>>),
+    Lzma(Box<lzma_rust2::LzmaReader<zip::read::ZipFile<'a, BufReader<File>>>>),
+}
+
+impl std::io::Read for ZipEntryReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(reader) => reader.read(buf),
+            Self::Lzma(reader) => reader.read(buf),
+        }
+    }
+}
+
+/// ZIP 的 LZMA 字典上限，与默认安全限额的字典上限保持一致。
+const LZMA_DICT_LIMIT: u32 = 512 * 1024 * 1024;
+
 impl ZipReader {
     pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
         let file = File::open(path).map_err(|err| ArchiveError::Open(err.to_string()))?;
@@ -356,21 +375,61 @@ impl ArchiveReader for ZipReader {
 }
 
 impl ZipReader {
-    fn open_entry(
-        &mut self,
-        id: EntryId,
-    ) -> Result<zip::read::ZipFile<'_, BufReader<File>>, ArchiveError> {
+    fn open_entry(&mut self, id: EntryId) -> Result<ZipEntryReader<'_>, ArchiveError> {
         let index = id as usize;
+        let method = self.entries[index].method;
+        let size = self.entries[index].size;
         let encrypted = self.entries[index].encrypted;
+
+        if matches!(method, Method::Lzma) {
+            if encrypted {
+                return Err(ArchiveError::Unsupported(
+                    "加密的 LZMA zip 条目暂不支持解压".to_owned(),
+                ));
+            }
+            let mut raw = self
+                .archive_mut()?
+                .by_index_raw(index)
+                .map_err(map_entry_error)?;
+
+            // ZIP LZMA 头：2 字节版本 + 2 字节属性长度 + 5 字节 LZMA 属性 + 数据。
+            let mut header = [0u8; 4];
+            raw.read_exact(&mut header).map_err(ArchiveError::Io)?;
+            let props_size = usize::from(u16::from_le_bytes([header[2], header[3]]));
+            if !(5..=64).contains(&props_size) {
+                return Err(ArchiveError::Unsupported(
+                    "zip LZMA 头属性长度异常".to_owned(),
+                ));
+            }
+            let mut props = vec![0u8; props_size];
+            raw.read_exact(&mut props).map_err(ArchiveError::Io)?;
+
+            let dict_size = u32::from_le_bytes([props[1], props[2], props[3], props[4]]);
+            if dict_size > LZMA_DICT_LIMIT {
+                return Err(ArchiveError::Unsupported(format!(
+                    "LZMA 字典 {dict_size} 字节超过上限 {LZMA_DICT_LIMIT}"
+                )));
+            }
+
+            let reader =
+                lzma_rust2::LzmaReader::new_with_props(raw, size, props[0], dict_size, None)
+                    .map_err(|err| ArchiveError::Other(format!("LZMA 解码器初始化失败: {err}")))?;
+            return Ok(ZipEntryReader::Lzma(Box::new(reader)));
+        }
 
         let password = self.password.clone();
         match (encrypted, password.as_ref()) {
             (true, Some(password)) => self
                 .archive_mut()?
                 .by_index_decrypt(index, password.expose().as_bytes())
+                .map(|file| ZipEntryReader::Plain(Box::new(file)))
                 .map_err(map_entry_error),
             (true, None) => Err(ArchiveError::PasswordRequired),
-            (false, _) => self.archive_mut()?.by_index(index).map_err(map_entry_error),
+            (false, _) => self
+                .archive_mut()?
+                .by_index(index)
+                .map(|file| ZipEntryReader::Plain(Box::new(file)))
+                .map_err(map_entry_error),
         }
     }
 }
@@ -415,15 +474,16 @@ fn map_method(method: zip::CompressionMethod) -> Method {
     match method {
         zip::CompressionMethod::Stored => Method::Store,
         zip::CompressionMethod::Deflated => Method::Deflate,
+        zip::CompressionMethod::Deflate64 => Method::Deflate64,
+        zip::CompressionMethod::Bzip2 => Method::Bzip2,
+        zip::CompressionMethod::Zstd => Method::Zstd,
+        zip::CompressionMethod::Ppmd => Method::Ppmd,
         zip::CompressionMethod::Aes => Method::Unknown(99),
         // 未启用的压缩方法会落到 Unsupported(id)，按 zip 规范编号还原。
+        // LZMA 由本模块自行解码，不走 zip crate 的解压器。
         zip::CompressionMethod::Unsupported(id) => match id {
-            9 => Method::Deflate64,
-            12 => Method::Bzip2,
             14 => Method::Lzma,
-            93 => Method::Zstd,
             95 => Method::Xz,
-            98 => Method::Ppmd,
             other => Method::Unknown(other),
         },
         other => Method::Unknown(other.to_u16()),

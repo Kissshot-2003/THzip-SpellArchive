@@ -220,3 +220,83 @@ fn test_command_verifies_crc() {
     assert_eq!(report.failed.len(), 0);
     assert_eq!(report.crc_mismatch.len(), 0);
 }
+
+fn write_zip_with_method(path: &Path, name: &str, data: &[u8], method: zip::CompressionMethod) {
+    let file = std::fs::File::create(path).unwrap();
+    let mut writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default().compression_method(method);
+    writer.start_file(name, options).unwrap();
+    writer.write_all(data).unwrap();
+    writer.finish().unwrap();
+}
+
+#[test]
+fn non_deflate_methods_read_and_extract() {
+    use spell_core::types::Method;
+
+    let dir = TempDir::new("methods");
+    let payload = b"SpellArchive non-deflate method test line\n".repeat(64);
+    // LZMA / XZ 由 zip 写入端以外的方式生成，见下方 fixtures 用例。
+    let cases = [
+        (zip::CompressionMethod::Bzip2, Method::Bzip2),
+        (zip::CompressionMethod::Zstd, Method::Zstd),
+        (zip::CompressionMethod::Ppmd, Method::Ppmd),
+    ];
+
+    for (index, (zip_method, expected)) in cases.into_iter().enumerate() {
+        let archive = dir.path().join(format!("method-{index}.zip"));
+        write_zip_with_method(&archive, "sample.txt", &payload, zip_method);
+
+        let reader = backend::open(&archive, None).unwrap();
+        assert_eq!(reader.entries()[0].method, expected, "{zip_method:?}");
+
+        let target = dir.path().join(format!("out-{index}"));
+        let report = extract_all(&archive, &target, DecisionTable::default());
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(std::fs::read(target.join("sample.txt")).unwrap(), payload);
+
+        let mut reader = backend::open(&archive, None).unwrap();
+        let cancel = CancelToken::new();
+        let mut sink = spell_core::safety::VerifySink::with_limits(Limits::default());
+        let report = reader.test(&cancel, &mut sink).unwrap();
+        assert_eq!(report.failed.len(), 0, "{zip_method:?}");
+        assert_eq!(report.crc_mismatch.len(), 0, "{zip_method:?}");
+    }
+}
+
+#[test]
+fn lzma_and_deflate64_fixtures_extract() {
+    use spell_core::types::Method;
+
+    let expected = (1..=200)
+        .map(|index| format!("SpellArchive compression fixture line {index} 0123456789ABCDEF"))
+        .collect::<Vec<_>>()
+        .join("\r\n");
+
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let dir = TempDir::new("fixtures");
+    let cases = [
+        ("lzma.zip", Method::Lzma),
+        ("deflate64.zip", Method::Deflate64),
+    ];
+
+    for (file, expected_method) in cases {
+        let archive = fixtures.join(file);
+        let reader = backend::open(&archive, None).unwrap();
+        assert_eq!(reader.entries()[0].method, expected_method, "{file}");
+        assert_eq!(reader.entries()[0].size, expected.len() as u64, "{file}");
+
+        let target = dir.path().join(file);
+        let report = extract_all(&archive, &target, DecisionTable::default());
+        assert!(report.failed.is_empty(), "{file}: {:?}", report.failed);
+        let extracted = std::fs::read(target.join("payload.txt")).unwrap();
+        assert_eq!(String::from_utf8(extracted).unwrap(), expected, "{file}");
+
+        let mut reader = backend::open(&archive, None).unwrap();
+        let cancel = CancelToken::new();
+        let mut sink = spell_core::safety::VerifySink::with_limits(Limits::default());
+        let report = reader.test(&cancel, &mut sink).unwrap();
+        assert_eq!(report.failed.len(), 0, "{file}");
+        assert_eq!(report.crc_mismatch.len(), 0, "{file}");
+    }
+}

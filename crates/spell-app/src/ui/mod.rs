@@ -133,11 +133,17 @@ pub fn status_bar(app: &mut SpellApp, root: &mut egui::Ui) {
     let theme_name = app.themes.current().name.clone();
     let locale = app.locale.label();
     let total = app.entries.len();
-    let selected = app
-        .selected
-        .and_then(|index| app.entries.get(index))
-        .map(|entry| entry.display.to_string())
-        .unwrap_or_default();
+    let selected = match app.selected.len() {
+        0 => String::new(),
+        1 => app
+            .selected
+            .iter()
+            .next()
+            .and_then(|&index| app.entries.get(index))
+            .map(|entry| format!("已选：{}", entry.display))
+            .unwrap_or_default(),
+        count => format!("已选 {count} 条"),
+    };
 
     egui::Panel::bottom("status_bar")
         .exact_size(26.0)
@@ -156,7 +162,7 @@ pub fn status_bar(app: &mut SpellApp, root: &mut egui::Ui) {
                     );
                     if !selected.is_empty() {
                         ui.label(
-                            egui::RichText::new(format!("已选：{selected}"))
+                            egui::RichText::new(selected)
                                 .size(12.0)
                                 .color(palette.text_sub),
                         );

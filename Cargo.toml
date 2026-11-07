@@ -25,6 +25,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 zip = { version = "4.6", default-features = false, features = [
     "deflate",
     "deflate-flate2-zlib-rs",
+    "deflate64",
+    "bzip2",
+    "zstd",
+    "ppmd",
     "aes-crypto",
 ] }
 crc32fast = "1"

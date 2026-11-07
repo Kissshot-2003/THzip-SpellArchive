@@ -14,6 +14,16 @@ use spell_core::task::{
 };
 use spell_core::types::{ArchiveEntry, ArchiveKind, Method};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKey {
+    Name,
+    Size,
+    Packed,
+    Ratio,
+    Method,
+    Time,
+}
+
 pub struct DirItem {
     pub name: String,
     pub is_dir: bool,
@@ -90,7 +100,10 @@ pub struct SpellApp {
     pub reader: Option<SharedReader>,
     pub entries: Vec<ArchiveEntry>,
     pub search: String,
-    pub selected: Option<usize>,
+    pub selected: std::collections::BTreeSet<usize>,
+    pub last_selected: Option<usize>,
+    pub sort_key: SortKey,
+    pub sort_asc: bool,
 
     pub runner: TaskRunner,
     pub tasks: Vec<TaskView>,
@@ -149,7 +162,10 @@ impl SpellApp {
             reader: None,
             entries: Vec::new(),
             search: String::new(),
-            selected: None,
+            selected: std::collections::BTreeSet::new(),
+            last_selected: None,
+            sort_key: SortKey::Name,
+            sort_asc: true,
             runner: TaskRunner::new(2),
             tasks: Vec::new(),
             pending_password: None,
@@ -340,14 +356,44 @@ impl SpellApp {
 
     pub fn filtered_entries(&self) -> Vec<usize> {
         let needle = self.search.trim().to_lowercase();
-        self.entries
+        let mut rows: Vec<usize> = self
+            .entries
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
                 needle.is_empty() || entry.display.to_lowercase().contains(&needle)
             })
             .map(|(index, _)| index)
-            .collect()
+            .collect();
+
+        rows.sort_by(|&a, &b| {
+            let left = &self.entries[a];
+            let right = &self.entries[b];
+            let order = match self.sort_key {
+                SortKey::Name => natural_cmp(&left.display, &right.display),
+                SortKey::Size => left.size.cmp(&right.size),
+                SortKey::Packed => left.packed.cmp(&right.packed),
+                SortKey::Ratio => left
+                    .ratio()
+                    .partial_cmp(&right.ratio())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                SortKey::Method => left.method.label().cmp(right.method.label()),
+                SortKey::Time => left.mtime.cmp(&right.mtime),
+            };
+            if self.sort_asc {
+                order
+            } else {
+                order.reverse()
+            }
+            .then_with(|| natural_cmp(&left.display, &right.display))
+        });
+        rows
+    }
+
+    pub fn select_all_filtered(&mut self) {
+        for index in self.filtered_entries() {
+            self.selected.insert(index);
+        }
     }
 
     /// 工具栏 / 文件列表入口：弹原生文件对话框后启动后台打开任务。
@@ -454,9 +500,10 @@ impl SpellApp {
             return;
         };
 
-        let ids: Vec<u32> = match self.selected {
-            Some(index) => vec![index as u32],
-            None => (0..self.entries.len() as u32).collect(),
+        let ids: Vec<u32> = if self.selected.is_empty() {
+            (0..self.entries.len() as u32).collect()
+        } else {
+            self.selected.iter().map(|&index| index as u32).collect()
         };
         let name = self.archive_name.clone();
         let handle = self.runner.submit(TaskOp::Plan {
@@ -704,7 +751,8 @@ impl SpellApp {
                 self.reader = Some(reader);
                 self.entries = entries.to_vec();
                 self.search.clear();
-                self.selected = None;
+                self.selected.clear();
+                self.last_selected = None;
                 self.status = format!(
                     "已打开 {}：{} 个条目",
                     self.archive_name,
@@ -938,7 +986,7 @@ impl eframe::App for SpellApp {
 }
 
 /// 自然排序：`file2` 排在 `file10` 前；数字段按数值比较。
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 
     let left: Vec<char> = a.chars().collect();

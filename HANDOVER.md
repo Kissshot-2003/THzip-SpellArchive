@@ -3,7 +3,7 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（格式读写、桌面集成、日志、主题包导入、打包脚本完成）
+> 最后更新：2026-11（zip 多方法解压、格式读写、桌面集成、日志、主题包导入、打包脚本完成）
 
 ---
 
@@ -21,6 +21,18 @@
 工程路径：`C:\Users\karl2\Desktop\SpellArchive\spell_archive`
 素材目录：`C:\Users\karl2\Desktop\SpellArchive\assets`（与工程同级）
 
+### 0.1 30 秒摘要
+
+- **能做什么**：zip / 7z / tar 家族读写；zip 多方法解压（Deflate64/BZip2/Zstd/PPMd/LZMA）；
+  单文件流读取；AES-256；固实 7z；分卷 7z；
+  后台预检；多选/排序；创建/追加；密码；主题包导入；托盘、右键菜单、单实例、设置持久化。
+- **怎么跑**：`cargo test --workspace`（65）；`cargo clippy --workspace --all-targets -- -D warnings`；
+  `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
+- **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
+- **当前风险**：RAR 未实现；多文件拖拽只开第一个；zip XZ 与加密 LZMA 未支持；exe 未签名。
+- **工作区状态**：最新提交 `4c360e0`，工作区有未提交改动（多选/排序、zip 多方法解压、文档），无远端。
+- **下一步建议**：先提交当前批次，再决定 RAR、标签页/多文件、主题视觉增强或签名。
+
 ---
 
 ## 1. 项目现状
@@ -28,15 +40,15 @@
 ### 1.1 一句话
 
 SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
-当前 **zip / 7z / tar 家族可读写，单文件流可读**；GUI 覆盖打开、预检、解压、测试、取消、
-创建/追加、密码、后台预检、主题包导入、设置持久化、拖拽打开与悬停提示、单实例转交、
+当前 **zip / 7z / tar 家族可读写，单文件流可读**；GUI 覆盖打开、后台预检、解压、测试、取消、
+创建/追加、密码、主题包导入、多选与表头排序、设置持久化、拖拽打开与悬停提示、单实例转交、
 关闭到托盘、右键菜单、主题热重载、日志/崩溃落盘。
 
 ### 1.2 能力矩阵
 
 | 格式 | 读取 | 创建 | 追加 | 加密 | 备注 |
 |---|---|---|---|---|---|
-| zip | 是 | 是 | 是 | AES-256 | Store/Deflate；zip64；同名 `~1` |
+| zip | 是 | 是 | 是 | AES-256 | Store/Deflate 写入；Store/Deflate/Deflate64/BZip2/Zstd/PPMd/LZMA 读取；zip64；同名 `~1` |
 | 7z | 是 | 是 | 否 | AES-256 头加密 | 固实包；LZMA2/COPY 写入 |
 | tar | 是 | 是 | 否 | 否 | PAX / GNU longname 由 tar crate 处理 |
 | tar.gz / tgz | 是 | 是 | 否 | 否 | 无 `.tar` 扩展名时探测内层 ustar |
@@ -50,10 +62,10 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 11450 行（含测试）。
-- 最新提交：`28cd385 feat: add 7z/tar/stream support, encryption, prefs and desktop integration`
+- Rust 约 11570 行（含测试）。
+- 最新提交：`4c360e0 feat: background planning, theme import, logging, volume join and packaging`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
-- 当前工作区有 23 个文件未提交（分卷/资源/预检/主题包/日志/打包等），没有配置远端。
+- 当前工作区有未提交改动（多选/排序、zip 多方法解压、文档），没有配置远端。
 - 接手第一件事：`git status` → 跑测试 → 决定是否提交当前批次。
 
 ---
@@ -109,7 +121,8 @@ tar 家族忽略。
 6. 加密：zip / 7z 勾选 AES-256 创建；无密码打开 7z 包头会提示密码。
 7. 设置：切主题/语言后退出重开，设置应保持（`%APPDATA%\SpellArchive\prefs.toml`）。
 8. 拖拽：把归档拖进窗口应直接打开；拖目录应切换左侧浏览目录。
-9. `cargo test --workspace` 63 通过；clippy 无告警。
+9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
+10. `cargo test --workspace` 63 通过；clippy 无告警。
 
 ---
 
@@ -267,13 +280,16 @@ UI 选目标目录
 
 读取：
 
-- `zip = 4.6`，启用 `deflate`、`deflate-flate2-zlib-rs`、`aes-crypto`。
+- `zip = 4.6`，启用 `deflate`、`deflate-flate2-zlib-rs`、`deflate64`、`bzip2`、`zstd`、`ppmd`、`aes-crypto`。
 - 名字用 `name_raw()` + `name_codec` 还原，不直接吃 CP437。
 - 支持 AES 解压；AES 条目 CRC 字段为 0，读取时置 `crc32=None`，避免误报。
 - `plan()` 负责路径净化、冲突、重解析点、超长、链接、可疑显示名。
 - 解压走 64 KiB 流式读取 → `ExtractDirSink`（预算 + CRC + 原子写）。
 - 同名/大小写冲突自动 `~1` 改名。
-- 未启用的压缩方法（bzip2/zstd/lzma 等）会报 `Unsupported`，见技术债。
+- LZMA（方法 14）由 `lzma-rust2` 自行解码：zip crate 的解压器不识别 ZIP 内部 LZMA 头。
+  解析 2 字节版本 + 2 字节属性长度 + 5 字节属性后再喂给 `LzmaReader::new_with_props`；
+  字典上限 512 MiB，超过直接拒绝；加密的 LZMA 条目暂不支持。
+- XZ（方法 95）及未启用方法仍报 `Unsupported`，见技术债。
 
 写入：
 
@@ -452,6 +468,10 @@ pub enum TaskOp {
 `egui_extras::TableBuilder`，不要手工 `add_sized` 拼表头。
 列宽：名称 280（可裁切）、大小 84、压缩后 84、比率 60、方法 72、修改时间 110、标记 remainder。
 
+- 表头按钮可排序（名称/大小/压缩后/比率/方法/时间），再点一次反向；名称使用自然序。
+- 选中集合是 `BTreeSet<usize>`：单击单选、Ctrl 切换、Shift 连选；“全选/清空”作用于当前搜索结果。
+- 解压时若选中集合非空，只解压这些条目；否则解压全部。
+
 ### 7.3 任务行
 
 固定列宽：名称 240 / 速度 96 / 状态 120 / 取消 24，间距共用；
@@ -543,7 +563,7 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 - `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`；启动、任务失败、设置保存失败、
   主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
 - 文件浏览器使用 `natural_cmp`：`file2` 排在 `file10` 前，数字段按数值比较。
-- 归档表保持包内顺序，未做表头排序（技术债 #7）。
+- 归档表支持表头排序与多选；排序状态暂不持久化（技术债 #7）。
 
 ### 7.15 打包
 
@@ -610,7 +630,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **62** 个测试。
+当前共 **65** 个测试。
 
 ### 9.2 测试分布
 
@@ -618,7 +638,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 |---|---:|---|
 | `spell-core` 单元测试 | 32 | path_sanitize、display_guard、bomb、atomic_fs、worker、plan、name_codec、volume 读取+分卷、sevenz、stream |
 | `spell-app` 单元测试 | 4 | theme loader 2、prefs 解析 1、自然排序 1 |
-| `tests/zip_backend.rs` | 8 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC |
+| `tests/zip_backend.rs` | 10 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64 fixtures |
 | `tests/zip_write.rs` | 7 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES |
 | `tests/task_runner.rs` | 5 | Open→Plan→Extract、取消、Pack、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
@@ -647,23 +667,19 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 1 | `task_panel` 每帧 clone 整个 Theme（含纹理 HashMap） | 轻微浪费 | `Arc<Theme>` 或只克隆纹理 id |
 | 2 | 冲突策略 Rename/AutoNumber 没有真正改名 | UI 只能选跳过/覆盖 | 在 `resolve_all` 对已存在文件生成 `~n` |
 | 3 | 主题包导入仍在 UI 线程执行 | 超大主题包会短暂卡顿 | 需要时改成 `TaskOp::InstallTheme` |
-| 4 | 只支持单条选中，没有多选/全选反选 | 批量操作不顺手 | 表格加多选集合 |
+| 4 | 多选只有解压能用，没有批量删除/批量移动 | 批量操作仍有限 | 视需求加右键批量菜单 |
 | 5 | 进度条底图拉伸到任意宽高 | 像素素材边缘不完美 | 按 `theme.scale` 吸附整数倍 |
 | 6 | 启动加载全部主题纹理 | 启动内存/时间偏高 | 懒加载，切换再解码 |
-| 7 | 归档条目保持包内顺序；搜索只做小写子串 | 列表不适合按名称浏览 | 表头排序 + 自然序（文件浏览器已用自然序） |
+| 7 | 归档表排序状态不持久化；搜索只做小写子串 | 重启后回到名称升序 | 排序写进 prefs；搜索支持通配/正则 |
 | 8 | 无 SVG 支持 | plain 主题只能用纯色 | 开 `egui_extras` svg |
 | 9 | `[resource_nine_patch]` 解析但未使用 | 面板背景不能九宫格 | `ui/nine_patch.rs` |
 | 10 | 日志是简单文本，没有级别/模块 | 排查复杂问题不够 | 需要时换 `tracing` |
 | 11 | `prefs.toml` 目前只有 schema 1→2 的被动补齐 | 再改字段需显式迁移 | 在 `Prefs::load` 里继续加分支 |
-| 12 | 拖拽多个文件只打开第一个 | 批量拖入时其余项目被忽略 | drop 处理后逐个打开或提示数量 |
-| 28 | 单实例 handoff 只转发第一个路径，且靠 250/500ms 文件轮询 | 多文件转交只开第一个；空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
-| 29 | 托盘菜单与关闭行为没有跟随语言/主题刷新 | 切语言后托盘仍是中文 | 语言变更时重建菜单 |
-| 30 | 托盘菜单文案固定中文，切语言不刷新 | 英文界面下托盘仍是中文 | 语言变更时重建托盘菜单 |
-| 31 | 右键菜单记录的是当前 exe 绝对路径 | 移动/升级 exe 后菜单失效 | 安装包升级后重新写注册表，或启动时自检路径 |
+| 12 | 拖拽多个文件只打开第一个 | 批量拖入时其余项目被忽略 | 需要标签页/多 reader；或提示数量 |
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
-| 14 | 当前批次 34 个文件未提交 | 无回滚点 | 确认测试后提交 |
+| 14 | 当前批次未提交 | 无回滚点 | 确认测试后提交 |
 | 15 | exe 未做代码签名 | SmartScreen 可能拦截 | 发布前购买/配置签名证书 |
-| 16 | zip 只启用 deflate/aes，读写都不支持 bzip2/zstd/lzma | 遇到会报 Unsupported | 按需加 zip features |
+| 16 | zip 写入只有 Store/Deflate；XZ 读取未启用 | 创建时不能选 bzip2/zstd/lzma；XZ 包报 Unsupported | 读取已覆盖 Deflate64/BZip2/Zstd/PPMd/LZMA；XZ 需要时再评估 |
 | 17 | zip 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 增量原地追加风险高，暂不做 |
 | 18 | 打包扫描跳过符号链接 | 链接内容不会进包 | 需要时提供“跟随链接”+ 环检测 |
 | 19 | 追加模式不能设置新密码 | 加密包追加的新条目不加密 | 明确提示或禁止追加加密包 |
@@ -675,6 +691,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 25 | tar 写入不保留原始权限/目录 mtime | 解压后 644/755 | 从 metadata 读取 mode/mtime |
 | 26 | tar 家族不支持追加与加密 | 只能新建 | 追加需重写整包 |
 | 27 | RAR 未实现 | 只能识别 magic | libarchive 或可选 C 后端 |
+| 28 | 单实例 handoff 只转发第一个路径，且靠 250/500ms 文件轮询 | 多文件转交只开第一个；空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
+| 29 | 托盘菜单文案固定中文，切语言不刷新 | 英文界面下托盘仍是中文 | 语言变更时重建菜单 |
+| 30 | 右键菜单记录的是当前 exe 绝对路径 | 移动/升级 exe 后菜单失效 | 安装包升级后重新写注册表，或启动时自检路径 |
 
 ---
 
@@ -691,8 +710,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### P2 功能
 
 - 九宫格面板、SVG 图标、粒子效果。
-- 多选、全选反选、批量解压。
-- 归档表表头排序、搜索增强（文件浏览器已自然排序）。
+- 搜索增强（通配/正则）与排序持久化。
 - 语言包扩展、字体 fallback（内嵌 Noto Sans SC 子集）。
 - `tracing` 结构化日志（当前是文本日志）。
 - 代码签名；Inno 脚本已就绪。
@@ -700,7 +718,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### 格式增强
 
-- zip：启用 bzip2/zstd/lzma 解码；Deflate64。
+- zip：XZ 解码；写入端可选 BZip2/Zstd；加密 LZMA 条目。
 - 7z：固实包压缩字节进度；可选追加（需重写）；缺少卷号时给出缺失列表。
 - tar：保留权限/mtime；可选追加/加密。
 - RAR：可选特性或外部后端（注意许可证与单 exe 约束）。
@@ -758,7 +776,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（63 通过）
+- [ ] `cargo test --workspace`（65 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / tar.gz / 单文件 gz，条目真实显示
@@ -775,11 +793,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 设置页切换“关闭窗口时最小化到托盘”，重开程序后保持
 - [ ] 导入一个 `<主题>/theme.toml` 的 zip，主题出现在下拉框
 - [ ] 解压时预检在后台（快速点其他 UI 不卡），随后弹预检框
+- [ ] 归档表点“全选”后解压只处理选中项；点表头可切换排序
 - [ ] `%APPDATA%\SpellArchive\spellarchive.log` 有启动记录；panic 会落盘
 - [ ] `scripts/package.ps1` 能产出 `dist/SpellArchive/`
 - [ ] `(Get-Item target/debug/spell_archive.exe).VersionInfo` 有 FileDescription/FileVersion
 - [ ] 确认 `spell-core` 依赖树无 egui
-- [ ] 检查 `git status`，决定是否提交当前 23 个文件
+- [ ] 检查 `git status`，决定是否提交当前 5 个文件
 - [ ] 确认素材许可证边界（代码 MIT / 素材 CC BY-NC-SA 4.0）
 
 ---

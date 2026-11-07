@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 
-use crate::app::SpellApp;
+use crate::app::{SortKey, SpellApp};
 use crate::i18n::TextKey;
 use crate::theme::ResKey;
 use crate::ui::format_bytes;
@@ -29,6 +29,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
         .unwrap_or_default();
     let search_hint = app.tr.t(TextKey::SearchHint);
     let empty_text = app.tr.t(TextKey::EmptyArchive);
+    let rows = app.filtered_entries();
 
     egui::CentralPanel::default().show(root, |ui| {
         ui.add_space(4.0);
@@ -51,11 +52,19 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 if response.changed() {
                     app.search = search;
                 }
+                if !rows.is_empty() {
+                    if ui.small_button("清空").clicked() {
+                        app.selected.clear();
+                        app.last_selected = None;
+                    }
+                    if ui.small_button("全选").clicked() {
+                        app.select_all_filtered();
+                    }
+                }
             });
         });
         ui.add_space(2.0);
 
-        let rows = app.filtered_entries();
         if rows.is_empty() {
             ui.separator();
             ui.add_space(24.0);
@@ -85,6 +94,10 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             .texture(ResKey::IconArchiveEncrypted)
             .map(|tex| tex.id());
         let mut clicked = None;
+        let mut header_click = None;
+        let modifiers = ui.input(|input| input.modifiers);
+        let additive = modifiers.command || modifiers.ctrl;
+        let range = modifiers.shift;
 
         // TableBuilder 让表头与数据行共用同一套列宽，不会再出现列错位。
         TableBuilder::new(ui)
@@ -100,22 +113,22 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             .column(Column::remainder().clip(true))
             .header(24.0, |mut header| {
                 header.col(|ui| {
-                    ui.strong("名称");
+                    sort_header(ui, app, SortKey::Name, "名称", &mut header_click);
                 });
                 header.col(|ui| {
-                    ui.strong("大小");
+                    sort_header(ui, app, SortKey::Size, "大小", &mut header_click);
                 });
                 header.col(|ui| {
-                    ui.strong("压缩后");
+                    sort_header(ui, app, SortKey::Packed, "压缩后", &mut header_click);
                 });
                 header.col(|ui| {
-                    ui.strong("比率");
+                    sort_header(ui, app, SortKey::Ratio, "比率", &mut header_click);
                 });
                 header.col(|ui| {
-                    ui.strong("方法");
+                    sort_header(ui, app, SortKey::Method, "方法", &mut header_click);
                 });
                 header.col(|ui| {
-                    ui.strong("修改时间");
+                    sort_header(ui, app, SortKey::Time, "修改时间", &mut header_click);
                 });
                 header.col(|ui| {
                     ui.strong("标记");
@@ -125,7 +138,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 body.rows(ROW_H, rows.len(), |mut row| {
                     let index = rows[row.index()];
                     let entry = &entries[index];
-                    let selected = app.selected == Some(index);
+                    let selected = app.selected.contains(&index);
                     let guard = spell_core::safety::guard_display(&entry.display);
 
                     row.col(|ui| {
@@ -205,7 +218,62 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             });
 
         if let Some(index) = clicked {
-            app.selected = Some(index);
+            if range {
+                if let Some(anchor) = app.last_selected {
+                    if !additive {
+                        app.selected.clear();
+                    }
+                    let (low, high) = if anchor <= index {
+                        (anchor, index)
+                    } else {
+                        (index, anchor)
+                    };
+                    for row in low..=high {
+                        app.selected.insert(row);
+                    }
+                } else {
+                    app.selected.clear();
+                    app.selected.insert(index);
+                }
+            } else if additive {
+                if !app.selected.remove(&index) {
+                    app.selected.insert(index);
+                }
+            } else {
+                app.selected.clear();
+                app.selected.insert(index);
+            }
+            app.last_selected = Some(index);
+        }
+
+        if let Some(key) = header_click {
+            if app.sort_key == key {
+                app.sort_asc = !app.sort_asc;
+            } else {
+                app.sort_key = key;
+                app.sort_asc = true;
+            }
         }
     });
+}
+
+fn sort_header(
+    ui: &mut egui::Ui,
+    app: &SpellApp,
+    key: SortKey,
+    text: &str,
+    clicked: &mut Option<SortKey>,
+) {
+    let label = if app.sort_key == key {
+        format!("{text} {}", if app.sort_asc { "↑" } else { "↓" })
+    } else {
+        text.to_owned()
+    };
+    let response = ui.add(egui::Button::new(egui::RichText::new(label).strong()).frame(false));
+    if response.clicked() {
+        *clicked = Some(key);
+    }
+    if app.sort_key == key {
+        response.on_hover_text("点击切换升序 / 降序");
+    }
 }

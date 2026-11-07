@@ -12,8 +12,10 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let ctx = root.ctx().clone();
     let prev_locale = app.locale;
     let prev_standard = app.tr.prefer_standard;
+    let prev_close_to_tray = app.close_to_tray;
     let shell_installed = crate::shell_menu::is_installed();
     let mut shell_want = shell_installed;
+    let mut import_theme = false;
     let mut open = true;
     let title = app.tr.t(TextKey::Settings);
     let theme_label = app.tr.t(TextKey::Theme);
@@ -77,12 +79,20 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 ui.selectable_value(&mut app.locale, Locale::EnUs, "English");
             });
 
+            ui.add_space(6.0);
+            ui.checkbox(&mut app.close_to_tray, "关闭窗口时最小化到托盘");
+
             if cfg!(windows) {
                 ui.add_space(6.0);
                 ui.checkbox(
                     &mut shell_want,
                     "资源管理器右键菜单（Win11 在“显示更多选项”里）",
                 );
+            }
+
+            ui.add_space(6.0);
+            if ui.button("导入主题包…").clicked() {
+                import_theme = true;
             }
 
             ui.separator();
@@ -107,7 +117,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             );
             ui.label(
                 egui::RichText::new(
-                    "已实现：zip / 7z / tar 读写、单文件流读取、AES-256、预检、CRC、后台任务、\n取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、原子覆盖、设置持久化、\n单实例、托盘、右键菜单。\n待接入：RAR、7z 分卷拼接、拖拽多文件同时打开。",
+                    "已实现：zip / 7z / tar 读写、单文件流读取、AES-256、预检、CRC、后台任务、\n取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、原子覆盖、设置持久化、\n日志、单实例、托盘、右键菜单、主题包导入。\n待接入：RAR、拖拽多文件同时打开。",
                 )
                 .size(12.0)
                 .color(theme.palette.text_sub),
@@ -115,6 +125,13 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             if let Some(path) = crate::prefs::config_path() {
                 ui.label(
                     egui::RichText::new(format!("设置文件：{}", path.display()))
+                        .size(11.0)
+                        .color(theme.palette.text_sub),
+                );
+            }
+            if let Some(path) = crate::prefs::log_path() {
+                ui.label(
+                    egui::RichText::new(format!("日志文件：{}", path.display()))
                         .size(11.0)
                         .color(theme.palette.text_sub),
                 );
@@ -127,8 +144,15 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     if app.locale != app.tr.locale {
         app.tr.locale = app.locale;
     }
-    if app.locale != prev_locale || app.tr.prefer_standard != prev_standard {
+    if app.locale != prev_locale
+        || app.tr.prefer_standard != prev_standard
+        || app.close_to_tray != prev_close_to_tray
+    {
         app.touch_settings();
+    }
+
+    if import_theme {
+        app.import_theme_dialog();
     }
 
     if shell_want != shell_installed {

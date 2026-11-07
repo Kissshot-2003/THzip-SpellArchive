@@ -25,6 +25,12 @@ pub enum TaskOp {
         path: PathBuf,
         password: Option<SecretString>,
     },
+    Plan {
+        reader: SharedReader,
+        ids: Vec<EntryId>,
+        target: PathBuf,
+        limits: Limits,
+    },
     Extract {
         reader: SharedReader,
         plan: Arc<ExtractPlan>,
@@ -147,6 +153,52 @@ fn run_task(
                 }
                 Err(ArchiveError::PasswordRequired) => {
                     send(tx, TaskEvent::NeedPassword { task, path });
+                }
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        TaskOp::Plan {
+            reader,
+            ids,
+            target,
+            limits,
+        } => {
+            send(
+                tx,
+                TaskEvent::PhaseChanged {
+                    task,
+                    phase: TaskPhase::Planning,
+                },
+            );
+            let plan = {
+                let guard = lock_reader(&reader);
+                guard.plan(&ids, &target, &limits)
+            };
+            match plan {
+                Ok(plan) => {
+                    send(
+                        tx,
+                        TaskEvent::PlanReady {
+                            task,
+                            plan: Arc::new(plan),
+                            target,
+                        },
+                    );
+                    send(
+                        tx,
+                        TaskEvent::PhaseChanged {
+                            task,
+                            phase: TaskPhase::Done,
+                        },
+                    );
                 }
                 Err(err) => {
                     send(

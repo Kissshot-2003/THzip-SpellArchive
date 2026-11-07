@@ -114,6 +114,44 @@ fn sevenz_writes_and_extracts() {
 }
 
 #[test]
+fn sevenz_volumes_are_joined() {
+    let dir = TempDir::new("volumes");
+    let src = build_source(dir.path());
+    let archive = dir.path().join("whole.7z");
+    pack(&archive, &src, None);
+
+    let data = std::fs::read(&archive).unwrap();
+    std::fs::remove_file(&archive).unwrap();
+    let chunk = data.len().div_ceil(3).max(1);
+    for (index, part) in data.chunks(chunk).enumerate() {
+        let path = dir.path().join(format!("split.7z.{:03}", index + 1));
+        std::fs::write(path, part).unwrap();
+    }
+
+    let first = dir.path().join("split.7z.001");
+    let reader = backend::open(&first, None).unwrap();
+    assert!(
+        reader
+            .entries()
+            .iter()
+            .any(|entry| entry.display.as_ref() == "素材/说明.txt")
+    );
+
+    // 从非首卷打开也应能找到同组全部分卷。
+    let second = dir.path().join("split.7z.002");
+    let reader = backend::open(&second, None).unwrap();
+    assert_eq!(reader.entries().len(), 5);
+
+    let target = dir.path().join("vol-out");
+    let report = extract_all(&first, &target, None);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("素材/说明.txt")).unwrap(),
+        "灵梦 7z 写入".as_bytes()
+    );
+}
+
+#[test]
 fn sevenz_encrypted_roundtrip() {
     let dir = TempDir::new("encrypted");
     let src = build_source(dir.path());

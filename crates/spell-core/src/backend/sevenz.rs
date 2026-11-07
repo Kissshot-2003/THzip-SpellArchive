@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
 use crate::backend::common::detect_conflict;
+use crate::backend::volume::{MultiVolumeReader, collect_volumes, is_volume_name};
 use crate::error::ArchiveError;
 use crate::limits::Limits;
 use crate::plan::{
@@ -21,9 +22,21 @@ use crate::types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
 
 const READ_BUF: usize = 64 * 1024;
 
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+fn open_source(path: &Path, volumes: &[PathBuf]) -> Result<Box<dyn ReadSeek>, ArchiveError> {
+    if volumes.is_empty() {
+        Ok(Box::new(File::open(path)?))
+    } else {
+        Ok(Box::new(MultiVolumeReader::open(volumes)?))
+    }
+}
+
 /// 7z 后端：`sevenz-rust2` 负责解析与解码；写盘仍然只经过 `ExtractSink`。
 pub struct SevenZReader {
     path: PathBuf,
+    volumes: Vec<PathBuf>,
     archive: sevenz_rust2::Archive,
     entries: Vec<ArchiveEntry>,
     password: Option<SecretString>,
@@ -31,9 +44,14 @@ pub struct SevenZReader {
 
 impl SevenZReader {
     pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
-        let mut file = File::open(path)?;
+        let volumes = match path.file_name().and_then(|name| name.to_str()) {
+            Some(name) if is_volume_name(name) => collect_volumes(path)?,
+            _ => Vec::new(),
+        };
+        let mut source = open_source(path, &volumes)?;
         let sz_password = to_sz_password(password);
-        let archive = sevenz_rust2::Archive::read(&mut file, &sz_password).map_err(map_sz_error)?;
+        let archive =
+            sevenz_rust2::Archive::read(&mut source, &sz_password).map_err(map_sz_error)?;
 
         let mut entries = Vec::with_capacity(archive.files.len());
         for (file_index, file) in archive.files.iter().enumerate() {
@@ -47,6 +65,7 @@ impl SevenZReader {
 
         Ok(Self {
             path: path.to_path_buf(),
+            volumes,
             archive,
             entries,
             password: password.cloned(),
@@ -57,9 +76,12 @@ impl SevenZReader {
         &self.path
     }
 
-    fn open_decoder(&self) -> Result<sevenz_rust2::ArchiveReader<File>, ArchiveError> {
-        sevenz_rust2::ArchiveReader::open(&self.path, to_sz_password(self.password.as_ref()))
-            .map_err(map_sz_error)
+    fn open_decoder(&self) -> Result<sevenz_rust2::ArchiveReader<Box<dyn ReadSeek>>, ArchiveError> {
+        sevenz_rust2::ArchiveReader::new(
+            open_source(&self.path, &self.volumes)?,
+            to_sz_password(self.password.as_ref()),
+        )
+        .map_err(map_sz_error)
     }
 }
 

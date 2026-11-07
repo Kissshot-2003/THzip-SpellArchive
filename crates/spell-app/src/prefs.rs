@@ -11,17 +11,19 @@ pub struct Prefs {
     pub locale: String,
     pub prefer_standard: bool,
     pub show_hint: bool,
+    pub close_to_tray: bool,
     pub last_dir: Option<String>,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            schema: 1,
+            schema: 2,
             theme: None,
             locale: "zh-CN".to_owned(),
             prefer_standard: false,
             show_hint: true,
+            close_to_tray: true,
             last_dir: None,
         }
     }
@@ -35,7 +37,12 @@ impl Prefs {
         let Ok(text) = std::fs::read_to_string(&path) else {
             return Self::default();
         };
-        toml::from_str(&text).unwrap_or_default()
+        let mut prefs: Prefs = toml::from_str(&text).unwrap_or_default();
+        // schema 1 没有 close_to_tray；serde default 已补齐，只需升级版本号。
+        if prefs.schema < 2 {
+            prefs.schema = 2;
+        }
+        prefs
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -70,6 +77,10 @@ pub fn handoff_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("handoff.txt"))
 }
 
+pub fn log_path() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join("spellarchive.log"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::Prefs;
@@ -81,6 +92,7 @@ mod tests {
         assert!(prefs.prefer_standard);
         assert_eq!(prefs.locale, "zh-CN");
         assert!(prefs.show_hint);
-        assert_eq!(prefs.schema, 1);
+        assert!(prefs.close_to_tray);
+        assert_eq!(prefs.schema, 2);
     }
 }

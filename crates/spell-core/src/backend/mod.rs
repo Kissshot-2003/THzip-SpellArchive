@@ -135,6 +135,10 @@ pub fn classify(header: &[u8], name: Option<&str>) -> ArchiveKind {
     if name_is("tar") {
         return ArchiveKind::Tar;
     }
+    // 非首卷没有 7z 魔数，只能靠文件名识别；首卷通常已命中 magic。
+    if volume::is_volume_name(&name) {
+        return ArchiveKind::SevenZ;
+    }
     ArchiveKind::Unknown
 }
 

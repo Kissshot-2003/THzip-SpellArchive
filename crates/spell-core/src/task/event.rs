@@ -90,6 +90,12 @@ pub enum TaskEvent {
         task: TaskId,
         plan: Arc<ExtractPlan>,
     },
+    /// 后台预检完成，UI 可以弹出确认框。
+    PlanReady {
+        task: TaskId,
+        plan: Arc<ExtractPlan>,
+        target: PathBuf,
+    },
     EntryFailed {
         task: TaskId,
         entry: EntryId,

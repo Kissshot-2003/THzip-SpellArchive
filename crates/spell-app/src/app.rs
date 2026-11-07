@@ -7,6 +7,7 @@ use crate::theme::ThemeStore;
 use crate::tray::{Tray, TrayAction};
 use eframe::egui;
 use spell_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
+use spell_core::safety::ExtractDirSink;
 use spell_core::secret::SecretString;
 use spell_core::task::{
     CancelToken, SharedReader, TaskEvent, TaskId, TaskOp, TaskPhase, TaskRunner,
@@ -78,6 +79,7 @@ pub struct SpellApp {
     pub locale: Locale,
     pub show_settings: bool,
     pub show_first_run_hint: bool,
+    pub close_to_tray: bool,
 
     pub dir: PathBuf,
     pub dir_items: Vec<DirItem>,
@@ -138,6 +140,7 @@ impl SpellApp {
             locale,
             show_settings: false,
             show_first_run_hint: prefs.show_hint,
+            close_to_tray: prefs.close_to_tray,
             dir,
             dir_items: Vec::new(),
             archive_name: String::new(),
@@ -285,9 +288,12 @@ impl SpellApp {
             locale: self.locale.code().to_owned(),
             prefer_standard: self.tr.prefer_standard,
             show_hint: self.show_first_run_hint,
+            close_to_tray: self.close_to_tray,
             last_dir: Some(self.dir.display().to_string()),
         };
-        let _ = prefs.save();
+        if let Err(err) = prefs.save() {
+            crate::logging::write(&format!("prefs save failed: {err}"));
+        }
         self.settings_dirty = false;
         self.last_settings_save = Instant::now();
     }
@@ -308,7 +314,11 @@ impl SpellApp {
                 Some(DirItem { name, is_dir })
             })
             .collect();
-        items.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+        items.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| natural_cmp(&a.name, &b.name))
+        });
         items.truncate(300);
         self.dir_items = items;
     }
@@ -361,6 +371,66 @@ impl SpellApp {
         }
     }
 
+    /// 导入 zip 主题包：要求包内是一级目录 + theme.toml（以及 png/）。
+    pub fn import_theme_dialog(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_directory(&self.dir)
+            .add_filter("主题包", &["zip"])
+            .pick_file()
+        else {
+            return;
+        };
+        let Some(themes_root) = crate::theme::loader::themes_root() else {
+            self.status = "找不到 themes 目录".to_owned();
+            return;
+        };
+
+        let mut reader = match spell_core::backend::open(&path, None) {
+            Ok(reader) => reader,
+            Err(err) => {
+                self.status = format!("主题包打开失败: {err}");
+                return;
+            }
+        };
+        let has_manifest = reader.entries().iter().any(|entry| {
+            let name = entry.display.trim_start_matches("./").replace('\\', "/");
+            let parts: Vec<&str> = name.split('/').filter(|part| !part.is_empty()).collect();
+            parts.len() == 2 && parts[1] == "theme.toml"
+        });
+        if !has_manifest {
+            self.status = "主题包格式不对：需要 <主题目录>/theme.toml".to_owned();
+            return;
+        }
+
+        let ids: Vec<u32> = (0..reader.entries().len() as u32).collect();
+        let limits = self.limits;
+        let plan = match reader.plan(&ids, &themes_root, &limits) {
+            Ok(plan) => plan,
+            Err(err) => {
+                self.status = format!("主题包预检失败: {err}");
+                return;
+            }
+        };
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Skip,
+            ..Default::default()
+        };
+        let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
+        match reader.extract(&plan, &decisions, &CancelToken::new(), &mut sink) {
+            Ok(report) if report.failed.is_empty() => {
+                self.status = format!("主题包已导入：{} 个条目", report.succeeded.len());
+                crate::logging::write(&format!("theme imported from {}", path.display()));
+                self.next_theme_check = Instant::now();
+            }
+            Ok(report) => {
+                self.status = format!("主题包导入部分失败：失败 {} 条", report.failed.len());
+            }
+            Err(err) => {
+                self.status = format!("主题包导入失败: {err}");
+            }
+        }
+    }
+
     pub fn open_path(&mut self, path: PathBuf, password: Option<SecretString>) {
         let name = file_name(&path);
         self.status = format!("正在打开：{name}");
@@ -388,34 +458,15 @@ impl SpellApp {
             Some(index) => vec![index as u32],
             None => (0..self.entries.len() as u32).collect(),
         };
-        let limits = self.limits;
-        let plan = match reader.try_lock() {
-            Ok(guard) => guard.plan(&ids, &target, &limits),
-            Err(std::sync::TryLockError::WouldBlock) => {
-                self.status = "后台任务正在使用该归档，请稍后再试".to_owned();
-                return;
-            }
-            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
-                poisoned.into_inner().plan(&ids, &target, &limits)
-            }
-        };
-        match plan {
-            Ok(plan) => {
-                self.status = format!(
-                    "预检完成：{} 个条目，解压后 {}",
-                    plan.items.len(),
-                    crate::ui::format_bytes(plan.total_bytes)
-                );
-                self.pending_extract = Some(PendingExtract {
-                    plan,
-                    target,
-                    policy: OverwritePolicy::Skip,
-                });
-            }
-            Err(err) => {
-                self.status = format!("预检失败：{err}");
-            }
-        }
+        let name = self.archive_name.clone();
+        let handle = self.runner.submit(TaskOp::Plan {
+            reader,
+            ids,
+            target,
+            limits: self.limits,
+        });
+        self.push_task(handle, format!("预检：{name}"));
+        self.status = "正在后台预检…".to_owned();
     }
 
     pub fn start_extract(&mut self) {
@@ -768,7 +819,23 @@ impl SpellApp {
                     }
                 );
             }
+            TaskEvent::PlanReady { task, plan, target } => {
+                self.status = format!(
+                    "预检完成：{} 个条目，解压后 {}",
+                    plan.items.len(),
+                    crate::ui::format_bytes(plan.total_bytes)
+                );
+                if let Some(view) = self.task_mut(task) {
+                    view.detail = Some(format!("{} 个条目", plan.items.len()));
+                }
+                self.pending_extract = Some(PendingExtract {
+                    plan: (*plan).clone(),
+                    target,
+                    policy: OverwritePolicy::Skip,
+                });
+            }
             TaskEvent::Failed { task, error } => {
+                crate::logging::write(&format!("task {task} failed: {error}"));
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Failed;
                     view.detail = Some(error.clone());
@@ -818,6 +885,7 @@ impl eframe::App for SpellApp {
         let ctx = ui.ctx().clone();
 
         if ctx.input(|input| input.viewport().close_requested())
+            && self.close_to_tray
             && self.tray.is_some()
             && !self.quitting
         {
@@ -867,6 +935,61 @@ impl eframe::App for SpellApp {
         };
         ctx.request_repaint_after(delay);
     }
+}
+
+/// 自然排序：`file2` 排在 `file10` 前；数字段按数值比较。
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    let left: Vec<char> = a.chars().collect();
+    let right: Vec<char> = b.chars().collect();
+    let (mut i, mut j) = (0usize, 0usize);
+
+    while i < left.len() && j < right.len() {
+        if left[i].is_ascii_digit() && right[j].is_ascii_digit() {
+            let l_start = i;
+            while i < left.len() && left[i].is_ascii_digit() {
+                i += 1;
+            }
+            let r_start = j;
+            while j < right.len() && right[j].is_ascii_digit() {
+                j += 1;
+            }
+
+            let l_num: Vec<char> = left[l_start..i]
+                .iter()
+                .copied()
+                .skip_while(|c| *c == '0')
+                .collect();
+            let r_num: Vec<char> = right[r_start..j]
+                .iter()
+                .copied()
+                .skip_while(|c| *c == '0')
+                .collect();
+
+            let cmp = l_num
+                .len()
+                .cmp(&r_num.len())
+                .then_with(|| l_num.cmp(&r_num));
+            if cmp != Ordering::Equal {
+                return cmp;
+            }
+            let zero_cmp = (i - l_start).cmp(&(j - r_start));
+            if zero_cmp != Ordering::Equal {
+                return zero_cmp;
+            }
+        } else {
+            let lc = left[i].to_ascii_lowercase();
+            let rc = right[j].to_ascii_lowercase();
+            if lc != rc {
+                return lc.cmp(&rc);
+            }
+            i += 1;
+            j += 1;
+        }
+    }
+
+    left.len().cmp(&right.len()).then_with(|| a.cmp(b))
 }
 
 fn file_name(path: &std::path::Path) -> String {
@@ -936,4 +1059,18 @@ fn install_cjk_fonts(ctx: &egui::Context) {
             .text_styles
             .insert(egui::TextStyle::Heading, egui::FontId::proportional(18.0));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::natural_cmp;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn natural_sort_orders_numbers() {
+        assert_eq!(natural_cmp("file2", "file10"), Ordering::Less);
+        assert_eq!(natural_cmp("A2", "a10"), Ordering::Less);
+        assert_eq!(natural_cmp("文件2", "文件10"), Ordering::Less);
+        assert_eq!(natural_cmp("a1", "a1"), Ordering::Equal);
+    }
 }

@@ -1,5 +1,8 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod i18n;
+mod logging;
 mod prefs;
 mod shell_menu;
 mod theme;
@@ -10,14 +13,17 @@ use eframe::egui;
 use single_instance::SingleInstance;
 
 fn main() -> eframe::Result<()> {
+    logging::init();
     let instance = match SingleInstance::new("SpellArchive.v1") {
         Ok(instance) => instance,
         Err(err) => {
+            logging::write(&format!("single-instance failed: {err}"));
             eprintln!("单实例检查失败: {err}");
             return Ok(());
         }
     };
     if !instance.is_single() {
+        logging::write("second instance: handoff");
         handoff_to_existing();
         return Ok(());
     }

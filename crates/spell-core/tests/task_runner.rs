@@ -147,6 +147,53 @@ fn open_then_extract_through_worker() {
 }
 
 #[test]
+fn plans_through_worker() {
+    let dir = TempDir::new("plan");
+    let archive = dir.path().join("plan.zip");
+    write_zip(&archive, &[("a.txt", b"hello")]);
+
+    let mut runner = TaskRunner::new(1);
+    runner.submit(TaskOp::Open {
+        path: archive,
+        password: None,
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(event, TaskEvent::Opened { .. } | TaskEvent::Failed { .. })
+    });
+    let reader = events
+        .iter()
+        .find_map(|event| match event {
+            TaskEvent::Opened { reader, .. } => Some(reader.clone()),
+            _ => None,
+        })
+        .expect("打开失败");
+
+    let ids: Vec<u32> = {
+        let guard = reader.lock().unwrap();
+        (0..guard.entries().len() as u32).collect()
+    };
+    let target = dir.path().join("out");
+    let handle = runner.submit(TaskOp::Plan {
+        reader,
+        ids,
+        target: target.clone(),
+        limits: spell_core::Limits::default(),
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::PlanReady { task, .. } | TaskEvent::Failed { task, .. }
+                if *task == handle.id
+        )
+    });
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TaskEvent::PlanReady { plan, target: ready_target, .. }
+            if plan.items.len() == 1 && ready_target == &target
+    )));
+}
+
+#[test]
 fn cancellation_stops_extract() {
     let dir = TempDir::new("cancel");
     let archive = dir.path().join("big.zip");

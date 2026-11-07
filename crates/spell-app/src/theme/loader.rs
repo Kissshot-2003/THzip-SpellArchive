@@ -133,6 +133,11 @@ fn rank(id: &str) -> u8 {
     }
 }
 
+/// 运行时主题目录；主题包导入需要写到这里。
+pub fn themes_root() -> Option<PathBuf> {
+    theme_root()
+}
+
 /// 查找主题目录：工作目录优先，其次 exe 同级，最后 `target/debug` 的开发路径。
 fn theme_root() -> Option<PathBuf> {
     let mut candidates = vec![PathBuf::from("themes")];

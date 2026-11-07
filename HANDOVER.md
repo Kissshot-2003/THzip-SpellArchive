@@ -3,7 +3,7 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（zip / 7z / tar 读写、单文件流读取、设置持久化完成）
+> 最后更新：2026-11（格式读写、桌面集成、日志、主题包导入、打包脚本完成）
 
 ---
 
@@ -29,7 +29,8 @@
 
 SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
 当前 **zip / 7z / tar 家族可读写，单文件流可读**；GUI 覆盖打开、预检、解压、测试、取消、
-创建/追加、密码、设置持久化、拖拽打开与悬停提示、单实例转交、关闭到托盘、右键菜单、主题热重载。
+创建/追加、密码、后台预检、主题包导入、设置持久化、拖拽打开与悬停提示、单实例转交、
+关闭到托盘、右键菜单、主题热重载、日志/崩溃落盘。
 
 ### 1.2 能力矩阵
 
@@ -45,14 +46,14 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 | tar.lz4 / tlz4 | 是 | 是 | 否 | 否 | 同上 |
 | gz / bz2 / xz / zst / lz4 | 是 | 否 | 否 | 否 | 单文件流，打开时先读一遍求大小 |
 | rar | 否 | 否 | 否 | 否 | 仅 magic bytes 识别 |
-| 分卷 `.7z.001` | 识别 | 否 | 否 | 否 | 只收集卷名，尚未拼接 |
+| 分卷 `.7z.001` | 是 | 否 | 否 | 同主包 | 读取时按字节拼接成逻辑流；从任意卷号打开都可 |
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 10900 行（含测试）。
-- 最新提交：`a4ced19 feat: connect zip read/write, task queue and GUI archive flow`
+- Rust 约 11450 行（含测试）。
+- 最新提交：`28cd385 feat: add 7z/tar/stream support, encryption, prefs and desktop integration`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
-- 当前工作区有 34 个文件未提交（7z/tar/单文件流/prefs/单实例/托盘/右键菜单/热重载等），没有配置远端。
+- 当前工作区有 23 个文件未提交（分卷/资源/预检/主题包/日志/打包等），没有配置远端。
 - 接手第一件事：`git status` → 跑测试 → 决定是否提交当前批次。
 
 ---
@@ -71,7 +72,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 59 个测试
+cargo test --workspace                 # 63 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -108,7 +109,7 @@ tar 家族忽略。
 6. 加密：zip / 7z 勾选 AES-256 创建；无密码打开 7z 包头会提示密码。
 7. 设置：切主题/语言后退出重开，设置应保持（`%APPDATA%\SpellArchive\prefs.toml`）。
 8. 拖拽：把归档拖进窗口应直接打开；拖目录应切换左侧浏览目录。
-9. `cargo test --workspace` 59 通过；clippy 无告警。
+9. `cargo test --workspace` 63 通过；clippy 无告警。
 
 ---
 
@@ -159,9 +160,23 @@ spell_archive/
 | `backend/tar_write.rs` | tar 家族创建：6 种容器、流式进度、取消 |
 | `backend/stream.rs` | 单文件流读取：gz/bz2/xz/zst/lz4 |
 | `backend/name_codec.rs` | zip 名字 UTF-8 → GBK / Shift-JIS 择优 |
-| `backend/volume.rs` | `.7z.001` 识别与收集（未拼接） |
+| `backend/volume.rs` | `.7z.001` 识别、收集与 `MultiVolumeReader` 拼接 |
 
-### 3.4 启动顺序
+### 3.4 `spell-app` 模块
+
+| 文件 | 职责 |
+|---|---|
+| `main.rs` | 单实例、日志初始化、窗口参数、启动参数/目录 |
+| `app.rs` | 状态、事件泵、任务表、打开/解压/创建、预检、设置保存、拖拽、热重载轮询 |
+| `prefs.rs` | schema 2 配置、handoff、日志路径 |
+| `logging.rs` | 文本日志 + panic hook，5 MiB 轮转 |
+| `i18n/mod.rs` | zh-CN / en-US + 主题覆盖 + 标准术语开关 |
+| `theme/{mod,loader}.rs` | 主题扫描、PNG 纹理、签名轮询、主题目录定位 |
+| `tray.rs` | 托盘图标与菜单 |
+| `shell_menu.rs` | HKCU 资源管理器右键菜单 |
+| `ui/*` | 工具栏、文件浏览、归档表、任务行、预检/密码/打包对话框、设置、进度条、拖拽遮罩 |
+
+### 3.5 启动顺序
 
 ```text
 main
@@ -181,7 +196,7 @@ main
          └─ open_path(arg)             # 有启动参数则提交 Open 任务
 ```
 
-### 3.5 每帧顺序
+### 3.6 每帧顺序
 
 ```text
 App::ui(root_ui)
@@ -206,7 +221,7 @@ App::ui(root_ui)
 
 面板必须按“先 top/bottom，再 left/right，最后 CentralPanel”的顺序挂到同一个 root `Ui`。
 
-### 3.6 数据流
+### 3.7 数据流
 
 打开：
 
@@ -222,9 +237,10 @@ App::ui(root_ui)
 
 ```text
 UI 选目标目录
- └─ reader.try_lock().plan(ids, target, limits)   # 预检不能阻塞解压中的 reader
-     └─ 预检弹窗：条目数 / 总大小 / 最大文件 / 冲突 / 剩余空间 / 加密
-         └─ DecisionTable { 跳过已有 | 覆盖已有 }
+ └─ TaskOp::Plan { reader, ids, target, limits }   # 后台 worker 预检
+     └─ TaskEvent::PlanReady { plan, target }
+         └─ 预检弹窗：条目数 / 总大小 / 最大文件 / 冲突 / 剩余空间 / 加密
+             └─ DecisionTable { 跳过已有 | 覆盖已有 }
              └─ TaskOp::Extract { reader, plan, decisions, limits }
                  ├─ worker: ExtractDirSink + ProgressSink
                  └─ TaskEvent::{Started, Progress, Finished, Failed} → UI
@@ -454,7 +470,8 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 ### 7.5 对话框
 
-- 预检：条目数、总大小、最大单文件、冲突、警告、剩余空间、加密提示；
+- 预检在后台 `TaskOp::Plan` 执行，完成后 `TaskEvent::PlanReady` 弹窗；不会卡住 UI。
+- 预检内容：条目数、总大小、最大单文件、冲突、警告、剩余空间、加密提示；
   覆盖策略只有“跳过已有 / 覆盖已有”（Rename/AutoNumber 尚未实现）。
 - 密码：打开任务返回 `NeedPassword` 或失败信息含“密码”时弹出。
 - 打包：添加文件/文件夹、输出路径、扩展名决定格式、仅存储、AES、追加；
@@ -471,7 +488,8 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 7.7 设置持久化
 
 - 路径：`%APPDATA%\SpellArchive\prefs.toml`（没有 APPDATA 时退回当前目录）。
-- 字段：`schema`、`theme`、`locale`、`prefer_standard`、`show_hint`、`last_dir`。
+- 当前 schema 2；字段：`theme`、`locale`、`prefer_standard`、`show_hint`、`close_to_tray`、`last_dir`。
+- schema 1 读取时自动升级到 2（缺失 `close_to_tray` 走默认 true）。
 - 变更后 400ms 防抖，用 `AtomicFile` 写入。
 - 语言切换必须同时改 `app.locale` 和 `app.tr.locale`（曾因只改前者导致界面语言不变）。
 
@@ -491,18 +509,48 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 - 没有引入文件监听依赖；代价是每秒 stat 一次主题目录（约 100 个文件）。
 - 新增主题目录、修改 `theme.toml` 或替换 PNG 都会触发。
 
-### 7.10 拖拽悬停提示
+### 7.10 Windows 资源
+
+- `crates/spell-app/build.rs` 使用 `winresource`：嵌入 `icon.ico`、`app.manifest` 和版本字符串。
+- `icon.ico` 由 `themes/reimu/png/avatar.png` 经 ImageMagick 生成（16~256 多尺寸）。
+- `app.manifest` 声明 PerMonitorV2 DPI、longPathAware、Win10/11 supportedOS。
+- `main.rs` 用 `cfg_attr(not(debug_assertions), windows_subsystem = "windows")`：
+  debug 保留控制台，release 不弹黑框。
+- `build.rs` 修改后需重新编译；`cargo:rerun-if-changed` 已覆盖图标与 manifest。
+
+### 7.11 拖拽悬停提示
 
 - `ui::drag_overlay` 读取 `raw.hovered_files`，在 `Order::Foreground` 图层画半透明遮罩、
   accent 边框和“松开以打开归档 / 浏览文件夹”提示。
 - 不拦截鼠标事件；drop 仍由 `App::ui` 开头统一处理。
 - 当前只打开第一个文件，多文件拖入时其余被忽略（见技术债 #12）。
 
-### 7.11 字体
+### 7.12 字体
 
 `install_cjk_fonts` 读 `C:/Windows/Fonts/simhei.ttf`（回退 `Deng.ttf`）。
 egui 默认无 CJK 字形，不装字体就是豆腐块。
 待办：`fontdb` 查找 + 内嵌 Noto Sans SC 子集（OFL），供 Linux 构建兜底。
+
+### 7.13 主题包导入
+
+- 设置页“导入主题包…”选择 zip；要求包内是 `<主题目录>/theme.toml`。
+- 用 `backend::open` + `ExtractDirSink` 解压到 `themes/`；冲突策略默认 Skip。
+- 导入成功后把 `next_theme_check` 提前，下一次热重载轮询立即生效。
+- 同步执行；超大主题包会短暂卡住 UI（技术债 #3）。
+
+### 7.14 日志与自然排序
+
+- `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`；启动、任务失败、设置保存失败、
+  主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
+- 文件浏览器使用 `natural_cmp`：`file2` 排在 `file10` 前，数字段按数值比较。
+- 归档表保持包内顺序，未做表头排序（技术债 #7）。
+
+### 7.15 打包
+
+- `scripts/package.ps1`：release 构建 → `dist/SpellArchive/`（exe + themes + 文档）。
+- `packaging/SpellArchive.iss`：Inno Setup，安装到 `%LOCALAPPDATA%\Programs\SpellArchive`，
+  无需管理员；有 `iscc` 时生成 `dist/SpellArchive-<version>-setup.exe`。
+- 未做代码签名（技术债 #15）。
 
 ---
 
@@ -562,21 +610,21 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **59** 个测试。
+当前共 **62** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
-| `spell-core` 单元测试 | 31 | path_sanitize、display_guard、bomb、atomic_fs、worker、plan、name_codec、volume、sevenz、stream |
-| `spell-app` 单元测试 | 3 | theme loader 2、prefs 解析 1 |
+| `spell-core` 单元测试 | 32 | path_sanitize、display_guard、bomb、atomic_fs、worker、plan、name_codec、volume 读取+分卷、sevenz、stream |
+| `spell-app` 单元测试 | 4 | theme loader 2、prefs 解析 1、自然排序 1 |
 | `tests/zip_backend.rs` | 8 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC |
 | `tests/zip_write.rs` | 7 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES |
-| `tests/task_runner.rs` | 4 | Open→Plan→Extract、取消、Pack、失败事件 |
+| `tests/task_runner.rs` | 5 | Open→Plan→Extract、取消、Pack、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
 | `tests/tar_write.rs` | 2 | 6 种 tar 容器创建往返、密码拒绝 |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
-| `tests/sevenz_write.rs` | 2 | 7z 普通往返、加密往返 |
+| `tests/sevenz_write.rs` | 3 | 7z 普通往返、加密往返、分卷拼接 |
 
 ### 9.3 手工验收（每次改格式/任务层都跑）
 
@@ -598,23 +646,23 @@ cargo clippy --workspace --all-targets -- -D warnings
 |---:|---|---|---|
 | 1 | `task_panel` 每帧 clone 整个 Theme（含纹理 HashMap） | 轻微浪费 | `Arc<Theme>` 或只克隆纹理 id |
 | 2 | 冲突策略 Rename/AutoNumber 没有真正改名 | UI 只能选跳过/覆盖 | 在 `resolve_all` 对已存在文件生成 `~n` |
-| 3 | 预检在 UI 线程执行 | 大目录/慢盘会短暂卡顿 | 改成 `TaskOp::Plan` 后台任务 |
+| 3 | 主题包导入仍在 UI 线程执行 | 超大主题包会短暂卡顿 | 需要时改成 `TaskOp::InstallTheme` |
 | 4 | 只支持单条选中，没有多选/全选反选 | 批量操作不顺手 | 表格加多选集合 |
 | 5 | 进度条底图拉伸到任意宽高 | 像素素材边缘不完美 | 按 `theme.scale` 吸附整数倍 |
 | 6 | 启动加载全部主题纹理 | 启动内存/时间偏高 | 懒加载，切换再解码 |
-| 7 | 搜索只做小写子串；排序字典序 | 无自然序 | 实现 natural sort |
+| 7 | 归档条目保持包内顺序；搜索只做小写子串 | 列表不适合按名称浏览 | 表头排序 + 自然序（文件浏览器已用自然序） |
 | 8 | 无 SVG 支持 | plain 主题只能用纯色 | 开 `egui_extras` svg |
 | 9 | `[resource_nine_patch]` 解析但未使用 | 面板背景不能九宫格 | `ui/nine_patch.rs` |
-| 10 | 无日志 / 崩溃落盘 | 用户报错难定位 | `tracing` + panic hook |
-| 11 | `prefs.toml` 只有 schema=1，无迁移分支 | 未来字段变化可能丢配置 | 按 schema 迁移 |
+| 10 | 日志是简单文本，没有级别/模块 | 排查复杂问题不够 | 需要时换 `tracing` |
+| 11 | `prefs.toml` 目前只有 schema 1→2 的被动补齐 | 再改字段需显式迁移 | 在 `Prefs::load` 里继续加分支 |
 | 12 | 拖拽多个文件只打开第一个 | 批量拖入时其余项目被忽略 | drop 处理后逐个打开或提示数量 |
 | 28 | 单实例 handoff 只转发第一个路径，且靠 250/500ms 文件轮询 | 多文件转交只开第一个；空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
-| 29 | 关闭主窗口固定隐藏到托盘，没有设置项 | 想真正退出的用户会困惑 | 设置里增加“关闭时最小化到托盘”开关 |
+| 29 | 托盘菜单与关闭行为没有跟随语言/主题刷新 | 切语言后托盘仍是中文 | 语言变更时重建菜单 |
 | 30 | 托盘菜单文案固定中文，切语言不刷新 | 英文界面下托盘仍是中文 | 语言变更时重建托盘菜单 |
 | 31 | 右键菜单记录的是当前 exe 绝对路径 | 移动/升级 exe 后菜单失效 | 安装包升级后重新写注册表，或启动时自检路径 |
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
 | 14 | 当前批次 34 个文件未提交 | 无回滚点 | 确认测试后提交 |
-| 15 | 无 `build.rs`（图标/版本/manifest） | exe 无图标、长路径未声明 | 发布前补 |
+| 15 | exe 未做代码签名 | SmartScreen 可能拦截 | 发布前购买/配置签名证书 |
 | 16 | zip 只启用 deflate/aes，读写都不支持 bzip2/zstd/lzma | 遇到会报 Unsupported | 按需加 zip features |
 | 17 | zip 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 增量原地追加风险高，暂不做 |
 | 18 | 打包扫描跳过符号链接 | 链接内容不会进包 | 需要时提供“跟随链接”+ 环检测 |
@@ -622,7 +670,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 20 | 7z 固实包单条提取进度按写出字节算 | 跳过前序数据时进度停滞/跳变 | 通过解码字节回调上报压缩进度 |
 | 21 | 7z 不支持追加 | 增量修改需重建 | 复制重写，暂不做 |
 | 22 | 7z 写入固定 LZMA2/COPY 与默认参数 | 不能调固实块、字典大小 | 暴露 `EncoderConfiguration` |
-| 23 | 分卷 `.7z.001` 只识别不拼接 | 打不开分卷包 | 按卷顺序拼流后交给 sevenz-rust2 |
+| 23 | 7z 分卷要求卷号从 001 连续 | 缺卷时只报打开失败 | 错误信息里列出缺失卷号 |
 | 24 | 单文件流打开时先解压一遍求大小 | 大文件打开/解压读两遍 | 列表尺寸懒加载或显示“未知” |
 | 25 | tar 写入不保留原始权限/目录 mtime | 解压后 644/755 | 从 metadata 读取 mode/mtime |
 | 26 | tar 家族不支持追加与加密 | 只能新建 | 追加需重写整包 |
@@ -642,19 +690,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### P2 功能
 
-- 主题包导入（复用 `safe_extract` + 资源限额）。
 - 九宫格面板、SVG 图标、粒子效果。
 - 多选、全选反选、批量解压。
-- 预检移到后台（`TaskOp::Plan`）。
-- 设置迁移、语言包扩展、字体 fallback。
-- `tracing` + panic hook + 日志文件。
-- `build.rs`：exe 图标、版本资源、长路径 manifest。
-- 自然排序、搜索增强。
+- 归档表表头排序、搜索增强（文件浏览器已自然排序）。
+- 语言包扩展、字体 fallback（内嵌 Noto Sans SC 子集）。
+- `tracing` 结构化日志（当前是文本日志）。
+- 代码签名；Inno 脚本已就绪。
+- RAR 读取（可选特性/外部后端）。
 
 ### 格式增强
 
 - zip：启用 bzip2/zstd/lzma 解码；Deflate64。
-- 7z：固实包压缩字节进度；分卷拼接；可选追加（需重写）。
+- 7z：固实包压缩字节进度；可选追加（需重写）；缺少卷号时给出缺失列表。
 - tar：保留权限/mtime；可选追加/加密。
 - RAR：可选特性或外部后端（注意许可证与单 exe 约束）。
 
@@ -694,6 +741,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 解压接口 | plan → decisions → extract 两阶段 | worker 不能同步询问 UI |
 | 覆盖 | 临时文件 + ReplaceFileW | 直接写会截断原文件 |
 | 任务 | 2 worker + crossbeam-channel | UI 不卡；取消/进度事件统一 |
+| 日志 | 文本文件 + panic hook | 零额外依赖，足够定位用户报错 |
 | 文案 | i18n 与主题解耦 | 换素体主题不能丢中文 |
 | 表格 | egui_extras TableBuilder | 手工拼列必然错位 |
 | 工程结构 | workspace，core 零 UI 依赖 | 用 Cargo 强制分层 |
@@ -710,7 +758,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（59 通过）
+- [ ] `cargo test --workspace`（63 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / tar.gz / 单文件 gz，条目真实显示
@@ -724,8 +772,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 设置页勾选/取消右键菜单，`reg query HKCU\Software\Classes\*\shell\SpellArchive` 有/无
 - [ ] 运行中 touch `themes/*/theme.toml`，2 秒内出现“主题文件已重新加载”
 - [ ] 从资源管理器拖文件到窗口，出现“松开以打开归档”覆盖层
+- [ ] 设置页切换“关闭窗口时最小化到托盘”，重开程序后保持
+- [ ] 导入一个 `<主题>/theme.toml` 的 zip，主题出现在下拉框
+- [ ] 解压时预检在后台（快速点其他 UI 不卡），随后弹预检框
+- [ ] `%APPDATA%\SpellArchive\spellarchive.log` 有启动记录；panic 会落盘
+- [ ] `scripts/package.ps1` 能产出 `dist/SpellArchive/`
+- [ ] `(Get-Item target/debug/spell_archive.exe).VersionInfo` 有 FileDescription/FileVersion
 - [ ] 确认 `spell-core` 依赖树无 egui
-- [ ] 检查 `git status`，决定是否提交当前 34 个文件
+- [ ] 检查 `git status`，决定是否提交当前 23 个文件
 - [ ] 确认素材许可证边界（代码 MIT / 素材 CC BY-NC-SA 4.0）
 
 ---

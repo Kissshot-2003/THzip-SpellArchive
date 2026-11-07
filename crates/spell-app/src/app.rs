@@ -1313,23 +1313,51 @@ pub(crate) fn kind_for_output(path: &std::path::Path) -> Option<ArchiveKind> {
     None
 }
 
+fn cjk_font_bytes() -> Option<Vec<u8>> {
+    for candidate in ["C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/Deng.ttf"] {
+        if let Ok(bytes) = std::fs::read(candidate) {
+            return Some(bytes);
+        }
+    }
+
+    // fontdb 只在系统字体缺失时初始化（Windows 正常情况下走不到这里）。
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    for family in [
+        "Microsoft YaHei",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "WenQuanYi Micro Hei",
+        "Droid Sans Fallback",
+    ] {
+        let query = fontdb::Query {
+            families: &[fontdb::Family::Name(family)],
+            ..Default::default()
+        };
+        if let Some(id) = db.query(&query) {
+            let bytes = db.with_face_data(id, |data, _| data.to_vec());
+            if let Some(bytes) = bytes {
+                return Some(bytes);
+            }
+        }
+    }
+    None
+}
+
 fn install_cjk_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
-    // 骨架阶段直接读系统字体；正式版改为 fontdb 查找 + 内嵌子集兜底。
-    for candidate in ["C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/Deng.ttf"] {
-        if let Ok(bytes) = std::fs::read(candidate) {
+    // 先试 Windows 系统字体；找不到再用 fontdb 查常见 CJK 字体（Linux 构建兜底）。
+    if let Some(bytes) = cjk_font_bytes() {
+        fonts
+            .font_data
+            .insert("cjk".to_owned(), egui::FontData::from_owned(bytes).into());
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             fonts
-                .font_data
-                .insert("cjk".to_owned(), egui::FontData::from_owned(bytes).into());
-            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts
-                    .families
-                    .entry(family)
-                    .or_default()
-                    .push("cjk".to_owned());
-            }
-            break;
+                .families
+                .entry(family)
+                .or_default()
+                .push("cjk".to_owned());
         }
     }
 

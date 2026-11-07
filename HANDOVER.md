@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 14042 行（含测试）。
+- Rust 约 14070 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -595,9 +595,9 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 ### 7.12 字体
 
-`install_cjk_fonts` 读 `C:/Windows/Fonts/simhei.ttf`（回退 `Deng.ttf`）。
+`install_cjk_fonts` 先读 `C:/Windows/Fonts/simhei.ttf`（回退 `Deng.ttf`），再回退 fontdb 查询的常见 CJK 字体。
 egui 默认无 CJK 字形，不装字体就是豆腐块。
-待办：`fontdb` 查找 + 内嵌 Noto Sans SC 子集（OFL），供 Linux 构建兜底。
+待办：内嵌 Noto Sans SC 子集（OFL），完全摆脱系统字体。
 
 ### 7.13 主题包导入
 

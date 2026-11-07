@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 13484 行（含测试）。
+- Rust 约 13821 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。

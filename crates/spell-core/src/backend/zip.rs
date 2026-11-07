@@ -32,6 +32,7 @@ pub struct ZipReader {
 enum ZipEntryReader<'a> {
     Plain(Box<zip::read::ZipFile<'a, BufReader<File>>>),
     Lzma(Box<lzma_rust2::LzmaReader<zip::read::ZipFile<'a, BufReader<File>>>>),
+    Xz(Box<liblzma::bufread::XzDecoder<BufReader<zip::read::ZipFile<'a, BufReader<File>>>>>),
 }
 
 impl std::io::Read for ZipEntryReader<'_> {
@@ -39,11 +40,12 @@ impl std::io::Read for ZipEntryReader<'_> {
         match self {
             Self::Plain(reader) => reader.read(buf),
             Self::Lzma(reader) => reader.read(buf),
+            Self::Xz(reader) => reader.read(buf),
         }
     }
 }
 
-/// ZIP 的 LZMA 字典上限，与默认安全限额的字典上限保持一致。
+/// ZIP 的 LZMA / XZ 字典上限，与默认安全限额的字典上限保持一致。
 const LZMA_DICT_LIMIT: u32 = 512 * 1024 * 1024;
 
 impl ZipReader {
@@ -172,7 +174,7 @@ impl ArchiveReader for ZipReader {
             // 明确不支持的方法在预检阶段提示并跳过，避免解压到一半才失败。
             // Unknown(99) 是 WinZip AES，实际压缩方法仍由 zip crate 处理。
             let unsupported = match entry.method {
-                Method::Xz => true,
+                Method::Xz => entry.encrypted,
                 Method::Lzma => entry.encrypted,
                 Method::Unknown(code) => code != 99,
                 _ => false,
@@ -398,6 +400,23 @@ impl ZipReader {
         let method = self.entries[index].method;
         let size = self.entries[index].size;
         let encrypted = self.entries[index].encrypted;
+
+        if matches!(method, Method::Xz) {
+            if encrypted {
+                return Err(ArchiveError::Unsupported(
+                    "加密的 XZ zip 条目暂不支持解压".to_owned(),
+                ));
+            }
+            let raw = self
+                .archive_mut()?
+                .by_index_raw(index)
+                .map_err(map_entry_error)?;
+            let stream = liblzma::stream::Stream::new_stream_decoder(u64::from(LZMA_DICT_LIMIT), 0)
+                .map_err(|err| ArchiveError::Other(format!("XZ 解码器初始化失败: {err}")))?;
+            return Ok(ZipEntryReader::Xz(Box::new(
+                liblzma::bufread::XzDecoder::new_stream(BufReader::new(raw), stream),
+            )));
+        }
 
         if matches!(method, Method::Lzma) {
             if encrypted {

@@ -295,8 +295,7 @@ fn extraction_restores_entry_mtime() {
 }
 
 #[test]
-fn xz_entries_are_warned_and_skipped() {
-    use spell_core::plan::PlanWarning;
+fn xz_entries_extract() {
     use spell_core::types::Method;
 
     let archive = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -304,22 +303,27 @@ fn xz_entries_are_warned_and_skipped() {
         .join("xz.zip");
     let dir = TempDir::new("xz");
     let target = dir.path().join("out");
+    let expected = (1..=200)
+        .map(|index| format!("SpellArchive compression fixture line {index} 0123456789ABCDEF"))
+        .collect::<Vec<_>>()
+        .join("\r\n");
 
     let reader = backend::open(&archive, None).unwrap();
     assert_eq!(reader.entries()[0].method, Method::Xz);
     let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
     let plan = reader.plan(&ids, &target, &Limits::default()).unwrap();
-    assert!(
-        plan.warnings
-            .iter()
-            .any(|warning| matches!(warning, PlanWarning::UnsupportedMethod { .. }))
-    );
-    assert!(matches!(plan.items[0].action, PlanAction::Skip));
+    assert!(matches!(
+        plan.items[0].action,
+        PlanAction::Create | PlanAction::Overwrite
+    ));
 
     let report = extract_all(&archive, &target, DecisionTable::default());
     assert!(report.failed.is_empty(), "{:?}", report.failed);
-    assert_eq!(report.skipped.len(), 1);
-    assert!(!target.join("payload.txt").exists());
+    assert_eq!(report.succeeded.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(target.join("payload.txt")).unwrap(),
+        expected
+    );
 }
 
 #[test]

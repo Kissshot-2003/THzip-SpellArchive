@@ -29,7 +29,7 @@
 - **怎么跑**：`cargo test --workspace`（87）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
-- **当前风险**：RAR 只读且单条上限 512 MiB；zip XZ 与加密 LZMA 未支持；exe 未签名。
+- **当前风险**：RAR 只读且单条上限 512 MiB；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：最新提交 `83b9477`，工作区有未提交改动（本轮功能批次），无远端。
 - **下一步建议**：先跑测试并提交本轮批次，再决定九宫格面板、SVG/粒子、字体或签名。
 
@@ -49,7 +49,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 | 格式 | 读取 | 创建 | 追加 | 加密 | 备注 |
 |---|---|---|---|---|---|
-| zip | 是 | 是 | 是 | AES-256 | 写入 Store/Deflate/BZip2/Zstd；读取 Store/Deflate/Deflate64/BZip2/Zstd/PPMd/LZMA；XZ 预检提示并跳过；zip64；同名 `~1` |
+| zip | 是 | 是 | 是 | AES-256 | 写入 Store/Deflate/BZip2/Zstd；读取 Store/Deflate/Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；zip64；同名 `~1` |
 | 7z | 是 | 是 | 否 | AES-256 头加密 | 固实包；LZMA2/COPY 写入 |
 | tar | 是 | 是 | 否 | 否 | PAX / GNU longname 由 tar crate 处理 |
 | tar.gz / tgz | 是 | 是 | 否 | 否 | 无 `.tar` 扩展名时探测内层 ustar |
@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 14070 行（含测试）。
+- Rust 约 14093 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -310,8 +310,8 @@ UI 选目标目录
 - LZMA（方法 14）由 `lzma-rust2` 自行解码：zip crate 的解压器不识别 ZIP 内部 LZMA 头。
   解析 2 字节版本 + 2 字节属性长度 + 5 字节属性后再喂给 `LzmaReader::new_with_props`；
   字典上限 512 MiB，超过直接拒绝；加密的 LZMA 条目暂不支持。
-- XZ（方法 95）及未知方法在 `plan()` 阶段产生 `UnsupportedMethod` 警告并标记为跳过，
-  不再等到解压中途才失败；AES 条目显示为 `AES`。
+- XZ（方法 95）由 `liblzma` 解码，内存上限 512 MiB；未知方法和加密的 LZMA/XZ
+  在 `plan()` 阶段产生 `UnsupportedMethod` 警告并标记为跳过；AES 条目显示为 `AES`。
 
 写入：
 
@@ -687,7 +687,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 |---|---:|---|
 | `spell-core` 单元测试 | 40 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接 |
 | `spell-app` 单元测试 | 8 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配匹配 1、日志格式 1 |
-| `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64 fixtures、XZ 跳过、mtime |\n| `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
+| `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
+| `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
@@ -728,7 +729,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
 | 14 | 本轮批次未提交 | 无回滚点 | 确认测试后提交 |
 | 15 | exe 未做代码签名 | SmartScreen 可能拦截 | 发布前购买/配置签名证书 |
-| 16 | 部分修复 | 写入支持 Store/Deflate/BZip2/Zstd；读取支持 Deflate64/BZip2/Zstd/PPMd/LZMA；XZ 预检提示并跳过；加密 LZMA 不支持 |
+| 16 | 部分修复 | 写入支持 Store/Deflate/BZip2/Zstd；读取支持 Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；加密 LZMA/XZ 不支持 |
 | 17 | zip 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 增量原地追加风险高，暂不做 |
 | 18 | 打包扫描跳过符号链接 | 链接内容不会进包 | 需要时提供“跟随链接”+ 环检测 |
 | 19 | 追加模式不能设置新密码 | 加密包追加的新条目不加密 | 明确提示或禁止追加加密包 |
@@ -768,7 +769,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### 格式增强
 
-- zip：XZ 解码、加密 LZMA；复原 Deflate64 写入。
+- zip：加密 LZMA/XZ；写端可选更多压缩方法。
 - 7z：固实包压缩字节进度；可选追加（需重写）。
 - tar：写入保留权限/目录 mtime；可选追加/加密。
 - RAR：多卷、流式解压、超大条目；注意 UnRAR 许可证。

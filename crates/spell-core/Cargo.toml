@@ -20,6 +20,7 @@ lzma-rust2.workspace = true
 zstd.workspace = true
 lz4_flex.workspace = true
 unrar-ng.workspace = true
+liblzma.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Time"] }

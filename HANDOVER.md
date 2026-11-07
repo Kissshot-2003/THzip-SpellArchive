@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（78）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（79）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 未实现；多文件拖拽只开第一个；zip XZ 与加密 LZMA 未支持；exe 未签名。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 78 个测试
+cargo test --workspace                 # 79 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 78 通过；clippy 无告警。
+12. `cargo test --workspace` 79 通过；clippy 无告警。
 
 ---
 
@@ -595,7 +595,7 @@ egui 默认无 CJK 字形，不装字体就是豆腐块。
 - `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`；启动、任务失败、设置保存失败、
   主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
 - 文件浏览器使用 `natural_cmp`：`file2` 排在 `file10` 前，数字段按数值比较。
-- 归档表支持表头排序与多选；排序键和方向写入 `prefs.toml`，重启后保持。
+- 归档表支持表头排序与多选；排序键和方向写入 `prefs.toml`，重启后保持。\n- 搜索框支持小写子串；含 `*` 或 `?` 时按通配符匹配（不区分大小写）。
 
 ### 7.15 打包
 
@@ -663,14 +663,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **78** 个测试。
+当前共 **79** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
 | `spell-core` 单元测试 | 37 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream |
-| `spell-app` 单元测试 | 5 | theme loader 2、prefs 解析/排序 2、自然排序 1 |
+| `spell-app` 单元测试 | 6 | theme loader 2、prefs 解析/排序 2、自然排序 1、通配匹配 1 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64 fixtures、XZ 跳过、mtime |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
@@ -697,13 +697,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 | # | 问题 | 影响 | 建议 |
 |---:|---|---|---|
-| 1 | 已修复 | `task_panel` 直接借用 `&Theme`，不再每帧 clone |
+| 1 | 已修复 | `task_panel` 借用 `&Theme`；设置页只取需要的字段，均不再整包 clone |
 | 2 | 已修复 | Rename 生成 `a~1.txt`，AutoNumber 生成 `a (1).txt`，并避开磁盘已有文件 |
 | 3 | 已修复 | 主题包导入改为后台 `TaskOp::InstallTheme` |
 | 4 | 多选只有解压能用，没有批量删除/批量移动 | 批量操作仍有限 | 视需求加右键批量菜单 |
 | 5 | 进度条底图拉伸到任意宽高 | 像素素材边缘不完美 | 按 `theme.scale` 吸附整数倍 |
 | 6 | 已修复 | `ThemeStore` 只解码当前主题，切换时 `ensure_loaded` |
-| 7 | 部分修复 | 排序键/方向已写入 prefs schema 3；搜索仍为小写子串 |
+| 7 | 部分修复 | 排序键/方向已写入 prefs schema 3；搜索支持小写子串与 `*`/`?` 通配 |
 | 8 | 无 SVG 支持 | plain 主题只能用纯色 | 开 `egui_extras` svg |
 | 9 | `[resource_nine_patch]` 解析但未使用 | 面板背景不能九宫格 | `ui/nine_patch.rs` |
 | 10 | 日志是简单文本，没有级别/模块 | 排查复杂问题不够 | 需要时换 `tracing` |
@@ -810,7 +810,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（78 通过）
+- [ ] `cargo test --workspace`（79 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / tar.gz / 单文件 gz，条目真实显示

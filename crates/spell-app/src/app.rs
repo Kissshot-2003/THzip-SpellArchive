@@ -428,12 +428,21 @@ impl SpellApp {
 
     pub fn filtered_entries(&self) -> Vec<usize> {
         let needle = self.search.trim().to_lowercase();
+        let wildcard = needle.contains('*') || needle.contains('?');
         let mut rows: Vec<usize> = self
             .entries
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
-                needle.is_empty() || entry.display.to_lowercase().contains(&needle)
+                if needle.is_empty() {
+                    return true;
+                }
+                let text = entry.display.to_lowercase();
+                if wildcard {
+                    wildcard_match(&needle, &text)
+                } else {
+                    text.contains(&needle)
+                }
             })
             .map(|(index, _)| index)
             .collect();
@@ -1180,9 +1189,40 @@ fn install_cjk_fonts(ctx: &egui::Context) {
     });
 }
 
+/// 简单的 `*` / `?` 通配匹配；调用方负责大小写归一化。
+pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut resume = 0usize;
+
+    while ti < text.len() {
+        if pi < pattern.len() && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pattern.len() && pattern[pi] == '*' {
+            star = Some(pi);
+            resume = ti;
+            pi += 1;
+        } else if let Some(star_pos) = star {
+            pi = star_pos + 1;
+            resume += 1;
+            ti = resume;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pattern.len() && pattern[pi] == '*' {
+        pi += 1;
+    }
+    pi == pattern.len()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::natural_cmp;
+    use super::{natural_cmp, wildcard_match};
     use std::cmp::Ordering;
 
     #[test]
@@ -1191,5 +1231,17 @@ mod tests {
         assert_eq!(natural_cmp("A2", "a10"), Ordering::Less);
         assert_eq!(natural_cmp("文件2", "文件10"), Ordering::Less);
         assert_eq!(natural_cmp("a1", "a1"), Ordering::Equal);
+    }
+
+    #[test]
+    fn wildcard_matches_globs() {
+        assert!(wildcard_match("*.txt", "a.txt"));
+        assert!(wildcard_match("*.txt", "dir/a.txt"));
+        assert!(wildcard_match("a?c", "abc"));
+        assert!(wildcard_match("*", "anything"));
+        assert!(wildcard_match("a*b*c", "aXXbYYc"));
+        assert!(!wildcard_match("*.txt", "a.zip"));
+        assert!(!wildcard_match("a?c", "abbc"));
+        assert!(!wildcard_match("b*", "abc"));
     }
 }

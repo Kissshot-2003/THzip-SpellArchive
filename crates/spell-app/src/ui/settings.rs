@@ -23,7 +23,19 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let standard_terms = app.tr.t(TextKey::StandardTerms);
     let names = app.themes.names();
     let mut selected = app.themes.current_index();
-    let theme = app.themes.current().clone();
+    let theme = app.themes.current();
+    let avatar = theme
+        .texture(ResKey::AvatarMain)
+        .map(|texture| texture.id());
+    let palette = theme.palette;
+    let theme_name = theme.name.clone();
+    let theme_author = theme.author.clone();
+    let theme_version = theme.version.clone();
+    let theme_license = theme.license.clone();
+    let theme_description = theme.description.clone();
+    let theme_resources = theme.resources.len();
+    let theme_sampling_pixel = theme.sampling_pixel;
+    let theme_scale = theme.scale;
 
     egui::Window::new(title)
         .open(&mut open)
@@ -32,29 +44,29 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
         .default_width(440.0)
         .show(&ctx, |ui| {
             ui.horizontal(|ui| {
-                if let Some(texture) = theme.texture(ResKey::AvatarMain) {
+                if let Some(id) = avatar {
                     ui.add(
                         egui::Image::new(egui::load::SizedTexture::new(
-                            texture.id(),
+                            id,
                             egui::vec2(64.0, 64.0),
                         ))
                         .fit_to_exact_size(egui::vec2(64.0, 64.0)),
                     );
                 }
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(theme.name.clone()).strong());
+                    ui.label(egui::RichText::new(theme_name.clone()).strong());
                     ui.label(
                         egui::RichText::new(format!(
                             "{} · v{} · {}",
-                            theme.author, theme.version, theme.license
+                            theme_author, theme_version, theme_license
                         ))
                         .size(12.0)
-                        .color(theme.palette.text_sub),
+                        .color(palette.text_sub),
                     );
                     ui.label(
-                        egui::RichText::new(theme.description.clone())
+                        egui::RichText::new(theme_description.clone())
                             .size(12.0)
-                            .color(theme.palette.text_sub),
+                            .color(palette.text_sub),
                     );
                 });
             });
@@ -99,12 +111,12 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new(format!(
                     "资源：{} 个纹理 · 采样：{} · 基准 {}x",
-                    theme.resources.len(),
-                    if theme.sampling_pixel { "NEAREST（像素）" } else { "LINEAR" },
-                    theme.scale
+                    theme_resources,
+                    if theme_sampling_pixel { "NEAREST（像素）" } else { "LINEAR" },
+                    theme_scale
                 ))
                 .size(12.0)
-                .color(theme.palette.text_sub),
+                .color(palette.text_sub),
             );
             ui.label(
                 egui::RichText::new(format!(
@@ -120,20 +132,20 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                     "已实现：zip / 7z / tar 读写、单文件流读取、AES-256、预检、CRC、后台任务、\n取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、原子覆盖、设置持久化、\n日志、单实例、托盘、右键菜单、主题包导入。\n待接入：RAR、拖拽多文件同时打开。",
                 )
                 .size(12.0)
-                .color(theme.palette.text_sub),
+                .color(palette.text_sub),
             );
             if let Some(path) = crate::prefs::config_path() {
                 ui.label(
                     egui::RichText::new(format!("设置文件：{}", path.display()))
                         .size(11.0)
-                        .color(theme.palette.text_sub),
+                        .color(palette.text_sub),
                 );
             }
             if let Some(path) = crate::prefs::log_path() {
                 ui.label(
                     egui::RichText::new(format!("日志文件：{}", path.display()))
                         .size(11.0)
-                        .color(theme.palette.text_sub),
+                        .color(palette.text_sub),
                 );
             }
         });

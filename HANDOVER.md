@@ -31,7 +31,7 @@
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读且单条上限 512 MiB；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：最新提交 `83b9477`，工作区有未提交改动（本轮功能批次），无远端。
-- **下一步建议**：先跑测试并提交本轮批次，再决定九宫格面板、SVG/粒子、字体或签名。
+- **下一步建议**：先跑测试并提交本轮批次，再决定批量操作、内嵌字体、7z 参数或签名。
 
 ---
 
@@ -663,7 +663,9 @@ PanelBg / 失败态进度图尚未提供；粒子贴图已从 assets/particles �
 
 - 主题根目录：`./themes` → `<exe>/themes` → `<exe>/../../themes`。
 - 路径必须相对、无 `..`，canonicalize 后仍在主题目录内。
-- `sampling_pixel = true` → NEAREST，否则 LINEAR。\n- 资源路径可以是 PNG（image crate）或 SVG（resvg 光栅化，禁止外部资源）。\n- `[effects] particles = true` 且存在 `ParticleSakura` / `ParticleSparkle` 时显示飘落粒子。
+- `sampling_pixel = true` → NEAREST，否则 LINEAR。
+- 资源路径可以是 PNG（image crate）或 SVG（resvg 光栅化，禁止外部资源）。
+- `[effects] particles = true` 且存在 `ParticleSakura` / `ParticleSparkle` 时显示飘落粒子。
 - `schema > 1` 只警告，不 panic。
 - `ThemeStore::load` 只解析 manifest 与路径；`ensure_loaded(ctx)` 才解码当前主题。
 - 主题包导入已执行 500 文件 / 8 MiB 单文件 / 64 MiB 总量限制，并拒绝 exe/dll/bat 等可执行扩展名。
@@ -759,10 +761,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### P2 功能
 
-- 九宫格面板、SVG 图标、粒子效果。
-- 搜索增强（通配/正则）。
-- 语言包扩展（设置页/对话框仍有硬编码中文）、字体 fallback（内嵌 Noto Sans SC 子集）。
-- `tracing` 结构化日志（当前是文本日志）。
+- 搜索增强（正则；`*`/`?` 通配已支持）。
+- 语言包扩展（设置页/对话框仍有硬编码中文）、内嵌 Noto Sans SC 子集。
+- `tracing` 结构化日志（当前是带级别/模块的文本日志）。
 - 代码签名；Inno 脚本已就绪。
 - RAR 多卷与流式解压（当前单条 512 MiB 上限）。
 - 批量操作（批量删除/移动）。
@@ -771,7 +772,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 - zip：加密 LZMA/XZ；写端可选更多压缩方法。
 - 7z：固实包压缩字节进度；可选追加（需重写）。
-- tar：写入保留权限/目录 mtime；可选追加/加密。
+- tar：可选追加/加密（写入已保留只读属性、文件/目录 mtime）。
 - RAR：多卷、流式解压、超大条目；注意 UnRAR 许可证。
 
 ---

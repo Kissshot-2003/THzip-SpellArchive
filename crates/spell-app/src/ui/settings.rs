@@ -129,7 +129,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
             );
             ui.label(
                 egui::RichText::new(
-                    "已实现：zip / 7z / rar / tar 读取，zip / 7z / tar 写入、单文件流读取、AES-256、\n预检、CRC、后台任务、取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、\n原子覆盖、设置持久化、日志、单实例、托盘、右键菜单、主题包导入。\n待接入：九宫格面板 / SVG / 粒子效果。",
+                    "已实现：zip / 7z / rar / tar 读取，zip / 7z / tar 写入、单文件流读取、AES-256、\n预检、CRC、后台任务、取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、\n原子覆盖、设置持久化、日志、单实例、托盘、右键菜单、主题包导入。\n待接入：批量操作 / 内嵌字体 / 代码签名。",
                 )
                 .size(12.0)
                 .color(palette.text_sub),

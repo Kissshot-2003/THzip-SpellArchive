@@ -85,6 +85,7 @@ pub enum TextKey {
     TrayShow,
     TrayHide,
     TrayQuit,
+    NewTab,
 }
 
 impl TextKey {
@@ -134,6 +135,7 @@ impl TextKey {
             TextKey::TrayShow => "tray_show",
             TextKey::TrayHide => "tray_hide",
             TextKey::TrayQuit => "tray_quit",
+            TextKey::NewTab => "new_tab",
         }
     }
 }
@@ -186,6 +188,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::TrayShow => "显示主窗口",
             TextKey::TrayHide => "隐藏主窗口",
             TextKey::TrayQuit => "退出",
+            TextKey::NewTab => "新标签页",
         },
         Locale::EnUs => match key {
             TextKey::AppTitle => "SpellArchive",
@@ -233,6 +236,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::TrayShow => "Show window",
             TextKey::TrayHide => "Hide window",
             TextKey::TrayQuit => "Quit",
+            TextKey::NewTab => "New tab",
         },
     }
 }

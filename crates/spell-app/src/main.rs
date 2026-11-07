@@ -60,14 +60,18 @@ fn main() -> eframe::Result<()> {
 }
 
 fn handoff_to_existing() {
-    if let Some(path) = std::env::args().nth(1).map(std::path::PathBuf::from) {
-        if path.exists() {
-            if let Some(handoff) = prefs::handoff_path() {
-                if let Some(parent) = handoff.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let _ = std::fs::write(&handoff, path.display().to_string());
+    let paths: Vec<String> = std::env::args()
+        .skip(1)
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.exists())
+        .map(|path| path.display().to_string())
+        .collect();
+    if !paths.is_empty() {
+        if let Some(handoff) = prefs::handoff_path() {
+            if let Some(parent) = handoff.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
+            let _ = std::fs::write(&handoff, paths.join("\n"));
         }
     }
     activate_existing_window();

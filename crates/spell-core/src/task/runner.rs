@@ -196,6 +196,7 @@ fn run_task(
                             task,
                             plan: Arc::new(plan),
                             target,
+                            reader,
                         },
                     );
                     send(

@@ -48,6 +48,18 @@ impl SortKey {
     }
 }
 
+#[derive(Default)]
+pub struct ArchiveTab {
+    pub name: String,
+    pub kind: Option<ArchiveKind>,
+    pub path: Option<PathBuf>,
+    pub reader: Option<SharedReader>,
+    pub entries: Vec<ArchiveEntry>,
+    pub search: String,
+    pub selected: std::collections::BTreeSet<usize>,
+    pub last_selected: Option<usize>,
+}
+
 pub struct DirItem {
     pub name: String,
     pub is_dir: bool,
@@ -93,6 +105,8 @@ pub struct PendingExtract {
     pub plan: ExtractPlan,
     pub target: PathBuf,
     pub policy: OverwritePolicy,
+    /// 预检对应的归档；即使用户切换了标签页也不能换错。
+    pub reader: SharedReader,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -155,6 +169,9 @@ pub struct SpellApp {
     pub last_selected: Option<usize>,
     pub sort_key: SortKey,
     pub sort_asc: bool,
+    /// 非活动标签页的快照；`tabs[active_tab]` 是空占位，活动数据在字段里。
+    pub tabs: Vec<ArchiveTab>,
+    pub active_tab: usize,
 
     pub runner: TaskRunner,
     pub tasks: Vec<TaskView>,
@@ -223,6 +240,8 @@ impl SpellApp {
                 .and_then(SortKey::from_str)
                 .unwrap_or(SortKey::Name),
             sort_asc: prefs.sort_asc,
+            tabs: vec![ArchiveTab::default()],
+            active_tab: 0,
             runner: TaskRunner::new(2),
             tasks: Vec::new(),
             pending_password: None,
@@ -268,6 +287,120 @@ impl SpellApp {
 
     pub fn touch_settings(&mut self) {
         self.settings_dirty = true;
+    }
+
+    fn stash_active_tab(&mut self) -> ArchiveTab {
+        ArchiveTab {
+            name: std::mem::take(&mut self.archive_name),
+            kind: self.archive_kind.take(),
+            path: self.archive_path.take(),
+            reader: self.reader.take(),
+            entries: std::mem::take(&mut self.entries),
+            search: std::mem::take(&mut self.search),
+            selected: std::mem::take(&mut self.selected),
+            last_selected: self.last_selected.take(),
+        }
+    }
+
+    fn restore_active_tab(&mut self, tab: ArchiveTab) {
+        self.archive_name = tab.name;
+        self.archive_kind = tab.kind;
+        self.archive_path = tab.path;
+        self.reader = tab.reader;
+        self.entries = tab.entries;
+        self.search = tab.search;
+        self.selected = tab.selected;
+        self.last_selected = tab.last_selected;
+    }
+
+    pub fn tab_count(&self) -> usize {
+        self.tabs.len()
+    }
+
+    pub fn active_tab_index(&self) -> usize {
+        self.active_tab
+    }
+
+    pub fn tab_title(&self, index: usize) -> String {
+        if index == self.active_tab {
+            if self.archive_name.is_empty() {
+                self.tr.t(TextKey::NewTab).to_owned()
+            } else {
+                self.archive_name.clone()
+            }
+        } else {
+            self.tabs
+                .get(index)
+                .map(|tab| tab.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| self.tr.t(TextKey::NewTab).to_owned())
+        }
+    }
+
+    pub fn activate_tab(&mut self, index: usize) {
+        if index == self.active_tab || index >= self.tabs.len() {
+            return;
+        }
+        let current = self.stash_active_tab();
+        let target = std::mem::take(&mut self.tabs[index]);
+        self.tabs[self.active_tab] = current;
+        self.active_tab = index;
+        self.restore_active_tab(target);
+        self.status = format!("切换到：{}", self.tab_title(index));
+    }
+
+    pub fn close_tab(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        if self.tabs.len() == 1 {
+            self.tabs[0] = ArchiveTab::default();
+            self.active_tab = 0;
+            self.archive_name.clear();
+            self.archive_kind = None;
+            self.archive_path = None;
+            self.reader = None;
+            self.entries.clear();
+            self.search.clear();
+            self.selected.clear();
+            self.last_selected = None;
+            self.status = self.tr.t(TextKey::StatusReady).to_owned();
+            return;
+        }
+
+        if index == self.active_tab {
+            let other = if self.active_tab + 1 < self.tabs.len() {
+                self.active_tab + 1
+            } else {
+                self.active_tab - 1
+            };
+            let target = std::mem::take(&mut self.tabs[other]);
+            self.tabs.remove(self.active_tab);
+            self.active_tab = if other > self.active_tab {
+                other - 1
+            } else {
+                other
+            };
+            self.restore_active_tab(target);
+        } else {
+            self.tabs.remove(index);
+            if index < self.active_tab {
+                self.active_tab -= 1;
+            }
+        }
+        self.status = format!("已关闭标签页，剩余 {} 个", self.tabs.len());
+    }
+
+    /// 打开归档成功时决定是替换当前标签还是新开一个。
+    fn prepare_tab_for_open(&mut self, path: &PathBuf) {
+        let same = self.archive_path.as_ref() == Some(path);
+        if same || self.archive_name.is_empty() {
+            return;
+        }
+        let current = self.stash_active_tab();
+        self.tabs[self.active_tab] = current;
+        self.tabs.push(ArchiveTab::default());
+        self.active_tab = self.tabs.len() - 1;
     }
 
     fn show_window(&self, ctx: &egui::Context) {
@@ -322,16 +455,19 @@ impl SpellApp {
 
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let _ = std::fs::remove_file(&path);
-        let text = text.trim();
         self.show_window(ctx);
-        if text.is_empty() {
-            return;
+        let mut opened = 0usize;
+        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            let target = PathBuf::from(line);
+            if target.is_dir() {
+                self.navigate(target);
+            } else {
+                self.open_path(target, None);
+                opened += 1;
+            }
         }
-        let target = PathBuf::from(text);
-        if target.is_dir() {
-            self.navigate(target);
-        } else {
-            self.open_path(target, None);
+        if opened > 1 {
+            self.status = format!("正在打开 {opened} 个转交归档（各占一个标签页）");
         }
     }
 
@@ -562,10 +698,10 @@ impl SpellApp {
     }
 
     pub fn start_extract(&mut self) {
-        let (Some(pending), Some(reader)) = (self.pending_extract.take(), self.reader.clone())
-        else {
+        let Some(pending) = self.pending_extract.take() else {
             return;
         };
+        let reader = pending.reader.clone();
         let decisions = DecisionTable {
             default: pending.policy,
             per_entry: Default::default(),
@@ -792,6 +928,7 @@ impl SpellApp {
                 entries,
                 reader,
             } => {
+                self.prepare_tab_for_open(&path);
                 self.archive_name = file_name(&path);
                 self.archive_kind = Some(kind);
                 self.archive_path = Some(path.clone());
@@ -914,7 +1051,12 @@ impl SpellApp {
                     }
                 );
             }
-            TaskEvent::PlanReady { task, plan, target } => {
+            TaskEvent::PlanReady {
+                task,
+                plan,
+                target,
+                reader,
+            } => {
                 self.status = format!(
                     "预检完成：{} 个条目，解压后 {}",
                     plan.items.len(),
@@ -927,6 +1069,7 @@ impl SpellApp {
                     plan: (*plan).clone(),
                     target,
                     policy: OverwritePolicy::Skip,
+                    reader,
                 });
             }
             TaskEvent::ThemeInstalled {
@@ -1027,15 +1170,11 @@ impl eframe::App for SpellApp {
             }
         }
         let files: Vec<&PathBuf> = dropped.iter().filter(|path| !path.is_dir()).collect();
-        if let Some(first) = files.first() {
-            self.open_path((*first).clone(), None);
+        for file in &files {
+            self.open_path((*file).clone(), None);
         }
         if files.len() > 1 {
-            // 单窗口只能同时显示一个归档；这里明确提示，避免静默丢弃。
-            self.status = format!(
-                "已打开第一个归档，其余 {} 个文件暂未打开（多标签页待实现）",
-                files.len() - 1
-            );
+            self.status = format!("正在打开 {} 个归档（各占一个标签页）", files.len());
         }
 
         self.poll_tray(&ctx);
@@ -1045,6 +1184,7 @@ impl eframe::App for SpellApp {
 
         crate::ui::hint_banner(self, ui);
         crate::ui::top_bar(self, ui);
+        crate::ui::tab_bar(self, ui);
         crate::ui::status_bar(self, ui);
         crate::ui::file_browser::show(self, ui);
         crate::ui::task_panel::show(self, ui);

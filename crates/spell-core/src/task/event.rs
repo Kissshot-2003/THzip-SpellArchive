@@ -95,6 +95,8 @@ pub enum TaskEvent {
         task: TaskId,
         plan: Arc<ExtractPlan>,
         target: PathBuf,
+        /// 预检时使用的 reader；切换标签页后仍能对正确的归档解压。
+        reader: Arc<Mutex<Box<dyn ArchiveReader>>>,
     },
     EntryFailed {
         task: TaskId,

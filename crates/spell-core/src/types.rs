@@ -84,6 +84,7 @@ pub enum Method {
     Xz,
     Zstd,
     Lz4,
+    Rar,
     Ppmd,
     Unknown(u16),
 }
@@ -101,6 +102,7 @@ impl Method {
             Method::Xz => "XZ",
             Method::Zstd => "ZSTD",
             Method::Lz4 => "LZ4",
+            Method::Rar => "RAR",
             Method::Ppmd => "PPMd",
             // winzip AES：压缩方法字段被 99 覆盖，实际方法在 extra field 里。
             Method::Unknown(99) => "AES",

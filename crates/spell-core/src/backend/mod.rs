@@ -1,6 +1,7 @@
 mod common;
 mod decoder;
 pub mod name_codec;
+pub mod rar;
 pub mod sevenz;
 pub mod sevenz_write;
 pub mod stream;
@@ -156,9 +157,7 @@ pub fn open(
         | ArchiveKind::TarXz
         | ArchiveKind::TarZst
         | ArchiveKind::TarLz4 => Ok(Box::new(tar::TarReader::new(path, kind)?)),
-        ArchiveKind::Rar => Err(ArchiveError::Unsupported(
-            "RAR 仅提供可选解压特性，默认构建不支持".to_owned(),
-        )),
+        ArchiveKind::Rar => Ok(Box::new(rar::RarReader::new(path, password)?)),
         ArchiveKind::Gz
         | ArchiveKind::Bz2
         | ArchiveKind::Xz

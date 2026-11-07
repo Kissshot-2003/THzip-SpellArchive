@@ -41,6 +41,7 @@ bzip2 = "0.6"
 lzma-rust2 = { version = "0.16", features = ["xz", "encoder"] }
 zstd = "0.13"
 lz4_flex = { version = "0.12", features = ["frame"] }
+unrar-ng = "0.7"
 single-instance = "0.3"
 tray-icon = "0.24"
 winreg = "0.56"

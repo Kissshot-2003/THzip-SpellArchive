@@ -22,6 +22,7 @@ try {
     Copy-Item (Join-Path $root "README.md") $stage
     Copy-Item (Join-Path $root "LICENSE") $stage
     Copy-Item (Join-Path $root "NOTICE.md") $stage
+    Copy-Item (Join-Path $root "third_party") $stage -Recurse
 
     Write-Host "Staged: $stage"
     Write-Host "Version: $Version"

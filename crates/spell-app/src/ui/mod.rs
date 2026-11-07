@@ -49,6 +49,38 @@ pub fn hint_banner(app: &mut SpellApp, root: &mut egui::Ui) {
     });
 }
 
+pub fn tab_bar(app: &mut SpellApp, root: &mut egui::Ui) {
+    if app.tab_count() <= 1 && app.archive_name.is_empty() {
+        return;
+    }
+
+    let mut switch = None;
+    let mut close = None;
+    egui::Panel::top("tab_bar").show(root, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(2.0);
+            for index in 0..app.tab_count() {
+                let title = app.tab_title(index);
+                let active = index == app.active_tab_index();
+                if ui.selectable_label(active, title).clicked() {
+                    switch = Some(index);
+                }
+                if ui.small_button("×").on_hover_text("关闭标签页").clicked() {
+                    close = Some(index);
+                }
+                ui.separator();
+            }
+        });
+    });
+
+    if let Some(index) = switch {
+        app.activate_tab(index);
+    }
+    if let Some(index) = close {
+        app.close_tab(index);
+    }
+}
+
 pub fn top_bar(app: &mut SpellApp, root: &mut egui::Ui) {
     let palette = app.themes.current().palette;
     let ctx = root.ctx().clone();

@@ -7,7 +7,6 @@ use crate::theme::ThemeStore;
 use crate::tray::{Tray, TrayAction};
 use eframe::egui;
 use spell_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
-use spell_core::safety::ExtractDirSink;
 use spell_core::secret::SecretString;
 use spell_core::task::{
     CancelToken, SharedReader, TaskEvent, TaskId, TaskOp, TaskPhase, TaskRunner,
@@ -22,6 +21,31 @@ pub enum SortKey {
     Ratio,
     Method,
     Time,
+}
+
+impl SortKey {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Size => "size",
+            Self::Packed => "packed",
+            Self::Ratio => "ratio",
+            Self::Method => "method",
+            Self::Time => "time",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "name" => Some(Self::Name),
+            "size" => Some(Self::Size),
+            "packed" => Some(Self::Packed),
+            "ratio" => Some(Self::Ratio),
+            "method" => Some(Self::Method),
+            "time" => Some(Self::Time),
+            _ => None,
+        }
+    }
 }
 
 pub struct DirItem {
@@ -71,11 +95,38 @@ pub struct PendingExtract {
     pub policy: OverwritePolicy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ZipPackMethod {
+    #[default]
+    Deflate,
+    Bzip2,
+    Zstd,
+}
+
+impl ZipPackMethod {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Deflate => "Deflate",
+            Self::Bzip2 => "BZip2",
+            Self::Zstd => "ZSTD",
+        }
+    }
+
+    pub fn method(self) -> Method {
+        match self {
+            Self::Deflate => Method::Deflate,
+            Self::Bzip2 => Method::Bzip2,
+            Self::Zstd => Method::Zstd,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct PackState {
     pub sources: Vec<PathBuf>,
     pub output: String,
     pub store: bool,
+    pub zip_method: ZipPackMethod,
     pub append: bool,
     pub encrypt: bool,
     pub password: String,
@@ -129,10 +180,11 @@ impl SpellApp {
         install_cjk_fonts(&cc.egui_ctx);
 
         let prefs = crate::prefs::Prefs::load();
-        let mut themes = ThemeStore::load(&cc.egui_ctx);
+        let mut themes = ThemeStore::load();
         if let Some(theme) = prefs.theme.as_deref() {
             themes.select_by_id(theme);
         }
+        themes.ensure_loaded(&cc.egui_ctx);
         let locale = Locale::from_code(&prefs.locale).unwrap_or(Locale::ZhCn);
         let mut tr = Translator::new();
         tr.locale = locale;
@@ -146,6 +198,7 @@ impl SpellApp {
             .filter(|path| path.is_dir())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
         let theme_signature = crate::theme::loader::signature();
+        let tray = Tray::new(&tr);
 
         let mut app = Self {
             tr,
@@ -164,8 +217,12 @@ impl SpellApp {
             search: String::new(),
             selected: std::collections::BTreeSet::new(),
             last_selected: None,
-            sort_key: SortKey::Name,
-            sort_asc: true,
+            sort_key: prefs
+                .sort_key
+                .as_deref()
+                .and_then(SortKey::from_str)
+                .unwrap_or(SortKey::Name),
+            sort_asc: prefs.sort_asc,
             runner: TaskRunner::new(2),
             tasks: Vec::new(),
             pending_password: None,
@@ -179,21 +236,33 @@ impl SpellApp {
             next_handoff_check: Instant::now(),
             theme_signature,
             next_theme_check: Instant::now() + Duration::from_secs(1),
-            tray: Tray::new(),
+            tray,
             quitting: false,
         };
 
         app.themes.apply(&cc.egui_ctx);
         app.refresh_dir();
+        // exe 移动或升级后，右键菜单里的旧路径自动修正。
+        if let Err(err) = crate::shell_menu::refresh_if_installed() {
+            crate::logging::write(&format!("shell menu refresh failed: {err}"));
+        }
         app
     }
 
     pub fn set_theme(&mut self, index: usize, ctx: &egui::Context) {
         if self.themes.set(index) {
+            self.themes.ensure_loaded(ctx);
             self.tr.set_theme(self.themes.current());
             self.themes.apply(ctx);
-            self.status = format!("主题已切换：{}", self.themes.current().name);
+            self.status = format!("已切换到主题：{}", self.themes.current().name);
             self.touch_settings();
+        }
+    }
+
+    /// 语言切换后重建托盘菜单，避免托盘一直显示旧语言。
+    pub fn rebuild_tray(&mut self) {
+        if let Some(tray) = Tray::new(&self.tr) {
+            self.tray = Some(tray);
         }
     }
 
@@ -282,8 +351,9 @@ impl SpellApp {
         self.theme_signature = Some(signature);
 
         let current_id = self.themes.current_id().to_owned();
-        let mut themes = ThemeStore::load(ctx);
+        let mut themes = ThemeStore::load();
         themes.select_by_id(&current_id);
+        themes.ensure_loaded(ctx);
         self.themes = themes;
         self.tr.set_theme(self.themes.current());
         self.themes.apply(ctx);
@@ -299,13 +369,15 @@ impl SpellApp {
         }
 
         let prefs = crate::prefs::Prefs {
-            schema: 1,
+            schema: crate::prefs::CURRENT_SCHEMA,
             theme: Some(self.themes.current_id().to_owned()),
             locale: self.locale.code().to_owned(),
             prefer_standard: self.tr.prefer_standard,
             show_hint: self.show_first_run_hint,
             close_to_tray: self.close_to_tray,
             last_dir: Some(self.dir.display().to_string()),
+            sort_key: Some(self.sort_key.as_str().to_owned()),
+            sort_asc: self.sort_asc,
         };
         if let Err(err) = prefs.save() {
             crate::logging::write(&format!("prefs save failed: {err}"));
@@ -431,50 +503,14 @@ impl SpellApp {
             return;
         };
 
-        let mut reader = match spell_core::backend::open(&path, None) {
-            Ok(reader) => reader,
-            Err(err) => {
-                self.status = format!("主题包打开失败: {err}");
-                return;
-            }
-        };
-        let has_manifest = reader.entries().iter().any(|entry| {
-            let name = entry.display.trim_start_matches("./").replace('\\', "/");
-            let parts: Vec<&str> = name.split('/').filter(|part| !part.is_empty()).collect();
-            parts.len() == 2 && parts[1] == "theme.toml"
+        let name = file_name(&path);
+        let handle = self.runner.submit(TaskOp::InstallTheme {
+            archive: path,
+            target: themes_root,
+            limits: self.limits,
         });
-        if !has_manifest {
-            self.status = "主题包格式不对：需要 <主题目录>/theme.toml".to_owned();
-            return;
-        }
-
-        let ids: Vec<u32> = (0..reader.entries().len() as u32).collect();
-        let limits = self.limits;
-        let plan = match reader.plan(&ids, &themes_root, &limits) {
-            Ok(plan) => plan,
-            Err(err) => {
-                self.status = format!("主题包预检失败: {err}");
-                return;
-            }
-        };
-        let decisions = DecisionTable {
-            default: OverwritePolicy::Skip,
-            ..Default::default()
-        };
-        let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
-        match reader.extract(&plan, &decisions, &CancelToken::new(), &mut sink) {
-            Ok(report) if report.failed.is_empty() => {
-                self.status = format!("主题包已导入：{} 个条目", report.succeeded.len());
-                crate::logging::write(&format!("theme imported from {}", path.display()));
-                self.next_theme_check = Instant::now();
-            }
-            Ok(report) => {
-                self.status = format!("主题包导入部分失败：失败 {} 条", report.failed.len());
-            }
-            Err(err) => {
-                self.status = format!("主题包导入失败: {err}");
-            }
-        }
+        self.push_task(handle, format!("导入主题：{name}"));
+        self.status = "正在后台导入主题包…".to_owned();
     }
 
     pub fn open_path(&mut self, path: PathBuf, password: Option<SecretString>) {
@@ -663,6 +699,8 @@ impl SpellApp {
 
         let method = if self.pack_state.store {
             Method::Store
+        } else if kind == ArchiveKind::Zip {
+            self.pack_state.zip_method.method()
         } else {
             Method::Deflate
         };
@@ -882,6 +920,31 @@ impl SpellApp {
                     policy: OverwritePolicy::Skip,
                 });
             }
+            TaskEvent::ThemeInstalled {
+                task,
+                report,
+                source,
+            } => {
+                let summary = format!(
+                    "主题包：成功 {} · 跳过 {} · 失败 {}",
+                    report.succeeded.len(),
+                    report.skipped.len(),
+                    report.failed.len()
+                );
+                if let Some(view) = self.task_mut(task) {
+                    view.phase = TaskPhase::Done;
+                    view.progress = 1.0;
+                    view.detail = Some(summary.clone());
+                }
+                crate::logging::write(&format!("theme imported from {}", source.display()));
+                self.status = if report.failed.is_empty() {
+                    summary
+                } else {
+                    format!("{summary}（部分条目失败）")
+                };
+                // 让下一次主题热重载轮询立即生效。
+                self.next_theme_check = Instant::now();
+            }
             TaskEvent::Failed { task, error } => {
                 crate::logging::write(&format!("task {task} failed: {error}"));
                 if let Some(view) = self.task_mut(task) {
@@ -949,13 +1012,21 @@ impl eframe::App for SpellApp {
                 .map(|file| file.path().to_path_buf())
                 .collect()
         });
-        for path in dropped {
+        for path in &dropped {
             if path.is_dir() {
-                self.navigate(path);
-            } else {
-                self.open_path(path, None);
-                break;
+                self.navigate(path.clone());
             }
+        }
+        let files: Vec<&PathBuf> = dropped.iter().filter(|path| !path.is_dir()).collect();
+        if let Some(first) = files.first() {
+            self.open_path((*first).clone(), None);
+        }
+        if files.len() > 1 {
+            // 单窗口只能同时显示一个归档；这里明确提示，避免静默丢弃。
+            self.status = format!(
+                "已打开第一个归档，其余 {} 个文件暂未打开（多标签页待实现）",
+                files.len() - 1
+            );
         }
 
         self.poll_tray(&ctx);

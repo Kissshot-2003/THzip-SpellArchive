@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 use crate::error::SinkError;
 use crate::limits::Limits;
@@ -7,6 +9,7 @@ use crate::plan::{DecisionTable, ExtractPlan, ResolvedAction, resolve_all};
 use crate::reader::ExtractSink;
 use crate::safety::atomic_fs::{AtomicFile, is_reparse_point};
 use crate::safety::bomb::{Budget, LimitHit};
+use crate::safety::file_time::set_mtime;
 use crate::types::{ArchiveEntry, EntryId};
 
 /// 把条目流安全落到磁盘的唯一实现。所有写盘入口（GUI 解压、CLI、主题导入）
@@ -27,6 +30,8 @@ enum CurrentEntry {
         expected_crc: Option<u32>,
         written: u64,
         id: EntryId,
+        path: PathBuf,
+        mtime: Option<SystemTime>,
     },
 }
 
@@ -84,6 +89,8 @@ impl ExtractSink for ExtractDirSink {
             expected_crc: entry.crc32,
             written: 0,
             id,
+            path,
+            mtime: entry.mtime,
         });
         Ok(())
     }
@@ -132,6 +139,8 @@ impl ExtractSink for ExtractDirSink {
             expected_crc,
             written,
             id: current_id,
+            path,
+            mtime,
         } = current
         else {
             return Ok(());
@@ -149,6 +158,10 @@ impl ExtractSink for ExtractDirSink {
         }
 
         atomic.commit()?;
+        if let Some(time) = mtime {
+            // 恢复归档时间失败不阻断解压（例如文件系统不支持）。
+            let _ = set_mtime(&path, time);
+        }
         self.bytes_written = self.bytes_written.saturating_add(written);
         Ok(())
     }

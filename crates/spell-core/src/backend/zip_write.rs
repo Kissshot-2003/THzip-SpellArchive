@@ -228,6 +228,8 @@ fn map_method(method: Method) -> Result<zip::CompressionMethod, ArchiveError> {
     match method {
         Method::Store => Ok(zip::CompressionMethod::Stored),
         Method::Deflate => Ok(zip::CompressionMethod::Deflated),
+        Method::Bzip2 => Ok(zip::CompressionMethod::Bzip2),
+        Method::Zstd => Ok(zip::CompressionMethod::Zstd),
         other => Err(ArchiveError::Unsupported(format!(
             "zip 创建暂不支持压缩方法 {}",
             other.label()
@@ -236,10 +238,11 @@ fn map_method(method: Method) -> Result<zip::CompressionMethod, ArchiveError> {
 }
 
 fn zip_method_to_method(method: zip::CompressionMethod) -> Method {
-    if method == zip::CompressionMethod::Stored {
-        Method::Store
-    } else {
-        Method::Deflate
+    match method {
+        zip::CompressionMethod::Stored => Method::Store,
+        zip::CompressionMethod::Bzip2 => Method::Bzip2,
+        zip::CompressionMethod::Zstd => Method::Zstd,
+        _ => Method::Deflate,
     }
 }
 

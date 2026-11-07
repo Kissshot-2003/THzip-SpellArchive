@@ -127,6 +127,8 @@ pub fn resolve_all(
             PlanAction::Create | PlanAction::Overwrite | PlanAction::Rename(_) => {
                 let mut path = item.rel_path.clone();
                 let mut overwrite = item.action == PlanAction::Overwrite;
+                let mut rename_conflict = false;
+                let mut style = SuffixStyle::Tilde;
 
                 if conflicted.contains(&item.id) {
                     match decisions.resolve(item.id) {
@@ -136,18 +138,28 @@ pub fn resolve_all(
                             continue;
                         }
                         OverwritePolicy::Overwrite => overwrite = true,
-                        OverwritePolicy::Rename | OverwritePolicy::AutoNumber => {
+                        OverwritePolicy::Rename => {
+                            // 目录条目不能单独改名，否则子条目仍会写到旧路径。
+                            rename_conflict = !item.kind.is_dir();
+                            overwrite = false;
+                        }
+                        OverwritePolicy::AutoNumber => {
+                            rename_conflict = !item.kind.is_dir();
+                            style = SuffixStyle::Paren;
                             overwrite = false;
                         }
                     }
                 }
 
-                // 包内同名 / 大小写冲突：始终改名，不能静默丢文件。
+                // 包内同名 / 大小写冲突：始终改名，不能静默丢文件；
+                // Rename/AutoNumber 还要避开磁盘上已存在的文件。
                 let mut candidate = path.clone();
                 let mut n = 0u32;
-                while used.contains(&collision_key(&candidate)) {
+                while used.contains(&collision_key(&candidate))
+                    || (rename_conflict && candidate.exists())
+                {
                     n += 1;
-                    candidate = with_suffix(&path, n);
+                    candidate = suffix_path(&path, n, style);
                 }
                 if n > 0 {
                     overwrite = false;
@@ -168,6 +180,21 @@ fn collision_key(path: &Path) -> String {
     path.to_string_lossy().to_lowercase()
 }
 
+#[derive(Debug, Clone, Copy)]
+enum SuffixStyle {
+    /// `a.txt` → `a~1.txt`
+    Tilde,
+    /// `a.txt` → `a (1).txt`
+    Paren,
+}
+
+fn suffix_path(path: &Path, n: u32, style: SuffixStyle) -> PathBuf {
+    match style {
+        SuffixStyle::Tilde => with_suffix(path, n),
+        SuffixStyle::Paren => with_numbered_suffix(path, n),
+    }
+}
+
 /// 在扩展名前插入 `~n`：`a/b.txt` → `a/b~1.txt`。
 pub fn with_suffix(path: &Path, n: u32) -> PathBuf {
     let stem = path
@@ -177,6 +204,22 @@ pub fn with_suffix(path: &Path, n: u32) -> PathBuf {
     let name = match path.extension() {
         Some(ext) => format!("{stem}~{n}.{}", ext.to_string_lossy()),
         None => format!("{stem}~{n}"),
+    };
+    match path.parent() {
+        Some(parent) => parent.join(name),
+        None => PathBuf::from(name),
+    }
+}
+
+/// 在扩展名前插入 ` (n)`：`a/b.txt` → `a/b (1).txt`。
+pub fn with_numbered_suffix(path: &Path, n: u32) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match path.extension() {
+        Some(ext) => format!("{stem} ({n}).{}", ext.to_string_lossy()),
+        None => format!("{stem} ({n})"),
     };
     match path.parent() {
         Some(parent) => parent.join(name),
@@ -253,5 +296,80 @@ mod tests {
                 overwrite: false,
             }
         );
+    }
+
+    fn conflict_plan(path: &std::path::Path) -> ExtractPlan {
+        let mut plan = ExtractPlan::default();
+        plan.items
+            .push(item(0, path.to_str().unwrap(), PlanAction::Overwrite));
+        plan.conflicts.push(Conflict {
+            id: 0,
+            path: path.to_path_buf(),
+            kind: crate::plan::ConflictKind::ExistingFile,
+        });
+        plan
+    }
+
+    #[test]
+    fn rename_policy_keeps_existing_file() {
+        let base = std::env::temp_dir().join(format!(
+            "spellarchive-rename-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let target = base.join("a.txt");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::write(base.join("a~1.txt"), b"also old").unwrap();
+
+        let plan = conflict_plan(&target);
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Rename,
+            ..Default::default()
+        };
+        let resolved = resolve_all(&plan, &decisions);
+        assert_eq!(
+            resolved[&0],
+            ResolvedAction::Write {
+                path: base.join("a~2.txt"),
+                overwrite: false,
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn auto_number_policy_uses_parenthesized_suffix() {
+        let base = std::env::temp_dir().join(format!(
+            "spellarchive-number-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let target = base.join("a.txt");
+        std::fs::write(&target, b"old").unwrap();
+
+        let plan = conflict_plan(&target);
+        let decisions = DecisionTable {
+            default: OverwritePolicy::AutoNumber,
+            ..Default::default()
+        };
+        let resolved = resolve_all(&plan, &decisions);
+        assert_eq!(
+            resolved[&0],
+            ResolvedAction::Write {
+                path: base.join("a (1).txt"),
+                overwrite: false,
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

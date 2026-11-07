@@ -16,7 +16,7 @@ cargo run -p spell-cli -- list <归档>            # 列出条目（zip / 7z / t
 cargo run -p spell-cli -- test <归档>            # CRC 完整性测试
 cargo run -p spell-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
 cargo run -p spell-cli -- pack <输出> <输入...>      # 格式由扩展名决定（zip/7z/tar 家族）
-cargo test --workspace                           # 65 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 76 个单元 / 集成 / 归档格式用例
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
 
@@ -26,19 +26,19 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 |---|---|
 | 格式嗅探（magic bytes） | 可用 |
 | 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护 | 可用，含测试 |
-| zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA；同名自动 `~1` 改名 |
-| zip 写 | **可用**：Store / Deflate、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
+| zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA；不支持方法预检提示；同名自动 `~1` 改名 |
+| zip 写 | **可用**：Store / Deflate / BZip2 / Zstd、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
 | 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密、`.7z.001` 分卷拼接 |
 | 7z 写 | **可用**：LZMA2 / COPY、AES-256 头加密、原子替换 |
 | tar 家族读 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4；符号链接跳过；无扩展名的压缩包会探测内层 tar |
 | 单文件流读 | **可用**：`.gz` / `.bz2` / `.xz` / `.zst` / `.lz4`，自动去掉压缩扩展名作为文件名 |
 | tar 家族写 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4，原子替换 |
-| CLI | `sniff` / `list` / `test` / `extract`（全部已支持格式）、`pack`（zip + 7z + tar 家族） |
+| CLI | `sniff` / `list` / `test` / `extract`（含 --force/--rename/--number）、`pack`（zip 可选 --method bzip2/zstd + 7z + tar 家族） |
 | 任务线程池 | **可用**：2 条后台 worker、`crossbeam-channel` 事件、进度节流、取消、panic 兜底 |
-| GUI | **可用**：打开任意支持格式、后台预检、解压/测试/取消、创建 zip/7z/tar、追加 zip、AES-256、主题包导入、多选与表头排序 |
-| 桌面集成 | **可用**：设置持久化（schema 2）、关闭到托盘开关、拖拽打开与悬停提示、单实例转交、托盘菜单、资源管理器右键菜单、主题热重载 |
+| GUI | **可用**：打开任意支持格式、后台预检、解压/测试/取消、创建 zip/7z/tar（zip 可选 BZip2/Zstd）、追加 zip、AES-256、后台主题包导入、多选与表头排序、冲突跳过/覆盖/改名/自动编号 |
+| 桌面集成 | **可用**：设置持久化（schema 3，含排序键）、关闭到托盘开关、拖拽打开与悬停提示、单实例转交、本地化托盘菜单、资源管理器右键菜单（启动自检 exe 路径）、主题热重载 |
 | 日志 | `%APPDATA%\SpellArchive\spellarchive.log`（5 MiB 轮转）+ panic hook |
-| 主题引擎 | 可扫描 `themes/*/theme.toml`，载入 PNG 纹理与配色；缺资源回退内置主题 |
+| 主题引擎 | 可扫描 `themes/*/theme.toml`，按需载入 PNG 纹理与配色；缺资源回退内置主题 |
 | 字体 | 自动加载系统 CJK 字体（simhei / Deng） |
 | Windows 资源 | `build.rs`：exe 图标、版本信息、DPI/长路径 manifest；release 隐藏控制台 |
 

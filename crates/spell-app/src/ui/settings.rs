@@ -144,6 +144,9 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     if app.locale != app.tr.locale {
         app.tr.locale = app.locale;
     }
+    if app.locale != prev_locale {
+        app.rebuild_tray();
+    }
     if app.locale != prev_locale
         || app.tr.prefer_standard != prev_standard
         || app.close_to_tray != prev_close_to_tray

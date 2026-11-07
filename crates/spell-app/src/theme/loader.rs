@@ -91,7 +91,7 @@ pub fn signature() -> Option<(u64, std::time::SystemTime)> {
     latest.map(|latest| (count, latest))
 }
 
-pub fn load_all(ctx: &egui::Context) -> Vec<Theme> {
+pub fn load_all() -> Vec<Theme> {
     let Some(root) = theme_root() else {
         return Vec::new();
     };
@@ -109,7 +109,7 @@ pub fn load_all(ctx: &egui::Context) -> Vec<Theme> {
         if !manifest.is_file() {
             continue;
         }
-        match load_theme(ctx, &dir, &manifest) {
+        match load_theme(&dir, &manifest) {
             Ok(theme) => themes.push(theme),
             Err(err) => eprintln!("[theme] {} 加载失败: {err}", dir.display()),
         }
@@ -150,7 +150,7 @@ fn theme_root() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_dir())
 }
 
-fn load_theme(ctx: &egui::Context, dir: &Path, manifest: &Path) -> Result<Theme, String> {
+fn load_theme(dir: &Path, manifest: &Path) -> Result<Theme, String> {
     let text = std::fs::read_to_string(manifest).map_err(|err| err.to_string())?;
     let manifest: Manifest =
         toml::from_str(&text).map_err(|err| format!("toml 解析失败: {err}"))?;
@@ -185,14 +185,9 @@ fn load_theme(ctx: &egui::Context, dir: &Path, manifest: &Path) -> Result<Theme,
         progress_bg: pick(&manifest.color, "progress_bg", base.progress_bg),
     };
 
-    let options = if manifest.meta.sampling_pixel {
-        egui::TextureOptions::NEAREST
-    } else {
-        egui::TextureOptions::LINEAR
-    };
-
     let root = std::fs::canonicalize(dir).map_err(|err| err.to_string())?;
-    let mut resources = std::collections::HashMap::new();
+    // 只解析路径，纹理在切换到该主题时由 ThemeStore 懒加载。
+    let mut paths = std::collections::HashMap::new();
 
     for (key_name, rel_path) in &manifest.resource {
         let Some(key) = ResKey::from_name(key_name) else {
@@ -203,12 +198,7 @@ fn load_theme(ctx: &egui::Context, dir: &Path, manifest: &Path) -> Result<Theme,
             eprintln!("[theme] {id}: 资源路径越界或不存在 `{rel_path}`");
             continue;
         };
-        match load_texture(ctx, &path, options, &format!("{id}/{key_name}")) {
-            Ok(texture) => {
-                resources.insert(key, texture);
-            }
-            Err(err) => eprintln!("[theme] {id}: {key_name} 载入失败: {err}"),
-        }
+        paths.insert(key, path);
     }
 
     Ok(Theme {
@@ -222,7 +212,8 @@ fn load_theme(ctx: &egui::Context, dir: &Path, manifest: &Path) -> Result<Theme,
         scale: manifest.meta.scale.max(1),
         palette,
         text_map: manifest.text_map,
-        resources,
+        resources: std::collections::HashMap::new(),
+        paths,
     })
 }
 
@@ -241,7 +232,7 @@ fn resolve(root: &Path, rel: &str) -> Option<PathBuf> {
     canonical.starts_with(root).then_some(canonical)
 }
 
-fn load_texture(
+pub(crate) fn load_texture(
     ctx: &egui::Context,
     path: &Path,
     options: egui::TextureOptions,

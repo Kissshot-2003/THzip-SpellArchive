@@ -7,7 +7,7 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use crate::backend;
 use crate::error::ArchiveError;
 use crate::limits::Limits;
-use crate::plan::{DecisionTable, ExtractPlan};
+use crate::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
 use crate::reader::{ArchiveReader, ExtractSink};
 use crate::safety::{ExtractDirSink, VerifySink};
 use crate::secret::SecretString;
@@ -48,6 +48,12 @@ pub enum TaskOp {
         method: Method,
         append: bool,
         password: Option<SecretString>,
+    },
+    /// 把主题包解压到目标 themes 目录；冲突默认跳过。
+    InstallTheme {
+        archive: PathBuf,
+        target: PathBuf,
+        limits: Limits,
     },
 }
 
@@ -437,6 +443,114 @@ fn run_task(
                         );
                     }
                 },
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        TaskOp::InstallTheme {
+            archive,
+            target,
+            limits,
+        } => {
+            send(
+                tx,
+                TaskEvent::PhaseChanged {
+                    task,
+                    phase: TaskPhase::Planning,
+                },
+            );
+            let mut reader = match backend::open(&archive, None) {
+                Ok(reader) => reader,
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.to_string(),
+                        },
+                    );
+                    return Ok(());
+                }
+            };
+
+            let has_manifest = reader.entries().iter().any(|entry| {
+                let name = entry.display.trim_start_matches("./").replace('\\', "/");
+                let parts: Vec<&str> = name.split('/').filter(|part| !part.is_empty()).collect();
+                parts.len() == 2 && parts[1] == "theme.toml"
+            });
+            if !has_manifest {
+                send(
+                    tx,
+                    TaskEvent::Failed {
+                        task,
+                        error: "主题包格式不对，需要 <主题目录>/theme.toml".to_owned(),
+                    },
+                );
+                return Ok(());
+            }
+
+            let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
+            let plan = match reader.plan(&ids, &target, &limits) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.to_string(),
+                        },
+                    );
+                    return Ok(());
+                }
+            };
+
+            send(
+                tx,
+                TaskEvent::Started {
+                    task,
+                    total_bytes: plan.total_bytes,
+                    total_entries: plan.items.len() as u32,
+                },
+            );
+            send(
+                tx,
+                TaskEvent::PhaseChanged {
+                    task,
+                    phase: TaskPhase::Running,
+                },
+            );
+
+            let decisions = DecisionTable {
+                default: OverwritePolicy::Skip,
+                ..Default::default()
+            };
+            let sink = ExtractDirSink::new(&plan, &decisions, limits);
+            let mut sink = ProgressSink::new(sink, tx.clone(), task);
+            match reader.extract(&plan, &decisions, cancel, &mut sink) {
+                Ok(report) => {
+                    send(
+                        tx,
+                        TaskEvent::ThemeInstalled {
+                            task,
+                            report: Arc::new(report),
+                            source: archive,
+                        },
+                    );
+                    send(
+                        tx,
+                        TaskEvent::PhaseChanged {
+                            task,
+                            phase: TaskPhase::Done,
+                        },
+                    );
+                }
                 Err(err) => {
                     send(
                         tx,

@@ -169,6 +169,24 @@ impl ArchiveReader for ZipReader {
                 continue;
             }
 
+            // 明确不支持的方法在预检阶段提示并跳过，避免解压到一半才失败。
+            // Unknown(99) 是 WinZip AES，实际压缩方法仍由 zip crate 处理。
+            let unsupported = match entry.method {
+                Method::Xz => true,
+                Method::Lzma => entry.encrypted,
+                Method::Unknown(code) => code != 99,
+                _ => false,
+            };
+            if unsupported {
+                plan.warnings.push(PlanWarning::UnsupportedMethod {
+                    id,
+                    method: entry.method.label().to_owned(),
+                });
+                item.action = PlanAction::Skip;
+                plan.items.push(item);
+                continue;
+            }
+
             let rel = match sanitize_rel(&entry.display, limits) {
                 Ok(rel) => rel,
                 Err(err) => {

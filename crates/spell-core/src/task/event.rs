@@ -110,6 +110,12 @@ pub enum TaskEvent {
         report: Arc<FinishReport>,
         append: bool,
     },
+    /// 主题包已在后台解压到 themes 目录。
+    ThemeInstalled {
+        task: TaskId,
+        report: Arc<ExtractReport>,
+        source: PathBuf,
+    },
     Failed {
         task: TaskId,
         error: String,

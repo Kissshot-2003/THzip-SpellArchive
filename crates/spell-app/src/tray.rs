@@ -4,6 +4,8 @@ use image::GenericImageView;
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 
+use crate::i18n::{TextKey, Translator};
+
 pub enum TrayAction {
     Show,
     Hide,
@@ -18,10 +20,10 @@ pub struct Tray {
 }
 
 impl Tray {
-    pub fn new() -> Option<Self> {
-        let show = MenuItem::new("显示主窗口", true, None);
-        let hide = MenuItem::new("隐藏主窗口", true, None);
-        let quit = MenuItem::new("退出", true, None);
+    pub fn new(tr: &Translator) -> Option<Self> {
+        let show = MenuItem::new(tr.t(TextKey::TrayShow), true, None);
+        let hide = MenuItem::new(tr.t(TextKey::TrayHide), true, None);
+        let quit = MenuItem::new(tr.t(TextKey::TrayQuit), true, None);
         let separator = PredefinedMenuItem::separator();
 
         let menu = Menu::new();

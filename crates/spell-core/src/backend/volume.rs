@@ -31,21 +31,49 @@ pub fn collect_volumes(first: &Path) -> io::Result<Vec<PathBuf>> {
     let parent = first
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "分卷没有父目录"))?;
-    let stem = &name[..name.len() - 3];
+    let Some((prefix, digits)) = name.rsplit_once('.') else {
+        return Ok(vec![first.to_path_buf()]);
+    };
+    let width = digits.len();
 
-    let mut volumes = Vec::new();
-    for index in 1..=9_999u32 {
-        let candidate = parent.join(format!("{stem}{index:03}"));
-        if !candidate.exists() {
-            break;
+    // 扫描目录而不是按顺序探测：能把“缺了中间某卷”的情况报清楚。
+    let mut found: std::collections::BTreeMap<u32, PathBuf> = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(parent)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let Some(candidate) = file_name.to_str() else {
+            continue;
+        };
+        let Some(rest) = candidate.strip_prefix(&format!("{prefix}.")) else {
+            continue;
+        };
+        if rest.is_empty() || rest.len() > 4 || !rest.chars().all(|c| c.is_ascii_digit()) {
+            continue;
         }
-        volumes.push(candidate);
+        if let Ok(index) = rest.parse::<u32>() {
+            if index > 0 {
+                found.insert(index, entry.path());
+            }
+        }
     }
 
-    if volumes.is_empty() {
-        volumes.push(first.to_path_buf());
+    if found.is_empty() {
+        return Ok(vec![first.to_path_buf()]);
     }
-    Ok(volumes)
+
+    let max = *found.keys().next_back().unwrap_or(&1);
+    let missing: Vec<String> = (1..=max)
+        .filter(|index| !found.contains_key(index))
+        .map(|index| format!("{index:0width$}"))
+        .collect();
+    if !missing.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("分卷不完整，缺少：{}", missing.join(", ")),
+        ));
+    }
+
+    Ok(found.into_values().collect())
 }
 
 /// 把多个分卷当成一个连续的 Read + Seek 流。
@@ -152,6 +180,52 @@ mod tests {
         assert!(!is_volume_name("a.zip"));
         assert!(!is_volume_name("a.7z"));
         assert!(!is_volume_name("a.7z.abc"));
+    }
+
+    #[test]
+    fn reports_missing_volume_numbers() {
+        let dir = std::env::temp_dir().join(format!(
+            "spellarchive-vol-missing-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for index in [1u32, 2, 4] {
+            std::fs::write(dir.join(format!("a.7z.{index:03}")), b"x").unwrap();
+        }
+
+        let err = super::collect_volumes(&dir.join("a.7z.001")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("003"), "{err}");
+        assert!(!err.to_string().contains("002"), "{err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collects_consecutive_volumes_from_any_part() {
+        let dir = std::env::temp_dir().join(format!(
+            "spellarchive-vol-order-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for index in [1u32, 2, 3] {
+            std::fs::write(dir.join(format!("a.7z.{index:03}")), b"x").unwrap();
+        }
+
+        let volumes = super::collect_volumes(&dir.join("a.7z.002")).unwrap();
+        assert_eq!(volumes.len(), 3);
+        assert!(volumes[0].ends_with("a.7z.001"));
+        assert!(volumes[2].ends_with("a.7z.003"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use spell_core::plan::OverwritePolicy;
 use spell_core::secret::SecretString;
 use spell_core::types::ArchiveKind;
 
-use crate::app::SpellApp;
+use crate::app::{SpellApp, ZipPackMethod};
 use crate::i18n::TextKey;
 use crate::ui::format_bytes;
 
@@ -110,6 +110,26 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
 
             ui.add_enabled_ui(supports_encrypt, |ui| {
                 ui.checkbox(&mut app.pack_state.store, "仅存储（不压缩）");
+            });
+            ui.add_enabled_ui(is_zip && !app.pack_state.store, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("zip 压缩方法");
+                    egui::ComboBox::from_id_salt("pack_zip_method")
+                        .selected_text(app.pack_state.zip_method.label())
+                        .show_ui(ui, |ui| {
+                            for method in [
+                                ZipPackMethod::Deflate,
+                                ZipPackMethod::Bzip2,
+                                ZipPackMethod::Zstd,
+                            ] {
+                                ui.selectable_value(
+                                    &mut app.pack_state.zip_method,
+                                    method,
+                                    method.label(),
+                                );
+                            }
+                        });
+                });
             });
             ui.add_enabled_ui(is_zip, |ui| {
                 if ui
@@ -273,6 +293,8 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
     let warnings_label = app.tr.t(TextKey::Warnings);
     let skip_label = app.tr.t(TextKey::SkipExisting);
     let overwrite_label = app.tr.t(TextKey::OverwriteExisting);
+    let rename_label = app.tr.t(TextKey::RenameExisting);
+    let autono_label = app.tr.t(TextKey::AutoNumberExisting);
 
     let plan = &pending.plan;
     let entries = plan.items.len();
@@ -354,6 +376,12 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
                 &mut pending.policy,
                 OverwritePolicy::Overwrite,
                 overwrite_label,
+            );
+            ui.radio_value(&mut pending.policy, OverwritePolicy::Rename, rename_label);
+            ui.radio_value(
+                &mut pending.policy,
+                OverwritePolicy::AutoNumber,
+                autono_label,
             );
 
             ui.add_space(8.0);

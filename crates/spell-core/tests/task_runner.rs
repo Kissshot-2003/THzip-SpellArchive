@@ -298,6 +298,71 @@ fn packs_through_worker() {
 }
 
 #[test]
+fn installs_theme_through_worker() {
+    let dir = TempDir::new("theme");
+    let archive = dir.path().join("theme.zip");
+    write_zip(
+        &archive,
+        &[
+            ("mytheme/theme.toml", b"schema = 1\n"),
+            ("mytheme/png/avatar.png", b"\x89PNG"),
+        ],
+    );
+    let target = dir.path().join("themes");
+    std::fs::create_dir_all(&target).unwrap();
+
+    let mut runner = TaskRunner::new(1);
+    let handle = runner.submit(TaskOp::InstallTheme {
+        archive,
+        target: target.clone(),
+        limits: spell_core::Limits::default(),
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::ThemeInstalled { task, .. } | TaskEvent::Failed { task, .. }
+                if *task == handle.id
+        )
+    });
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            TaskEvent::ThemeInstalled { report, .. } if report.failed.is_empty()
+        )),
+        "主题包应导入成功"
+    );
+    assert!(target.join("mytheme/theme.toml").is_file());
+    assert!(target.join("mytheme/png/avatar.png").is_file());
+}
+
+#[test]
+fn rejects_theme_without_manifest() {
+    let dir = TempDir::new("theme-bad");
+    let archive = dir.path().join("bad.zip");
+    write_zip(&archive, &[("theme.toml", b"schema = 1\n")]);
+    let target = dir.path().join("themes");
+    std::fs::create_dir_all(&target).unwrap();
+
+    let mut runner = TaskRunner::new(1);
+    let handle = runner.submit(TaskOp::InstallTheme {
+        archive,
+        target,
+        limits: spell_core::Limits::default(),
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::ThemeInstalled { task, .. } | TaskEvent::Failed { task, .. }
+                if *task == handle.id
+        )
+    });
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TaskEvent::Failed { error, .. } if error.contains("theme.toml")
+    )));
+}
+
+#[test]
 fn missing_password_reports_need_password() {
     let dir = TempDir::new("password");
     let archive = dir.path().join("empty.zip");

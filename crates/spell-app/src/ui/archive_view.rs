@@ -253,6 +253,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 app.sort_key = key;
                 app.sort_asc = true;
             }
+            app.touch_settings();
         }
     });
 }

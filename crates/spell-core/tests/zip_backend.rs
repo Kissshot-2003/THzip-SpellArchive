@@ -265,6 +265,64 @@ fn non_deflate_methods_read_and_extract() {
 }
 
 #[test]
+fn extraction_restores_entry_mtime() {
+    let dir = TempDir::new("mtime");
+    let archive = dir.path().join("time.zip");
+    let file = std::fs::File::create(&archive).unwrap();
+    let mut writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .last_modified_time(zip::DateTime::from_date_and_time(2021, 4, 5, 6, 7, 8).unwrap());
+    writer.start_file("a.txt", options).unwrap();
+    writer.write_all(b"x").unwrap();
+    writer.finish().unwrap();
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target, DecisionTable::default());
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+
+    let modified = std::fs::metadata(target.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // 2021-04-05 落在 2020-09 与 2023-11 之间即可证明写回的是归档时间。
+    assert!(
+        modified > 1_600_000_000 && modified < 1_700_000_000,
+        "{modified}"
+    );
+}
+
+#[test]
+fn xz_entries_are_warned_and_skipped() {
+    use spell_core::plan::PlanWarning;
+    use spell_core::types::Method;
+
+    let archive = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join("xz.zip");
+    let dir = TempDir::new("xz");
+    let target = dir.path().join("out");
+
+    let reader = backend::open(&archive, None).unwrap();
+    assert_eq!(reader.entries()[0].method, Method::Xz);
+    let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
+    let plan = reader.plan(&ids, &target, &Limits::default()).unwrap();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| matches!(warning, PlanWarning::UnsupportedMethod { .. }))
+    );
+    assert!(matches!(plan.items[0].action, PlanAction::Skip));
+
+    let report = extract_all(&archive, &target, DecisionTable::default());
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(report.skipped.len(), 1);
+    assert!(!target.join("payload.txt").exists());
+}
+
+#[test]
 fn lzma_and_deflate64_fixtures_extract() {
     use spell_core::types::Method;
 

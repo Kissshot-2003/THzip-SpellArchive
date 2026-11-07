@@ -11,7 +11,7 @@ const STATUS_W: f32 = 120.0;
 const CANCEL_W: f32 = 24.0;
 
 pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
-    let theme = app.themes.current().clone();
+    let theme = app.themes.current();
     let palette = theme.palette;
     let title = app.tr.t(TextKey::TaskQueue);
     let clear_label = app.tr.t(TextKey::ClearFinished);
@@ -76,7 +76,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                                 bar_width,
                                 task.progress,
                                 task.failed(),
-                                &theme,
+                                theme,
                             );
 
                             ui.add_sized(

@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use spell_core::safety::write_atomic;
 
+/// 当前配置 schema。新增字段时递增，并在 `load` 里补迁移。
+pub const CURRENT_SCHEMA: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
@@ -13,18 +16,23 @@ pub struct Prefs {
     pub show_hint: bool,
     pub close_to_tray: bool,
     pub last_dir: Option<String>,
+    /// 归档表排序键：name / size / packed / ratio / method / time。
+    pub sort_key: Option<String>,
+    pub sort_asc: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            schema: 2,
+            schema: CURRENT_SCHEMA,
             theme: None,
             locale: "zh-CN".to_owned(),
             prefer_standard: false,
             show_hint: true,
             close_to_tray: true,
             last_dir: None,
+            sort_key: None,
+            sort_asc: true,
         }
     }
 }
@@ -38,9 +46,10 @@ impl Prefs {
             return Self::default();
         };
         let mut prefs: Prefs = toml::from_str(&text).unwrap_or_default();
-        // schema 1 没有 close_to_tray；serde default 已补齐，只需升级版本号。
-        if prefs.schema < 2 {
-            prefs.schema = 2;
+        // schema 1 没有 close_to_tray；schema 2 没有 sort_key/sort_asc。
+        // serde default 已补齐缺失字段，这里只需推进版本号。
+        if prefs.schema < CURRENT_SCHEMA {
+            prefs.schema = CURRENT_SCHEMA;
         }
         prefs
     }
@@ -93,6 +102,15 @@ mod tests {
         assert_eq!(prefs.locale, "zh-CN");
         assert!(prefs.show_hint);
         assert!(prefs.close_to_tray);
-        assert_eq!(prefs.schema, 2);
+        assert!(prefs.sort_asc);
+        assert_eq!(prefs.sort_key, None);
+        assert_eq!(prefs.schema, super::CURRENT_SCHEMA);
+    }
+
+    #[test]
+    fn parses_sort_preferences() {
+        let prefs: Prefs = toml::from_str("sort_key = \"size\"\nsort_asc = false\n").unwrap();
+        assert_eq!(prefs.sort_key.as_deref(), Some("size"));
+        assert!(!prefs.sort_asc);
     }
 }

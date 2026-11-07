@@ -65,16 +65,19 @@ fn usage() {
   spell sniff   <文件>                    识别归档格式（magic bytes）
   spell list    <文件> [--password <pw>]  列出条目
   spell test    <文件> [--password <pw>]  完整性测试（CRC 校验）
-  spell extract <文件> [目标目录] [--force] [--password <pw>]
-                                          安全解压；默认不覆盖已有文件
-  spell pack    <输出> <输入...> [--store] [--force] [--append] [--password <pw>]
+  spell extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>]
+                                          安全解压；默认跳过已有文件
+  spell pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
+                [--force] [--append] [--password <pw>]
                                           创建 zip / tar 家族；--password 仅用于 zip AES-256
   spell --version
 
 说明:
   - 不带目标目录时解压到「文件所在目录/去扩展名」。
-  - --force 等价于覆盖策略「全部覆盖」；否则冲突条目会被跳过。
+  - 冲突策略：--force 覆盖；--rename 保留已有并改名 a~1.txt；--number 改为 a (1).txt；
+    都不加则跳过冲突条目。
   - 支持 zip / 7z / tar 家族读写；7z 与 zip 可加密。
+  - --method 只影响 zip：deflate（默认）/ bzip2 / zstd；--store 优先。
   - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
   - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
@@ -177,6 +180,14 @@ fn extract(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let force = args.iter().any(|arg| arg == "--force" || arg == "-f");
+    let rename = args.iter().any(|arg| arg == "--rename");
+    let auto_number = args
+        .iter()
+        .any(|arg| arg == "--number" || arg == "--auto-number");
+    if force && (rename || auto_number) || (rename && auto_number) {
+        eprintln!("--force / --rename / --number 只能选一个");
+        return ExitCode::FAILURE;
+    }
     let password = password_from(args);
     let input = Path::new(input);
 
@@ -208,6 +219,10 @@ fn extract(args: &[String]) -> ExitCode {
     let decisions = DecisionTable {
         default: if force {
             OverwritePolicy::Overwrite
+        } else if rename {
+            OverwritePolicy::Rename
+        } else if auto_number {
+            OverwritePolicy::AutoNumber
         } else {
             OverwritePolicy::Skip
         },
@@ -263,7 +278,7 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
     }
     if !plan.conflicts.is_empty() {
         println!(
-            "冲突: {} 个（默认跳过，--force 覆盖）",
+            "冲突: {} 个（默认跳过；可用 --force / --rename / --number）",
             plan.conflicts.len()
         );
         for conflict in plan.conflicts.iter().take(10) {
@@ -300,6 +315,11 @@ fn pack(args: &[String]) -> ExitCode {
     let store = args.iter().any(|arg| arg == "--store" || arg == "-s");
     let force = args.iter().any(|arg| arg == "--force" || arg == "-f");
     let append = args.iter().any(|arg| arg == "--append" || arg == "-a");
+    let method_name = args
+        .iter()
+        .position(|arg| arg == "--method" || arg == "-m")
+        .and_then(|index| args.get(index + 1))
+        .map(|value| value.to_ascii_lowercase());
     let password = password_from(args);
     let mut inputs = Vec::new();
     let mut skip_value = false;
@@ -308,7 +328,7 @@ fn pack(args: &[String]) -> ExitCode {
             skip_value = false;
             continue;
         }
-        if arg == "--password" || arg == "-p" {
+        if arg == "--password" || arg == "-p" || arg == "--method" || arg == "-m" {
             skip_value = true;
             continue;
         }
@@ -366,9 +386,29 @@ fn pack(args: &[String]) -> ExitCode {
     };
     let total: u64 = entries.iter().map(|entry| entry.size).sum();
 
+    let method = if store {
+        Method::Store
+    } else if kind == ArchiveKind::Zip {
+        match method_name.as_deref() {
+            None | Some("deflate") => Method::Deflate,
+            Some("bzip2") => Method::Bzip2,
+            Some("zstd") | Some("zstandard") => Method::Zstd,
+            Some(other) => {
+                eprintln!("不支持的 zip 压缩方法：{other}（可用 deflate / bzip2 / zstd）");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        if method_name.is_some() {
+            eprintln!("--method 目前只支持 zip");
+            return ExitCode::FAILURE;
+        }
+        Method::Deflate
+    };
+
     let detail = match kind {
         ArchiveKind::Zip => {
-            let mut detail = format!("zip · {}", if store { "Store" } else { "Deflate" });
+            let mut detail = format!("zip · {}", method.label());
             if password.is_some() && !append {
                 detail.push_str(" + AES-256");
             }
@@ -392,11 +432,6 @@ fn pack(args: &[String]) -> ExitCode {
         detail
     );
 
-    let method = if store {
-        Method::Store
-    } else {
-        Method::Deflate
-    };
     let created = if append {
         backend::create_writer_append(output, kind, method)
     } else {

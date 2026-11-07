@@ -177,6 +177,8 @@ pub struct Theme {
     /// 主题文案覆盖（theme.toml `[text_map]`）。
     pub text_map: BTreeMap<String, String>,
     pub resources: HashMap<ResKey, egui::TextureHandle>,
+    /// 解析后的纹理路径；切换主题时再解码，避免启动加载全部主题。
+    pub(crate) paths: HashMap<ResKey, std::path::PathBuf>,
 }
 
 impl Theme {
@@ -203,6 +205,7 @@ impl Theme {
             palette,
             text_map,
             resources: HashMap::new(),
+            paths: HashMap::new(),
         }
     }
 }
@@ -213,15 +216,38 @@ pub struct ThemeStore {
 }
 
 impl ThemeStore {
-    /// 扫描 `themes/` 并从 PNG 载入纹理；目录不存在时退回内置主题。
-    pub fn load(ctx: &egui::Context) -> Self {
-        let mut themes = loader::load_all(ctx);
+    /// 扫描 `themes/` 解析配色与资源路径；纹理在 `ensure_loaded` 里按需解码。
+    pub fn load() -> Self {
+        let mut themes = loader::load_all();
         if themes.is_empty() {
             themes = builtin();
         } else {
             themes.push(plain_theme());
         }
         Self { themes, current: 0 }
+    }
+
+    /// 解码当前主题的纹理。切换主题后调用；已加载则直接返回。
+    pub fn ensure_loaded(&mut self, ctx: &egui::Context) {
+        let theme = &mut self.themes[self.current];
+        if !theme.resources.is_empty() || theme.paths.is_empty() {
+            return;
+        }
+        let options = if theme.sampling_pixel {
+            egui::TextureOptions::NEAREST
+        } else {
+            egui::TextureOptions::LINEAR
+        };
+        let paths = theme.paths.clone();
+        let id = theme.id.clone();
+        for (key, path) in paths {
+            match loader::load_texture(ctx, &path, options, &format!("{id}/{}", key.name())) {
+                Ok(texture) => {
+                    theme.resources.insert(key, texture);
+                }
+                Err(err) => eprintln!("[theme] {id}: {} 载入失败: {err}", key.name()),
+            }
+        }
     }
 
     pub fn current(&self) -> &Theme {

@@ -71,6 +71,8 @@ pub enum TextKey {
     ExtractTo,
     SkipExisting,
     OverwriteExisting,
+    RenameExisting,
+    AutoNumberExisting,
     ClearFinished,
     PasswordPrompt,
     TotalSize,
@@ -80,6 +82,9 @@ pub enum TextKey {
     Warnings,
     Opening,
     Testing,
+    TrayShow,
+    TrayHide,
+    TrayQuit,
 }
 
 impl TextKey {
@@ -115,6 +120,8 @@ impl TextKey {
             TextKey::ExtractTo => "extract_to",
             TextKey::SkipExisting => "skip_existing",
             TextKey::OverwriteExisting => "overwrite_existing",
+            TextKey::RenameExisting => "rename_existing",
+            TextKey::AutoNumberExisting => "auto_number_existing",
             TextKey::ClearFinished => "clear_finished",
             TextKey::PasswordPrompt => "password_prompt",
             TextKey::TotalSize => "total_size",
@@ -124,6 +131,9 @@ impl TextKey {
             TextKey::Warnings => "warnings",
             TextKey::Opening => "opening",
             TextKey::Testing => "testing",
+            TextKey::TrayShow => "tray_show",
+            TextKey::TrayHide => "tray_hide",
+            TextKey::TrayQuit => "tray_quit",
         }
     }
 }
@@ -162,6 +172,8 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ExtractTo => "解压到",
             TextKey::SkipExisting => "跳过已有文件",
             TextKey::OverwriteExisting => "覆盖已有文件",
+            TextKey::RenameExisting => "保留已有文件，新文件改名（a~1.txt）",
+            TextKey::AutoNumberExisting => "保留已有文件，新文件自动编号（a (1).txt）",
             TextKey::ClearFinished => "清除已完成",
             TextKey::PasswordPrompt => "此归档需要密码",
             TextKey::TotalSize => "解压后大小",
@@ -171,6 +183,9 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::Warnings => "警告",
             TextKey::Opening => "打开中…",
             TextKey::Testing => "校验中…",
+            TextKey::TrayShow => "显示主窗口",
+            TextKey::TrayHide => "隐藏主窗口",
+            TextKey::TrayQuit => "退出",
         },
         Locale::EnUs => match key {
             TextKey::AppTitle => "SpellArchive",
@@ -204,6 +219,8 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ExtractTo => "Extract to",
             TextKey::SkipExisting => "Skip existing files",
             TextKey::OverwriteExisting => "Overwrite existing files",
+            TextKey::RenameExisting => "Keep existing, rename new (a~1.txt)",
+            TextKey::AutoNumberExisting => "Keep existing, auto-number new (a (1).txt)",
             TextKey::ClearFinished => "Clear finished",
             TextKey::PasswordPrompt => "This archive requires a password",
             TextKey::TotalSize => "Unpacked size",
@@ -213,6 +230,9 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::Warnings => "Warnings",
             TextKey::Opening => "Opening…",
             TextKey::Testing => "Verifying…",
+            TextKey::TrayShow => "Show window",
+            TextKey::TrayHide => "Hide window",
+            TextKey::TrayQuit => "Quit",
         },
     }
 }

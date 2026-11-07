@@ -286,3 +286,40 @@ fn rejects_unsafe_archive_names() {
     assert!(spell_core::writer::normalize_entry_name("a/../../b").is_err());
     assert!(spell_core::writer::normalize_entry_name("a\\b\\c").is_ok());
 }
+
+#[test]
+fn creates_bzip2_and_zstd_zips() {
+    for method in [Method::Bzip2, Method::Zstd] {
+        let dir = TempDir::new(&format!("{}-method", method.label()));
+        let src = build_source(dir.path());
+        let archive = dir.path().join("out.zip");
+
+        let entries = scan_inputs(&[src], &Limits::default()).unwrap();
+        let mut writer = backend::create_writer(&archive, ArchiveKind::Zip, method).unwrap();
+        write_entries(
+            writer.as_mut(),
+            &entries,
+            Some(method),
+            &CancelToken::new(),
+            &|_| {},
+        )
+        .unwrap();
+        writer.finish().unwrap();
+
+        let reader = backend::open(&archive, None).unwrap();
+        let file_entry = reader
+            .entries()
+            .iter()
+            .find(|entry| entry.display.ends_with("说明.txt"))
+            .unwrap();
+        assert_eq!(file_entry.method, method);
+
+        let target = dir.path().join("out");
+        let report = extract_all(&archive, &target);
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(
+            std::fs::read(target.join("素材/说明.txt")).unwrap(),
+            "灵梦的符卡".as_bytes()
+        );
+    }
+}

@@ -16,6 +16,22 @@ pub fn is_installed() -> bool {
         .is_ok()
 }
 
+/// 已安装右键菜单时，把注册表里的 exe 路径刷新成当前进程路径。
+/// 打包升级或移动 exe 后，菜单不会指向旧位置。
+#[cfg(windows)]
+pub fn refresh_if_installed() -> io::Result<()> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let installed = BASES.iter().any(|base| hkcu.open_subkey(base).is_ok());
+    if !installed {
+        return Ok(());
+    }
+    let exe = std::env::current_exe()?;
+    install(&exe)
+}
+
 #[cfg(windows)]
 pub fn install(exe: &Path) -> io::Result<()> {
     use winreg::RegKey;
@@ -54,6 +70,11 @@ pub fn uninstall() -> io::Result<()> {
 #[cfg(not(windows))]
 pub fn is_installed() -> bool {
     false
+}
+
+#[cfg(not(windows))]
+pub fn refresh_if_installed() -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(not(windows))]

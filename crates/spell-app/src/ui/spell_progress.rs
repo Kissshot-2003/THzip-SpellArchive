@@ -13,22 +13,33 @@ pub fn show(
     theme: &Theme,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
+    // 贴图坐标吸附到物理像素，避免像素素材被半像素拉伸。
+    let ppp = ui.ctx().pixels_per_point();
+    let snap = |value: f32| (value * ppp).round() / ppp;
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(snap(rect.min.x), snap(rect.min.y)),
+        egui::pos2(snap(rect.max.x), snap(rect.max.y)),
+    );
     let painter = ui.painter();
     let ratio = ratio.clamp(0.0, 1.0);
     let full_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
-    match theme.texture(ResKey::ProgressSpellBg) {
-        Some(bg) => {
-            painter.add(egui::Shape::image(
-                bg.id(),
-                rect,
-                full_uv,
-                egui::Color32::WHITE,
-            ));
-        }
-        None => {
-            painter.rect_filled(rect, egui::CornerRadius::same(3), theme.palette.progress_bg);
-        }
+    // 底图优先九宫格，避免像素边框随宽度拉伸变形。
+    match crate::ui::nine_patch::NinePatch::from_theme(theme, ResKey::ProgressSpellBg) {
+        Some(bg) => bg.paint(ui, rect, egui::Color32::WHITE),
+        None => match theme.texture(ResKey::ProgressSpellBg) {
+            Some(bg) => {
+                painter.add(egui::Shape::image(
+                    bg.id(),
+                    rect,
+                    full_uv,
+                    egui::Color32::WHITE,
+                ));
+            }
+            None => {
+                painter.rect_filled(rect, egui::CornerRadius::same(3), theme.palette.progress_bg);
+            }
+        },
     }
 
     // 逐格点亮：量化到 1/10。

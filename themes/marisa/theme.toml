@@ -48,6 +48,9 @@ AvatarMain = "png/avatar.png"
 ParticleSakura = "png/particle_sakura.png"
 ParticleSparkle = "png/particle_star.png"
 
+[resource_nine_patch]
+ProgressSpellBg = [8, 8, 8, 8]
+
 [color]
 accent = "#F5B840"
 accent_soft = "#403824"

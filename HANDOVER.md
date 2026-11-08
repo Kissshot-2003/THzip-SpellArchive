@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 14280 行（含测试）。
+- Rust 约 14291 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -528,6 +528,7 @@ painter.add(Shape::image(fill.id(), fill_rect, uv, WHITE));
 
 UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉伸到整条。
 逐格模式：`lit = round(ratio * 10) / 10`。
+底图若配置 `[resource_nine_patch]` 则走九宫格；绘制矩形边缘吸附物理像素。
 
 ### 7.5 对话框
 
@@ -720,7 +721,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 2 | 已修复 | Rename 生成 `a~1.txt`，AutoNumber 生成 `a (1).txt`，并避开磁盘已有文件 |
 | 3 | 已修复 | 主题包导入改为后台 `TaskOp::InstallTheme` |
 | 4 | 多选只有解压能用，没有批量删除/批量移动 | 批量操作仍有限 | 视需求加右键批量菜单 |
-| 5 | 进度条底图拉伸到任意宽高 | 像素素材边缘不完美 | 按 `theme.scale` 吸附整数倍 |
+| 5 | 已修复 | 进度条底图支持九宫格，绘制矩形吸附物理像素 |
 | 6 | 已修复 | `ThemeStore` 只解码当前主题，切换时 `ensure_loaded` |
 | 7 | 已修复 | 排序写入 prefs schema 3；搜索支持子串、`*`/`?` 通配和 `re:` 正则 |
 | 8 | 已修复 | 资源加载支持 SVG 光栅化（8 MiB / 最长边 2048，不加载外部资源） |

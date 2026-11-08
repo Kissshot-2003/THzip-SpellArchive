@@ -33,6 +33,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let panel_bg =
         crate::ui::nine_patch::NinePatch::from_theme(app.themes.current(), ResKey::PanelBg);
 
+    let mut delete_selected = false;
     egui::CentralPanel::default().show(root, |ui| {
         if let Some(bg) = panel_bg {
             bg.paint(ui, ui.max_rect(), egui::Color32::WHITE);
@@ -64,6 +65,9 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                     }
                     if ui.small_button("全选").clicked() {
                         app.select_all_filtered();
+                    }
+                    if !app.selected.is_empty() && ui.small_button("删除选中").clicked() {
+                        delete_selected = true;
                     }
                 }
             });
@@ -249,6 +253,10 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 app.selected.insert(index);
             }
             app.last_selected = Some(index);
+        }
+
+        if delete_selected {
+            app.delete_selected_entries();
         }
 
         if let Some(key) = header_click {

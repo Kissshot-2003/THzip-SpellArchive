@@ -189,6 +189,8 @@ pub struct SpellApp {
     pub particle_accum: f32,
     /// 打开成功后要自动执行的启动动作（解压到当前目录等）。
     startup: Option<StartupRequest>,
+    /// 归档重写任务：完成后需要重新打开该路径。
+    pending_rewrite: Option<(TaskId, PathBuf)>,
 
     pub runner: TaskRunner,
     pub tasks: Vec<TaskView>,
@@ -266,6 +268,7 @@ impl SpellApp {
                 .unwrap_or(0x9E37_79B9),
             particle_accum: 0.0,
             startup: None,
+            pending_rewrite: None,
             runner: TaskRunner::new(2),
             tasks: Vec::new(),
             pending_password: None,
@@ -745,6 +748,47 @@ impl SpellApp {
         self.status = "正在后台预检…".to_owned();
     }
 
+    /// 删除归档内选中的条目：确认后关闭当前 reader，后台重写并重新打开。
+    pub fn delete_selected_entries(&mut self) {
+        let Some(path) = self.archive_path.clone() else {
+            self.status = self.tr.t(TextKey::EmptyArchive).to_owned();
+            return;
+        };
+        let Some(kind) = self.archive_kind else {
+            return;
+        };
+        if self.selected.is_empty() {
+            self.status = "请先选择要删除的条目".to_owned();
+            return;
+        }
+        let count = self.selected.len();
+        let result = rfd::MessageDialog::new()
+            .set_title("删除归档条目")
+            .set_description(format!(
+                "确定从归档中删除 {count} 个条目？\n归档会被重写，原文件在成功前保持不变。"
+            ))
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if result != rfd::MessageDialogResult::Yes {
+            return;
+        }
+
+        let remove: Vec<u32> = self.selected.iter().map(|&index| index as u32).collect();
+        // 释放文件句柄，Windows 才能在任务最后由 ReplaceFileW 原子替换。
+        self.reader = None;
+        let name = self.archive_name.clone();
+        let handle = self.runner.submit(TaskOp::Rewrite {
+            path: path.clone(),
+            kind,
+            remove,
+            limits: self.limits,
+        });
+        self.pending_rewrite = Some((handle.id, path));
+        self.push_task(handle, format!("删除条目：{name}"));
+        self.status = format!("正在重写归档，删除 {count} 个条目…");
+    }
+
     pub fn start_extract(&mut self) {
         let Some(pending) = self.pending_extract.take() else {
             return;
@@ -1125,6 +1169,27 @@ impl SpellApp {
                     }
                 );
             }
+            TaskEvent::Rewritten { task, path, report } => {
+                let summary = format!(
+                    "重写完成：{} 个条目 · {} 字节",
+                    report.entries, report.bytes_out
+                );
+                if let Some(view) = self.task_mut(task) {
+                    view.phase = TaskPhase::Done;
+                    view.progress = 1.0;
+                    view.detail = Some(summary.clone());
+                }
+                crate::logging::write(&format!("archive rewritten: {}", path.display()));
+                self.status = summary;
+                if self
+                    .pending_rewrite
+                    .as_ref()
+                    .is_some_and(|(id, _)| *id == task)
+                {
+                    self.pending_rewrite = None;
+                    self.open_path(path, None);
+                }
+            }
             TaskEvent::PlanReady {
                 task,
                 plan,
@@ -1185,6 +1250,15 @@ impl SpellApp {
                             error: Some(error.clone()),
                         });
                     }
+                }
+                if let Some(path) = self
+                    .pending_rewrite
+                    .as_ref()
+                    .filter(|(id, _)| *id == task)
+                    .map(|(_, path)| path.clone())
+                {
+                    self.pending_rewrite = None;
+                    self.open_path(path, None);
                 }
                 self.status = format!("任务失败：{error}");
             }

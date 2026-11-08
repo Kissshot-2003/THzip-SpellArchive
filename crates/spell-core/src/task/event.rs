@@ -112,6 +112,12 @@ pub enum TaskEvent {
         report: Arc<FinishReport>,
         append: bool,
     },
+    /// 归档重写完成（删除条目）。
+    Rewritten {
+        task: TaskId,
+        path: PathBuf,
+        report: Arc<FinishReport>,
+    },
     /// 主题包已在后台解压到 themes 目录。
     ThemeInstalled {
         task: TaskId,

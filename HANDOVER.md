@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（92）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（93）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -42,7 +42,7 @@
 SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
 当前 **zip / 7z / tar 家族可读写，RAR 可读，单文件流可读**；GUI 覆盖打开、后台预检、解压、测试、取消、
 冲突跳过/覆盖/改名/自动编号、创建/追加、zip 多压缩方法、密码、后台主题包导入、主题懒加载、
-多标签页、主题粒子、多选与表头排序（持久化）、设置持久化、拖拽打开与悬停提示、单实例转交、
+多标签页、主题粒子、多选与表头排序（持久化）、删除选中条目、设置持久化、拖拽打开与悬停提示、单实例转交、
 关闭到托盘、本地化托盘菜单、右键菜单自检、主题热重载、日志/崩溃落盘。
 
 ### 1.2 能力矩阵
@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 14559 行（含测试）。
+- Rust 约 14937 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 92 个测试
+cargo test --workspace                 # 93 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 92 通过；clippy 无告警。
+12. `cargo test --workspace` 93 通过；clippy 无告警。
 
 ---
 
@@ -174,6 +174,7 @@ spell_archive/
 | `backend/decoder.rs` | tar 与单文件流共用的解压读取器 |
 | `backend/zip.rs` | zip 读取：中央目录、名字编码、预检、流式解压、AES、CRC；LZMA 自解码；不支持方法预检跳过 |
 | `backend/zip_write.rs` | zip 创建/追加：Store/Deflate/BZip2/Zstd、AES-256、zip64、原子替换 |
+| `backend/rewrite.rs` | 删除条目：保留项解到临时目录→写新包→原子替换原归档 |
 | `backend/rar.rs` | RAR 读取：unrar-ng 列表 / 预检 / 解压 / 测试、密码、固实包、多卷、临时文件中转 |
 | `backend/sevenz.rs` | 7z 读取：固实包、AES、单条提取、空根目录过滤 |
 | `backend/sevenz_write.rs` | 7z 创建：LZMA2/COPY、AES-256 头加密 |
@@ -433,13 +434,14 @@ pub enum TaskOp {
     Extract { reader, plan, decisions, limits },
     Test { reader, limits },
     Pack { output, inputs, kind, method, append, password },
+    Rewrite { path, kind, remove, limits },
     InstallTheme { archive, target, limits },
 }
 ```
 
 事件：`Opened` / `NeedPassword` / `PhaseChanged` / `Started` / `Progress` /
 `Warning` / `NeedDecision` / `PlanReady` / `EntryFailed` / `Finished` /
-`PackFinished` / `ThemeInstalled` / `Failed`。
+`PackFinished` / `Rewritten` / `ThemeInstalled` / `Failed`。
 
 ### 5.5 错误
 
@@ -512,6 +514,7 @@ pub enum TaskOp {
 - 表头按钮可排序（名称/大小/压缩后/比率/方法/时间），再点一次反向；名称使用自然序。
 - 选中集合是 `BTreeSet<usize>`：单击单选、Ctrl 切换、Shift 连选；“全选/清空”作用于当前搜索结果。
 - 解压时若选中集合非空，只解压这些条目；否则解压全部。
+- “删除选中”会重写归档（zip/7z/tar 家族，未加密），完成后自动重新打开。
 
 ### 7.3 任务行
 
@@ -685,13 +688,13 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **92** 个测试。
+当前共 **93** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
-| `spell-core` 单元测试 | 41 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转 |
+| `spell-core` 单元测试 | 42 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除 |
 | `spell-app` 单元测试 | 12 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
@@ -723,7 +726,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 1 | 已修复 | `task_panel` 借用 `&Theme`；设置页只取需要的字段，均不再整包 clone |
 | 2 | 已修复 | Rename 生成 `a~1.txt`，AutoNumber 生成 `a (1).txt`，并避开磁盘已有文件 |
 | 3 | 已修复 | 主题包导入改为后台 `TaskOp::InstallTheme` |
-| 4 | 多选只有解压能用，没有批量删除/批量移动 | 批量操作仍有限 | 视需求加右键批量菜单 |
+| 4 | 部分修复 | 多选可删除归档条目（重写）；批量移动/重命名未做 |
 | 5 | 已修复 | 进度条底图支持九宫格，绘制矩形吸附物理像素 |
 | 6 | 已修复 | `ThemeStore` 只解码当前主题，切换时 `ensure_loaded` |
 | 7 | 已修复 | 排序写入 prefs schema 3；搜索支持子串、`*`/`?` 通配和 `re:` 正则 |
@@ -831,7 +834,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（92 通过）
+- [ ] `cargo test --workspace`（93 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示
@@ -856,6 +859,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 导入一个 `<主题>/theme.toml` 的 zip，UI 不卡，主题出现在下拉框
 - [ ] 解压时预检在后台（快速点其他 UI 不卡），随后弹预检框
 - [ ] 归档表点“全选”后解压只处理选中项；点表头可切换排序
+- [ ] 选中条目点“删除选中”，确认后归档重写，其余条目仍可解压
 - [ ] 解压后文件修改时间等于归档内记录时间
 - [ ] `%APPDATA%\SpellArchive\spellarchive.log` 有启动记录；panic 会落盘
 - [ ] `scripts/package.ps1` 能产出 `dist/SpellArchive/`

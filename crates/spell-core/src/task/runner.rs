@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -48,6 +49,13 @@ pub enum TaskOp {
         method: Method,
         append: bool,
         password: Option<SecretString>,
+    },
+    /// 删除归档内指定条目（重写并原子替换）。
+    Rewrite {
+        path: PathBuf,
+        kind: ArchiveKind,
+        remove: Vec<EntryId>,
+        limits: Limits,
     },
     /// 把主题包解压到目标 themes 目录；冲突默认跳过。
     InstallTheme {
@@ -444,6 +452,68 @@ fn run_task(
                         );
                     }
                 },
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        TaskOp::Rewrite {
+            path,
+            kind,
+            remove,
+            limits,
+        } => {
+            send(
+                tx,
+                TaskEvent::PhaseChanged {
+                    task,
+                    phase: TaskPhase::Running,
+                },
+            );
+            let remove: HashSet<EntryId> = remove.into_iter().collect();
+            let progress_state = std::cell::RefCell::new((Instant::now(), 0u64));
+            let progress_tx = tx.clone();
+            let progress = |done: u64| {
+                let mut state = progress_state.borrow_mut();
+                let (last_time, last_bytes) = *state;
+                if last_time.elapsed().as_millis() >= 100
+                    || done.saturating_sub(last_bytes) >= 1_048_576
+                {
+                    *state = (Instant::now(), done);
+                    let _ = progress_tx.send(TaskEvent::Progress {
+                        task,
+                        processed_compressed: 0,
+                        written: done,
+                        entry: None,
+                    });
+                }
+            };
+            match crate::backend::rewrite::rewrite_without(
+                &path, kind, &remove, limits, cancel, &progress,
+            ) {
+                Ok(report) => {
+                    send(
+                        tx,
+                        TaskEvent::Rewritten {
+                            task,
+                            path,
+                            report: Arc::new(report),
+                        },
+                    );
+                    send(
+                        tx,
+                        TaskEvent::PhaseChanged {
+                            task,
+                            phase: TaskPhase::Done,
+                        },
+                    );
+                }
                 Err(err) => {
                     send(
                         tx,

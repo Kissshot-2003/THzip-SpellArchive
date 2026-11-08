@@ -2,6 +2,7 @@ mod common;
 mod decoder;
 pub mod name_codec;
 pub mod rar;
+pub mod rewrite;
 pub mod sevenz;
 pub mod sevenz_write;
 pub mod stream;

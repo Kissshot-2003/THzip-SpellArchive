@@ -24,6 +24,7 @@ toml = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 resvg = { version = "0.45", default-features = false }
 fontdb = "0.23"
+regex = "1"
 liblzma = { version = "0.4", features = ["static"] }
 zip = { version = "4.6", default-features = false, features = [
     "deflate",

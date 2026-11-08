@@ -585,22 +585,11 @@ impl SpellApp {
 
     pub fn filtered_entries(&self) -> Vec<usize> {
         let needle = self.search.trim().to_lowercase();
-        let wildcard = needle.contains('*') || needle.contains('?');
         let mut rows: Vec<usize> = self
             .entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| {
-                if needle.is_empty() {
-                    return true;
-                }
-                let text = entry.display.to_lowercase();
-                if wildcard {
-                    wildcard_match(&needle, &text)
-                } else {
-                    text.contains(&needle)
-                }
-            })
+            .filter(|(_, entry)| search_matches(&needle, &entry.display))
             .map(|(index, _)| index)
             .collect();
 
@@ -1379,6 +1368,26 @@ fn install_cjk_fonts(ctx: &egui::Context) {
     });
 }
 
+/// 搜索语法：空串全匹配；`re:` 前缀按正则（不区分大小写）；含 `*`/`?` 按通配；否则子串。
+pub(crate) fn search_matches(query: &str, text: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let text = text.to_lowercase();
+    if let Some(pattern) = query.strip_prefix("re:") {
+        return regex::RegexBuilder::new(pattern)
+            .case_insensitive(true)
+            .build()
+            .map(|regex| regex.is_match(&text))
+            .unwrap_or_else(|_| text.contains(pattern));
+    }
+    if query.contains('*') || query.contains('?') {
+        wildcard_match(query, &text)
+    } else {
+        text.contains(query)
+    }
+}
+
 /// 简单的 `*` / `?` 通配匹配；调用方负责大小写归一化。
 pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
@@ -1412,7 +1421,7 @@ pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{natural_cmp, wildcard_match};
+    use super::{natural_cmp, search_matches, wildcard_match};
     use std::cmp::Ordering;
 
     #[test]
@@ -1433,5 +1442,14 @@ mod tests {
         assert!(!wildcard_match("*.txt", "a.zip"));
         assert!(!wildcard_match("a?c", "abbc"));
         assert!(!wildcard_match("b*", "abc"));
+    }
+
+    #[test]
+    fn supports_regex_search() {
+        assert!(search_matches("re:^a.*\\.txt$", "A1.TXT"));
+        assert!(!search_matches("re:^a.*\\.txt$", "b.txt"));
+        // 非法正则退回子串匹配。
+        assert!(search_matches("re:[", "["));
+        assert!(search_matches("", "anything"));
     }
 }

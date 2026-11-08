@@ -4282,6 +4282,7 @@ dependencies = [
  "egui_extras",
  "fontdb",
  "image",
+ "regex",
  "resvg",
  "rfd",
  "serde",

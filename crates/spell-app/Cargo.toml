@@ -19,6 +19,7 @@ toml.workspace = true
 image.workspace = true
 resvg.workspace = true
 fontdb.workspace = true
+regex.workspace = true
 rfd.workspace = true
 single-instance.workspace = true
 tray-icon.workspace = true

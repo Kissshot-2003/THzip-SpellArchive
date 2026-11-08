@@ -26,10 +26,10 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（87）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（88）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
-- **当前风险**：RAR 只读且单条上限 512 MiB；加密 LZMA/XZ 未支持；exe 未签名。
+- **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：最新提交 `83b9477`，工作区有未提交改动（本轮功能批次），无远端。
 - **下一步建议**：先跑测试并提交本轮批次，再决定批量操作、内嵌字体、7z 参数或签名。
 
@@ -58,12 +58,12 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 | tar.zst / tzst | 是 | 是 | 否 | 否 | 同上 |
 | tar.lz4 / tlz4 | 是 | 是 | 否 | 否 | 同上 |
 | gz / bz2 / xz / zst / lz4 | 是 | 否 | 否 | 否 | 单文件流，打开时先读一遍求大小 |
-| rar | 是 | 否 | 否 | 支持 | 基于 unrar-ng（UnRAR 许可）；单条上限 512 MiB；不支持多卷 |
+| rar | 是 | 否 | 否 | 支持 | 基于 unrar-ng（UnRAR 许可）；支持多卷（从任意卷打开）；大条目走临时文件中转 |
 | 分卷 `.7z.001` | 是 | 否 | 否 | 同主包 | 读取时按字节拼接成逻辑流；从任意卷号打开都可 |
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 14093 行（含测试）。
+- Rust 约 14264 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 87 个测试
+cargo test --workspace                 # 88 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 87 通过；clippy 无告警。
+12. `cargo test --workspace` 88 通过；clippy 无告警。
 
 ---
 
@@ -174,7 +174,7 @@ spell_archive/
 | `backend/decoder.rs` | tar 与单文件流共用的解压读取器 |
 | `backend/zip.rs` | zip 读取：中央目录、名字编码、预检、流式解压、AES、CRC；LZMA 自解码；不支持方法预检跳过 |
 | `backend/zip_write.rs` | zip 创建/追加：Store/Deflate/BZip2/Zstd、AES-256、zip64、原子替换 |
-| `backend/rar.rs` | RAR 读取：unrar-ng 列表 / 预检 / 解压 / 测试、密码、固实包、单条 512 MiB 上限 |
+| `backend/rar.rs` | RAR 读取：unrar-ng 列表 / 预检 / 解压 / 测试、密码、固实包、多卷、临时文件中转 |
 | `backend/sevenz.rs` | 7z 读取：固实包、AES、单条提取、空根目录过滤 |
 | `backend/sevenz_write.rs` | 7z 创建：LZMA2/COPY、AES-256 头加密 |
 | `backend/tar.rs` | tar 家族读取：6 种容器、PAX/GNU longname、跳过链接 |
@@ -360,10 +360,10 @@ UI 选目标目录
 
 - `unrar-ng = 0.7`（包装 UnRAR C++ 源码，MIT/Apache 包装层 + UnRAR 许可证，见 `third_party/unrar-license.txt`）。
 - 列表使用 `open_for_listing()`；解压/测试使用 `open_for_processing()` 顺序处理。
-- 只读：不支持创建、追加；不支持多卷 RAR。
+- 只读：不支持创建、追加；多卷 RAR 会自动定位第一卷。
 - 密码：`Archive::with_password`；缺密码/错密码映射为 `PasswordRequired` / `BadPassword`。
 - 固实包：顺序读取，未选条目用 `skip()` 推进，不会错位。
-- `read()` 需要把整条数据放进内存，因此单条上限 512 MiB；超过标记失败并继续后续条目。
+- 小于 512 MiB 的条目用 `read()`；更大的条目用 `extract_to` 落到临时文件再分块喂给 sink，避免内存峰值。
 - 条目 CRC 来自 RAR 头，写入 `crc32`；`ExtractDirSink` 仍会二次校验。
 
 写入：不支持。
@@ -681,13 +681,13 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **87** 个测试。
+当前共 **88** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
-| `spell-core` 单元测试 | 40 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接 |
+| `spell-core` 单元测试 | 41 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转 |
 | `spell-app` 单元测试 | 8 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配匹配 1、日志格式 1 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
@@ -742,7 +742,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 24 | 单文件流打开时先解压一遍求大小 | 大文件打开/解压读两遍 | 列表尺寸懒加载或显示“未知” |
 | 25 | 部分修复 | 解压统一恢复 mtime；tar 写入按只读属性生成 444/644、目录 555/755，并保留目录 mtime |
 | 26 | tar 家族不支持追加与加密 | 只能新建 | 追加需重写整包 |
-| 27 | RAR 单条上限 512 MiB、不支持多卷 | 超大条目/多卷包失败 | 后续可改用 unrar 回调流式解压 |
+| 27 | 已修复 | 多卷自动定位第一卷；大条目临时文件中转，无 512 MiB 硬上限 |
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
 | 29 | 已修复 | 托盘菜单走 i18n，语言切换后 `rebuild_tray` |
 | 30 | 已修复 | 启动时 `refresh_if_installed` 自动改写为当前 exe 路径 |
@@ -765,7 +765,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - 语言包扩展（设置页/对话框仍有硬编码中文）、内嵌 Noto Sans SC 子集。
 - `tracing` 结构化日志（当前是带级别/模块的文本日志）。
 - 代码签名；Inno 脚本已就绪。
-- RAR 多卷与流式解压（当前单条 512 MiB 上限）。
+- RAR 超大条目的性能与磁盘占用优化。
 - 批量操作（批量删除/移动）。
 
 ### 格式增强
@@ -773,7 +773,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - zip：加密 LZMA/XZ；写端可选更多压缩方法。
 - 7z：固实包压缩字节进度；可选追加（需重写）。
 - tar：可选追加/加密（写入已保留只读属性、文件/目录 mtime）。
-- RAR：多卷、流式解压、超大条目；注意 UnRAR 许可证。
+- RAR：超大条目的性能优化；注意 UnRAR 许可证。
 
 ---
 
@@ -828,7 +828,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（87 通过）
+- [ ] `cargo test --workspace`（88 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

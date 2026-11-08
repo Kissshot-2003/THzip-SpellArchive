@@ -16,7 +16,7 @@ cargo run -p spell-cli -- list <归档>            # 列出条目（zip / 7z / t
 cargo run -p spell-cli -- test <归档>            # CRC 完整性测试
 cargo run -p spell-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
 cargo run -p spell-cli -- pack <输出> <输入...>      # 格式由扩展名决定（zip/7z/tar 家族）
-cargo test --workspace                           # 87 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 88 个单元 / 集成 / 归档格式用例
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
 
@@ -30,7 +30,7 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 | zip 写 | **可用**：Store / Deflate / BZip2 / Zstd、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
 | 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密、`.7z.001` 分卷拼接 |
 | 7z 写 | **可用**：LZMA2 / COPY、AES-256 头加密、原子替换 |
-| RAR 读 | **可用**：列表、预检、安全解压、CRC 校验、密码、固实包；基于 `unrar-ng`（UnRAR 许可）；单条上限 512 MiB |
+| RAR 读 | **可用**：列表、预检、安全解压、CRC 校验、密码、固实包、多卷；基于 `unrar-ng`（UnRAR 许可）；大条目临时文件中转 |
 | tar 家族读 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4；符号链接跳过；无扩展名的压缩包会探测内层 tar |
 | 单文件流读 | **可用**：`.gz` / `.bz2` / `.xz` / `.zst` / `.lz4`，自动去掉压缩扩展名作为文件名 |
 | tar 家族写 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4，原子替换 |

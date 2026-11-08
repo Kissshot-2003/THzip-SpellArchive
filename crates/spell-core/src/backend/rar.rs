@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -18,27 +20,33 @@ use crate::task::CancelToken;
 use crate::types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
 
 const READ_BUF: usize = 64 * 1024;
-/// unrar 的 `read()` 会把整条数据读进内存；超过此阈值直接拒绝。
+/// 超过此大小的条目改用临时文件中转，避免整条读进内存。
 const MAX_IN_MEMORY: u64 = 512 * 1024 * 1024;
 
 pub struct RarReader {
     path: PathBuf,
     entries: Vec<ArchiveEntry>,
     password: Option<SecretString>,
+    staging_limit: u64,
 }
 
 impl RarReader {
     pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
+        Self::new_with_limit(path, password, MAX_IN_MEMORY)
+    }
+
+    fn new_with_limit(
+        path: &Path,
+        password: Option<&SecretString>,
+        staging_limit: u64,
+    ) -> Result<Self, ArchiveError> {
         let mut entries = Vec::new();
         let mut index = 0u32;
 
         {
-            let archive = match password {
-                Some(password) => Archive::with_password(path, password.expose().as_bytes())
-                    .open_for_listing()
-                    .map_err(map_error)?,
-                None => Archive::new(path).open_for_listing().map_err(map_error)?,
-            };
+            let archive = Self::archive_for(path, password)
+                .open_for_listing()
+                .map_err(map_error)?;
 
             for item in archive {
                 let header = item.map_err(map_error)?;
@@ -79,18 +87,27 @@ impl RarReader {
             path: path.to_path_buf(),
             entries,
             password: password.cloned(),
+            staging_limit,
         })
     }
 
-    fn open_processing(&self) -> Result<OpenArchive<Process, CursorBeforeHeader>, ArchiveError> {
-        match self.password.as_ref() {
-            Some(password) => Archive::with_password(&self.path, password.expose().as_bytes())
-                .open_for_processing()
-                .map_err(map_error),
-            None => Archive::new(&self.path)
-                .open_for_processing()
-                .map_err(map_error),
+    /// 多卷 RAR 统一从第一卷开始处理。
+    fn archive_for<'a>(path: &'a Path, password: Option<&'a SecretString>) -> Archive<'a> {
+        let archive = match password {
+            Some(password) => Archive::with_password(path, password.expose().as_bytes()),
+            None => Archive::new(path),
+        };
+        if archive.is_multipart() {
+            archive.as_first_part()
+        } else {
+            archive
         }
+    }
+
+    fn open_processing(&self) -> Result<OpenArchive<Process, CursorBeforeHeader>, ArchiveError> {
+        Self::archive_for(&self.path, self.password.as_ref())
+            .open_for_processing()
+            .map_err(map_error)
     }
 
     /// 出错后重新打开并跳过前 `count` 条，继续处理后续条目。
@@ -274,49 +291,100 @@ impl ArchiveReader for RarReader {
                 continue;
             }
 
-            if entry.size > MAX_IN_MEMORY {
-                let _ = sink.on_entry_end(id, false);
-                report.failed.push((
-                    id,
-                    format!(
-                        "RAR 条目超过 {} MiB，暂不支持流式解压",
-                        MAX_IN_MEMORY / (1024 * 1024)
-                    ),
-                ));
-                archive = header.skip().map_err(map_error)?;
-                continue;
-            }
-
-            let (data, next) = match header.read() {
-                Ok(value) => value,
-                Err(err) => {
-                    let mapped = map_error(err);
-                    let _ = sink.on_entry_end(id, false);
-                    if matches!(
-                        mapped,
-                        ArchiveError::PasswordRequired | ArchiveError::BadPassword
-                    ) {
-                        return Err(mapped);
-                    }
-                    report.failed.push((id, mapped.to_string()));
-                    archive = self.skip_to(index)?;
-                    continue;
-                }
-            };
-
             let mut entry_ok = true;
-            for chunk in data.chunks(READ_BUF) {
-                if cancel.is_cancelled() {
-                    let _ = sink.on_entry_end(id, false);
-                    return Err(ArchiveError::Cancelled);
+            if entry.size > self.staging_limit {
+                // 大条目先解到临时文件，再分块喂给 sink，避免整条读进内存。
+                let temp = temp_path(id);
+                let next = match header.extract_to(&temp) {
+                    Ok(next) => next,
+                    Err(err) => {
+                        let mapped = map_error(err);
+                        let _ = sink.on_entry_end(id, false);
+                        let _ = std::fs::remove_file(&temp);
+                        if matches!(
+                            mapped,
+                            ArchiveError::PasswordRequired | ArchiveError::BadPassword
+                        ) {
+                            return Err(mapped);
+                        }
+                        report.failed.push((id, mapped.to_string()));
+                        archive = self.skip_to(index)?;
+                        continue;
+                    }
+                };
+
+                let mut file = match File::open(&temp) {
+                    Ok(file) => file,
+                    Err(err) => {
+                        let _ = sink.on_entry_end(id, false);
+                        let _ = std::fs::remove_file(&temp);
+                        report
+                            .failed
+                            .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                        archive = next;
+                        continue;
+                    }
+                };
+                let mut chunk = vec![0u8; READ_BUF];
+                loop {
+                    if cancel.is_cancelled() {
+                        drop(file);
+                        let _ = std::fs::remove_file(&temp);
+                        let _ = sink.on_entry_end(id, false);
+                        return Err(ArchiveError::Cancelled);
+                    }
+                    match file.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if let Err(err) = sink.on_data(id, &chunk[..n]) {
+                                report.failed.push((id, err.to_string()));
+                                entry_ok = false;
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            report
+                                .failed
+                                .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                            entry_ok = false;
+                            break;
+                        }
+                    }
                 }
-                if let Err(err) = sink.on_data(id, chunk) {
-                    report.failed.push((id, err.to_string()));
-                    entry_ok = false;
-                    break;
+                drop(file);
+                let _ = std::fs::remove_file(&temp);
+                archive = next;
+            } else {
+                let (data, next) = match header.read() {
+                    Ok(value) => value,
+                    Err(err) => {
+                        let mapped = map_error(err);
+                        let _ = sink.on_entry_end(id, false);
+                        if matches!(
+                            mapped,
+                            ArchiveError::PasswordRequired | ArchiveError::BadPassword
+                        ) {
+                            return Err(mapped);
+                        }
+                        report.failed.push((id, mapped.to_string()));
+                        archive = self.skip_to(index)?;
+                        continue;
+                    }
+                };
+
+                for chunk in data.chunks(READ_BUF) {
+                    if cancel.is_cancelled() {
+                        let _ = sink.on_entry_end(id, false);
+                        return Err(ArchiveError::Cancelled);
+                    }
+                    if let Err(err) = sink.on_data(id, chunk) {
+                        report.failed.push((id, err.to_string()));
+                        entry_ok = false;
+                        break;
+                    }
                 }
+                archive = next;
             }
-            archive = next;
             finish_entry(sink, id, entry_ok, &mut report)?;
         }
 
@@ -354,21 +422,74 @@ impl ArchiveReader for RarReader {
                 continue;
             }
 
-            if entry.size > MAX_IN_MEMORY {
-                report.failed.push((
-                    id,
-                    format!(
-                        "RAR 条目超过 {} MiB，暂不支持完整性测试",
-                        MAX_IN_MEMORY / (1024 * 1024)
-                    ),
-                ));
+            if let Err(err) = sink.on_entry_begin(id, &entry) {
+                report.failed.push((id, err.to_string()));
                 archive = header.skip().map_err(map_error)?;
                 continue;
             }
 
-            if let Err(err) = sink.on_entry_begin(id, &entry) {
-                report.failed.push((id, err.to_string()));
-                archive = header.skip().map_err(map_error)?;
+            if entry.size > self.staging_limit {
+                let temp = temp_path(id);
+                let next = match header.extract_to(&temp) {
+                    Ok(next) => next,
+                    Err(err) => {
+                        let mapped = map_error(err);
+                        let _ = sink.on_entry_end(id, false);
+                        let _ = std::fs::remove_file(&temp);
+                        if matches!(
+                            mapped,
+                            ArchiveError::PasswordRequired | ArchiveError::BadPassword
+                        ) {
+                            return Err(mapped);
+                        }
+                        report.failed.push((id, mapped.to_string()));
+                        archive = self.skip_to(index)?;
+                        continue;
+                    }
+                };
+                let mut file = match File::open(&temp) {
+                    Ok(file) => file,
+                    Err(err) => {
+                        let _ = sink.on_entry_end(id, false);
+                        let _ = std::fs::remove_file(&temp);
+                        report
+                            .failed
+                            .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                        archive = next;
+                        continue;
+                    }
+                };
+                let mut chunk = vec![0u8; READ_BUF];
+                let mut ok = true;
+                loop {
+                    if cancel.is_cancelled() {
+                        drop(file);
+                        let _ = std::fs::remove_file(&temp);
+                        let _ = sink.on_entry_end(id, false);
+                        return Err(ArchiveError::Cancelled);
+                    }
+                    match file.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if let Err(err) = sink.on_data(id, &chunk[..n]) {
+                                report.failed.push((id, err.to_string()));
+                                ok = false;
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            report
+                                .failed
+                                .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                drop(file);
+                let _ = std::fs::remove_file(&temp);
+                archive = next;
+                finish_entry(sink, id, ok, &mut report)?;
                 continue;
             }
 
@@ -430,6 +551,17 @@ fn finish_entry(
     }
 }
 
+fn temp_path(id: EntryId) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "spellarchive-rar-{}-{nanos}-{id}.tmp",
+        std::process::id()
+    ))
+}
+
 fn is_symlink(file_attr: u32) -> bool {
     file_attr & 0o170000 == 0o120000
 }
@@ -478,7 +610,44 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{days_from_civil, dos_to_system_time, is_symlink};
+    use super::{RarReader, days_from_civil, dos_to_system_time, is_symlink};
+    use crate::limits::Limits;
+    use crate::plan::{DecisionTable, OverwritePolicy};
+    use crate::reader::ArchiveReader;
+    use crate::safety::ExtractDirSink;
+    use crate::task::CancelToken;
+
+    #[test]
+    fn stages_entries_to_temp_file() {
+        let archive =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/version.rar");
+        // 阈值 0 强制走临时文件中转。
+        let mut reader = RarReader::new_with_limit(&archive, None, 0).unwrap();
+        let target = std::env::temp_dir().join(format!(
+            "spellarchive-rar-stage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let ids: Vec<u32> = (0..reader.entries().len() as u32).collect();
+        let plan = reader.plan(&ids, &target, &Limits::default()).unwrap();
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Overwrite,
+            ..Default::default()
+        };
+        let mut sink = ExtractDirSink::new(&plan, &decisions, Limits::default());
+        let report = reader
+            .extract(&plan, &decisions, &CancelToken::new(), &mut sink)
+            .unwrap();
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(
+            std::fs::read_to_string(target.join("VERSION")).unwrap(),
+            "unrar-0.4.0"
+        );
+        let _ = std::fs::remove_dir_all(&target);
+    }
 
     #[test]
     fn converts_dos_time() {

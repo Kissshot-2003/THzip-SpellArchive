@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（89）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（92）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -63,7 +63,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 14291 行（含测试）。
+- Rust 约 14559 行（含测试）。
 - 最新提交：`83b9477 feat: archive multi-select/sort and extended zip method decoding`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 当前工作区有未提交改动（本轮：冲突改名、排序持久化、后台主题导入、懒加载、zip 写方法等）。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 89 个测试
+cargo test --workspace                 # 92 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 89 通过；clippy 无告警。
+12. `cargo test --workspace` 92 通过；clippy 无告警。
 
 ---
 
@@ -194,7 +194,7 @@ spell_archive/
 | `i18n/mod.rs` | zh-CN / en-US + 主题覆盖 + 标准术语开关 + 托盘文案 |
 | `theme/{mod,loader}.rs` | 主题扫描、纹理路径解析、按需解码、九宫格切片、签名轮询、主题目录定位 |
 | `tray.rs` | 托盘图标与本地化菜单 |
-| `shell_menu.rs` | HKCU 资源管理器右键菜单；启动时自检并修正 exe 路径 |
+| `shell_menu.rs` | HKCU 右键菜单：打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip；启动自检 exe 路径 |
 | `ui/*` | 工具栏、标签栏、文件浏览、归档表、任务行、预检/密码/打包对话框、设置、进度条、拖拽遮罩 |
 
 ### 3.5 启动顺序
@@ -216,7 +216,7 @@ main
          ├─ Tray::new(&tr)             # 托盘图标 + 本地化菜单
          ├─ shell_menu::refresh_if_installed()  # 修正旧 exe 路径
          ├─ refresh_dir()              # 左侧本地文件列表
-         └─ open_path(arg)             # 有启动参数则提交 Open 任务
+         └─ apply_startup(request)     # 打开 / 解压动词 / 添加到 zip
 ```
 
 ### 3.6 每帧顺序
@@ -561,8 +561,11 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 7.8 资源管理器右键菜单
 
 - `shell_menu.rs` + `winreg`，只写 HKCU，不需要管理员。
-- 注册两个位置：`Software\Classes\*\shell\SpellArchive`（文件）和
-  `Software\Classes\Directory\shell\SpellArchive`（目录）；命令为 `"<exe>" "%1"`。
+- 文件动词：打开、解压到当前文件夹（`--extract-here`）、解压到单独文件夹（`--extract-to`）、
+  添加到 zip（`--add`）；目录动词：添加到 zip。
+- 第二实例通过 `handoff.txt` 转交“意图 + 路径”，第一实例执行同样动作。
+- 注册在 `Software\Classes\*\shell\SpellArchive*` 与
+  `Software\Classes\Directory\shell\SpellArchive.AddToZip`；命令形如 `"<exe>" --extract-here "%1"`。
 - 设置页复选框实时读取注册表状态；勾选安装、取消卸载。
 - 启动时 `refresh_if_installed` 会把已安装菜单的 exe 路径改成当前进程路径，
   exe 移动/升级后不会指向旧位置。
@@ -682,14 +685,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **89** 个测试。
+当前共 **92** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---:|---|
 | `spell-core` 单元测试 | 41 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转 |
-| `spell-app` 单元测试 | 9 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1 |
+| `spell-app` 单元测试 | 12 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
@@ -818,7 +821,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 设置 | `%APPDATA%\SpellArchive\prefs.toml` | 不污染安装目录，符合 Windows 习惯 |
 | 单实例 | mutex + handoff 文件 + SetForegroundWindow | 不引入 IPC 依赖；跨进程转交简单 |
 | 托盘 | tray-icon + muda，关闭隐藏 | 桌面工具习惯；托盘菜单可恢复/退出 |
-| 右键菜单 | winreg 写 HKCU | 免管理员；Win11 收进“显示更多选项” |
+| 右键菜单 | winreg 写 HKCU，多动词 | 免管理员；Win11 收进“显示更多选项”；支持解压/添加 |
 | 平台 | Windows 10+ / x64 | Win7 需要旧工具链，不值得 |
 
 ---
@@ -828,7 +831,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（89 通过）
+- [ ] `cargo test --workspace`（92 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示
@@ -844,6 +847,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 点窗口关闭按钮：进程留在托盘；再次启动或双击托盘能恢复
 - [ ] 切换语言后托盘菜单文案同步变化
 - [ ] 设置页勾选/取消右键菜单，`reg query HKCU\Software\Classes\*\shell\SpellArchive` 有/无
+- [ ] 右键 zip 分别试“打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip”
+- [ ] 命令行 `spell_archive.exe --extract-here <zip>` 能直接弹预检
 - [ ] 复制一份 exe 改名后启动，右键菜单命令路径自动更新为当前 exe
 - [ ] 运行中 touch `themes/*/theme.toml`，2 秒内出现“主题文件已重新加载”
 - [ ] 从资源管理器拖文件到窗口，出现“松开以打开归档”覆盖层

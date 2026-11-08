@@ -5,6 +5,7 @@ mod i18n;
 mod logging;
 mod prefs;
 mod shell_menu;
+mod startup;
 mod theme;
 mod tray;
 mod ui;
@@ -36,23 +37,13 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    // 支持「打开方式」/ 拖到 exe 上：第一个参数直接作为归档打开。
-    let startup = std::env::args().nth(1).map(std::path::PathBuf::from);
+    // 支持「打开方式」/ 拖到 exe 上 / 资源管理器右键动词。
+    let request = startup::StartupRequest::parse(std::env::args().skip(1));
 
     eframe::run_native(
         "SpellArchive",
         options,
-        Box::new(move |cc| {
-            let mut app = app::SpellApp::new(cc);
-            if let Some(path) = startup {
-                if path.is_dir() {
-                    app.navigate(path);
-                } else {
-                    app.open_path(path, None);
-                }
-            }
-            Ok(Box::new(app))
-        }),
+        Box::new(move |cc| Ok(Box::new(app::SpellApp::new(cc, Some(request))))),
     )?;
 
     drop(instance);
@@ -60,18 +51,13 @@ fn main() -> eframe::Result<()> {
 }
 
 fn handoff_to_existing() {
-    let paths: Vec<String> = std::env::args()
-        .skip(1)
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.exists())
-        .map(|path| path.display().to_string())
-        .collect();
-    if !paths.is_empty() {
+    let request = startup::StartupRequest::parse(std::env::args().skip(1));
+    if !request.paths.is_empty() {
         if let Some(handoff) = prefs::handoff_path() {
             if let Some(parent) = handoff.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let _ = std::fs::write(&handoff, paths.join("\n"));
+            let _ = std::fs::write(&handoff, request.to_handoff());
         }
     }
     activate_existing_window();

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::i18n::{Locale, TextKey, Translator};
+use crate::startup::{StartupIntent, StartupRequest, add_output, extract_target};
 use crate::theme::ThemeStore;
 use crate::tray::{Tray, TrayAction};
 use eframe::egui;
@@ -186,6 +187,8 @@ pub struct SpellApp {
     pub particles: Vec<Particle>,
     pub particle_seed: u32,
     pub particle_accum: f32,
+    /// 打开成功后要自动执行的启动动作（解压到当前目录等）。
+    startup: Option<StartupRequest>,
 
     pub runner: TaskRunner,
     pub tasks: Vec<TaskView>,
@@ -207,7 +210,7 @@ pub struct SpellApp {
 }
 
 impl SpellApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, startup: Option<StartupRequest>) -> Self {
         install_cjk_fonts(&cc.egui_ctx);
 
         let prefs = crate::prefs::Prefs::load();
@@ -262,6 +265,7 @@ impl SpellApp {
                 .map(|duration| duration.subsec_nanos() ^ duration.as_secs() as u32)
                 .unwrap_or(0x9E37_79B9),
             particle_accum: 0.0,
+            startup: None,
             runner: TaskRunner::new(2),
             tasks: Vec::new(),
             pending_password: None,
@@ -285,7 +289,47 @@ impl SpellApp {
         if let Err(err) = crate::shell_menu::refresh_if_installed() {
             crate::logging::warn("shell_menu", &format!("refresh failed: {err}"));
         }
+        app.apply_startup(startup);
         app
+    }
+
+    /// 处理命令行 / 右键动词 / 第二实例转交的启动动作。
+    fn apply_startup(&mut self, request: Option<StartupRequest>) {
+        let Some(request) = request else {
+            return;
+        };
+        if request.paths.is_empty() {
+            return;
+        }
+
+        if request.intent == StartupIntent::Add {
+            let output = add_output(&request.paths[0], request.paths.len());
+            self.open_pack_with(request.paths, output);
+            return;
+        }
+
+        let first = request.paths[0].clone();
+        if request.intent != StartupIntent::Open {
+            self.startup = Some(StartupRequest {
+                intent: request.intent,
+                paths: vec![first.clone()],
+            });
+        }
+        if first.is_dir() {
+            self.navigate(first);
+            return;
+        }
+        self.open_path(first, None);
+
+        if request.intent == StartupIntent::Open {
+            for path in request.paths.iter().skip(1) {
+                if path.is_dir() {
+                    self.navigate(path.clone());
+                } else {
+                    self.open_path(path.clone(), None);
+                }
+            }
+        }
     }
 
     pub fn set_theme(&mut self, index: usize, ctx: &egui::Context) {
@@ -476,19 +520,8 @@ impl SpellApp {
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let _ = std::fs::remove_file(&path);
         self.show_window(ctx);
-        let mut opened = 0usize;
-        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-            let target = PathBuf::from(line);
-            if target.is_dir() {
-                self.navigate(target);
-            } else {
-                self.open_path(target, None);
-                opened += 1;
-            }
-        }
-        if opened > 1 {
-            self.status = format!("正在打开 {opened} 个转交归档（各占一个标签页）");
-        }
+        let request = StartupRequest::from_handoff(&text);
+        self.apply_startup(Some(request));
     }
 
     /// 每秒检查主题文件是否有变化；有变化就重载并保持当前主题 id。
@@ -677,10 +710,6 @@ impl SpellApp {
 
     /// 解压前预检：选目标目录、生成计划，交给确认弹窗。
     pub fn begin_extract_dialog(&mut self) {
-        let Some(reader) = self.reader.clone() else {
-            self.status = self.tr.t(TextKey::EmptyArchive);
-            return;
-        };
         let start = self
             .archive_path
             .as_ref()
@@ -688,6 +717,15 @@ impl SpellApp {
             .map(PathBuf::from)
             .unwrap_or_else(|| self.dir.clone());
         let Some(target) = rfd::FileDialog::new().set_directory(start).pick_folder() else {
+            return;
+        };
+        self.begin_extract_to(target);
+    }
+
+    /// 对当前归档提交后台预检；目标目录由调用方决定（对话框 / 右键动词）。
+    pub fn begin_extract_to(&mut self, target: PathBuf) {
+        let Some(reader) = self.reader.clone() else {
+            self.status = self.tr.t(TextKey::EmptyArchive);
             return;
         };
 
@@ -729,11 +767,25 @@ impl SpellApp {
     }
 
     pub fn open_pack_dialog(&mut self) {
+        let output = self.dir.join("archive.zip");
+        self.open_pack_with(Vec::new(), output);
+    }
+
+    /// 用指定输入和输出打开打包对话框（右键“添加到压缩包”）。
+    pub fn open_pack_with(&mut self, sources: Vec<PathBuf>, output: PathBuf) {
         self.pack_state = PackState {
-            output: self.dir.join("archive.zip").display().to_string(),
+            sources,
+            output: output.display().to_string(),
             ..Default::default()
         };
         self.show_pack = true;
+        if !self.pack_state.sources.is_empty() {
+            self.status = format!(
+                "准备打包 {} 个输入到 {}",
+                self.pack_state.sources.len(),
+                self.pack_state.output
+            );
+        }
     }
 
     pub fn pack_add_files(&mut self) {
@@ -955,6 +1007,18 @@ impl SpellApp {
                 let count = self.entries.len();
                 if let Some(task) = self.task_mut(task) {
                     task.detail = Some(format!("{count} 个条目"));
+                }
+
+                if let Some(request) = self.startup.take() {
+                    match request.intent {
+                        StartupIntent::ExtractHere => {
+                            self.begin_extract_to(extract_target(&path, false));
+                        }
+                        StartupIntent::ExtractTo => {
+                            self.begin_extract_to(extract_target(&path, true));
+                        }
+                        StartupIntent::Open | StartupIntent::Add => {}
+                    }
                 }
             }
             TaskEvent::NeedPassword { task, path } => {

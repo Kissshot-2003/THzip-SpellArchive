@@ -17,7 +17,7 @@
 
 | 阶段 | 目标 | 预估 | 依赖 | 状态 |
 |---|---|---|---|---|
-| Phase 0 | 基线固化：远端、CI、版本单一来源、可复现打包、CHANGELOG | 1 天 | 无 | 进行中 |
+| Phase 0 | 基线固化：远端、CI、版本单一来源、可复现打包、CHANGELOG | 1 天 | 无 | 已完成 |
 | Phase 1 | 质量护栏：fuzz、差分测试、基准、GUI 冒烟 | 3–5 天 | Phase 0 | 未开始 |
 | Phase 2 | 产品功能收尾：便携模式、注释、主题导出、任务模板、预览 | 1–2 周 | Phase 0 | 未开始 |
 | Phase 3 | 格式与 CLI 增强：`--json`、zip 加密 LZMA/XZ、7z 固实进度、分卷创建 | 1–2 周 | Phase 1 | 未开始 |
@@ -35,8 +35,8 @@
 - [x] `CHANGELOG.md`
 - [x] `.github/workflows/ci.yml`（test / clippy / fmt）
 - [x] `.github/workflows/release.yml`（tag 触发打包并上传 Release）
-- [ ] 创建远端私有仓库并推送 `main`
-- [ ] 验证：`scripts/package.ps1` 产出的版本与 `Cargo.toml` 一致，`dist` 含两个 exe
+- [x] 创建远端私有仓库并推送 `main`
+- [x] 验证：`scripts/package.ps1` 产出的版本与 `Cargo.toml` 一致，`dist` 含两个 exe
 
 **退出标准**：干净机器上一条命令产出与源码同版本的 `dist`；推送后 CI 全绿。
 

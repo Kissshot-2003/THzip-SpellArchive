@@ -56,10 +56,6 @@ pub trait ArchiveReader: Send {
         false
     }
 
-    fn comment(&self) -> Option<&str> {
-        None
-    }
-
     /// 只读预检：净化路径、检测冲突、估算总量。不写盘。
     fn plan(
         &self,

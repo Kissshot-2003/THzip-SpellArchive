@@ -47,8 +47,6 @@ pub enum PlanWarning {
     SuspiciousDisplayName { id: EntryId, detail: String },
     UnsupportedMethod { id: EntryId, method: Method },
     UnsafePath { id: EntryId, issue: SanitizeError },
-    DuplicatePath { id: EntryId, renamed_to: String },
-    LongPath,
 }
 
 #[derive(Debug, Clone)]

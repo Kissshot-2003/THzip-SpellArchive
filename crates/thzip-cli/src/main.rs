@@ -297,14 +297,10 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
                 println!("  可疑文件名（条目 {id}）: {detail}")
             }
             PlanWarning::SymlinkSkipped { id } => println!("  跳过链接（条目 {id}）"),
-            PlanWarning::DuplicatePath { id, renamed_to } => {
-                println!("  重名（条目 {id}）→ {renamed_to}")
-            }
             PlanWarning::BombSuspected { hit } => println!("  疑似炸弹: {hit}"),
             PlanWarning::UnsupportedMethod { id, method } => {
                 println!("  不支持的压缩方法（条目 {id}）: {}", method.label())
             }
-            PlanWarning::LongPath => println!("  存在超长路径"),
         }
     }
 }

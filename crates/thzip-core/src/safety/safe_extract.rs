@@ -113,9 +113,7 @@ impl ExtractSink for ExtractDirSink {
         };
 
         let len = chunk.len() as u64;
-        self.budget
-            .on_write(*written, len, 0)
-            .map_err(limit_error)?;
+        self.budget.on_write(*written, len).map_err(limit_error)?;
 
         atomic.file_mut().write_all(chunk)?;
         hasher.update(chunk);

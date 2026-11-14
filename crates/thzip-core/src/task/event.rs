@@ -83,14 +83,6 @@ pub enum TaskEvent {
         written: u64,
         entry: Option<EntryId>,
     },
-    Warning {
-        task: TaskId,
-        text: String,
-    },
-    NeedDecision {
-        task: TaskId,
-        plan: Arc<ExtractPlan>,
-    },
     /// 后台预检完成，UI 可以弹出确认框。
     PlanReady {
         task: TaskId,
@@ -98,11 +90,6 @@ pub enum TaskEvent {
         target: PathBuf,
         /// 预检时使用的 reader；切换标签页后仍能对正确的归档解压。
         reader: Arc<Mutex<Box<dyn ArchiveReader>>>,
-    },
-    EntryFailed {
-        task: TaskId,
-        entry: EntryId,
-        error: FailReason,
     },
     Finished {
         task: TaskId,
@@ -129,10 +116,4 @@ pub enum TaskEvent {
         task: TaskId,
         error: FailReason,
     },
-}
-
-#[derive(Debug, Clone)]
-pub struct ArchiveOpened {
-    pub task: TaskId,
-    pub path: PathBuf,
 }

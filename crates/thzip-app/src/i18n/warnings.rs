@@ -36,14 +36,6 @@ pub fn warning(locale: Locale, warning: &PlanWarning) -> String {
         (Locale::EnUs, PlanWarning::UnsafePath { id, issue }) => {
             format!("Unsafe path (entry {id}): {}", issue_en(*issue))
         }
-        (Locale::ZhCn, PlanWarning::DuplicatePath { id, renamed_to }) => {
-            format!("重名（条目 {id}）→ {renamed_to}")
-        }
-        (Locale::EnUs, PlanWarning::DuplicatePath { id, renamed_to }) => {
-            format!("Duplicate (entry {id}) → {renamed_to}")
-        }
-        (Locale::ZhCn, PlanWarning::LongPath) => "存在超长路径".to_owned(),
-        (Locale::EnUs, PlanWarning::LongPath) => "Path too long".to_owned(),
     }
 }
 

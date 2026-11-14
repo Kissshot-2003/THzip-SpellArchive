@@ -24,7 +24,6 @@ pub(crate) fn limit_en(hit: LimitHit) -> &'static str {
         LimitHit::EntryCount => "entry count",
         LimitHit::Ratio => "compression ratio (possible zip bomb)",
         LimitHit::DictionarySize => "dictionary size",
-        LimitHit::Nesting => "nesting depth",
         LimitHit::EntryPathDepth => "archive path depth",
         LimitHit::EntryNameLength => "archive entry name length",
         LimitHit::ScanDepth => "input path depth",

@@ -53,7 +53,7 @@ impl ExtractSink for VerifySink {
 
         if let Some(budget) = self.budget.as_mut() {
             budget
-                .on_write(current.written, chunk.len() as u64, 0)
+                .on_write(current.written, chunk.len() as u64)
                 .map_err(SinkError::Limit)?;
         }
 

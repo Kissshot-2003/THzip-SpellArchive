@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（129）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（128）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -85,7 +85,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 129 个测试
+cargo test --workspace                 # 128 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p thzip-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 129 通过；clippy 无告警。
+12. `cargo test --workspace` 128 通过；clippy 无告警。
 
 ---
 
@@ -760,7 +760,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **129** 个测试。
+当前共 **128** 个测试。
 
 ### 9.2 测试分布
 

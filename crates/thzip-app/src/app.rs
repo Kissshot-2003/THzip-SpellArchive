@@ -1380,22 +1380,6 @@ impl ThzipApp {
                     };
                 }
             }
-            TaskEvent::Warning { task, text } => {
-                if let Some(view) = self.task_mut(task) {
-                    view.detail = Some(text);
-                }
-            }
-            TaskEvent::NeedDecision { task, .. } => {
-                if let Some(view) = self.task_mut(task) {
-                    view.phase = TaskPhase::AwaitingDecision;
-                }
-            }
-            TaskEvent::EntryFailed { task, error, .. } => {
-                let text = crate::i18n::errors::reason(self.locale, &error);
-                if let Some(view) = self.task_mut(task) {
-                    view.detail = Some(text);
-                }
-            }
             TaskEvent::Finished { task, report } => {
                 let summary = self.tr.tf(
                     TextKey::ExtractSummary,

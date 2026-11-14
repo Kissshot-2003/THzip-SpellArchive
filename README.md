@@ -25,6 +25,17 @@ cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / �
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
 
+## 性能基线（本机，`cargo bench --quick`）
+
+| 场景 | 耗时 |
+|---|---|
+| `classify_600b`（17 组样本） | ~5 µs |
+| 打开并列出 10k 条目 zip | ~340 ms |
+| 解压 16 MiB zip 到计数 sink | ~1.7 ms |
+| 打包 4 MiB 随机数据为 7z（LZMA2 L6） | ~950 ms |
+
+数字只用于前后对比；10k 列表偏慢已记录在 `ROADMAP.md` Phase 4。
+
 ## 便携模式
 
 exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：配置、日志、单实例 handoff 都写到

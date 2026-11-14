@@ -372,3 +372,27 @@ fn zip_append_respects_cancel() {
     );
     assert!(matches!(result, Err(thzip_core::ArchiveError::Cancelled)));
 }
+
+#[test]
+fn writes_and_reads_archive_comment() {
+    let dir = TempDir::new("comment");
+    let archive = dir.path().join("comment.zip");
+    let src = dir.path().join("a.txt");
+    std::fs::write(&src, b"hello").unwrap();
+
+    let entries = scan_inputs(std::slice::from_ref(&src), &Limits::default()).unwrap();
+    let mut writer = backend::create_writer(&archive, ArchiveKind::Zip, Method::Deflate).unwrap();
+    writer.set_comment("灵梦的符卡").unwrap();
+    write_entries(
+        writer.as_mut(),
+        &entries,
+        Some(Method::Deflate),
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+
+    let reader = backend::open(&archive, None).unwrap();
+    assert_eq!(reader.comment().as_deref(), Some("灵梦的符卡"));
+}

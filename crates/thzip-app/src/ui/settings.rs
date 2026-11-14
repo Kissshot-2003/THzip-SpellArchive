@@ -15,6 +15,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let shell_installed = crate::shell_menu::is_installed();
     let mut shell_want = shell_installed;
     let mut import_theme = false;
+    let mut export_theme = false;
     let mut open = true;
     let title = app.tr.t(TextKey::Settings);
     let theme_label = app.tr.t(TextKey::Theme);
@@ -23,6 +24,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let close_to_tray_label = app.tr.t(TextKey::CloseToTray);
     let shell_menu_label = app.tr.t(TextKey::ShellMenu);
     let import_theme_label = app.tr.t(TextKey::ImportTheme);
+    let export_theme_label = app.tr.t(TextKey::ExportTheme);
     let feature_summary = app.tr.t(TextKey::FeatureSummary);
     let names = app.themes.names();
     let mut selected = app.themes.current_index();
@@ -163,9 +165,14 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 ui.checkbox(&mut shell_want, shell_menu_label);
             }
             ui.add_space(8.0);
-            if crate::ui::primary_button(ui, &palette, import_theme_label).clicked() {
-                import_theme = true;
-            }
+            ui.horizontal(|ui| {
+                if crate::ui::primary_button(ui, &palette, import_theme_label).clicked() {
+                    import_theme = true;
+                }
+                if crate::ui::primary_button(ui, &palette, export_theme_label).clicked() {
+                    export_theme = true;
+                }
+            });
 
             ui.add_space(12.0);
             ui.separator();
@@ -210,6 +217,9 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
 
     if import_theme {
         app.import_theme_dialog();
+    }
+    if export_theme {
+        app.export_theme_dialog();
     }
 
     if shell_want != shell_installed {

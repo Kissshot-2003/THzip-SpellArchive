@@ -127,6 +127,14 @@ impl ArchiveReader for ZipReader {
         &self.entries
     }
 
+    fn comment(&self) -> Option<String> {
+        let raw = self.archive.as_ref()?.comment();
+        if raw.is_empty() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(raw).into_owned())
+    }
+
     fn plan(
         &self,
         ids: &[EntryId],

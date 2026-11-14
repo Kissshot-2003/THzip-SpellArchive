@@ -72,6 +72,7 @@ pub struct ArchiveTab {
     pub search: String,
     pub selected: std::collections::BTreeSet<usize>,
     pub last_selected: Option<usize>,
+    pub comment: Option<String>,
 }
 
 pub struct DirItem {
@@ -159,6 +160,7 @@ pub struct PackState {
     pub append: bool,
     pub encrypt: bool,
     pub password: String,
+    pub comment: String,
     pub error: Option<String>,
     pub confirm_overwrite: bool,
 }
@@ -175,6 +177,7 @@ impl Default for PackState {
             append: false,
             encrypt: false,
             password: String::new(),
+            comment: String::new(),
             error: None,
             confirm_overwrite: false,
         }
@@ -245,6 +248,7 @@ pub struct ThzipApp {
     pub archive_path: Option<PathBuf>,
     pub reader: Option<SharedReader>,
     pub entries: Vec<ArchiveEntry>,
+    pub comment: Option<String>,
     pub search: String,
     pub focus_search: bool,
     pub selected: std::collections::BTreeSet<usize>,
@@ -323,6 +327,7 @@ impl ThzipApp {
             archive_path: None,
             reader: None,
             entries: Vec::new(),
+            comment: None,
             search: String::new(),
             focus_search: false,
             selected: std::collections::BTreeSet::new(),
@@ -465,6 +470,7 @@ impl ThzipApp {
             search: std::mem::take(&mut self.search),
             selected: std::mem::take(&mut self.selected),
             last_selected: self.last_selected.take(),
+            comment: self.comment.take(),
         }
     }
 
@@ -477,6 +483,7 @@ impl ThzipApp {
         self.search = tab.search;
         self.selected = tab.selected;
         self.last_selected = tab.last_selected;
+        self.comment = tab.comment;
     }
 
     pub fn tab_count(&self) -> usize {
@@ -809,6 +816,44 @@ impl ThzipApp {
         let task_name = self.tr.tf(TextKey::TaskImportTheme, &[("name", &name)]);
         self.push_task(handle, task_name);
         self.status = self.tr.t(TextKey::ImportingTheme);
+    }
+
+    /// 把当前主题目录打包成 zip，输出位置由用户选择。
+    pub fn export_theme_dialog(&mut self) {
+        let Some(themes_root) = crate::theme::loader::themes_root() else {
+            self.status = self.tr.t(TextKey::ThemeDirMissing);
+            return;
+        };
+        let id = self.themes.current_id().to_owned();
+        let theme_dir = themes_root.join(&id);
+        if !theme_dir.is_dir() {
+            self.status = self.tr.t(TextKey::ThemeExportUnavailable);
+            return;
+        }
+        let filter = self.tr.t(TextKey::FilterThemePack);
+        let Some(output) = rfd::FileDialog::new()
+            .set_directory(&self.dir)
+            .set_file_name(format!("{id}-theme.zip"))
+            .add_filter(filter, &["zip"])
+            .save_file()
+        else {
+            return;
+        };
+        let name = file_name(&output);
+        let handle = self.runner.submit(TaskOp::Pack {
+            output,
+            inputs: vec![theme_dir],
+            kind: ArchiveKind::Zip,
+            method: Method::Deflate,
+            append: false,
+            password: None,
+            sevenz: SevenZOptions::default(),
+            comment: None,
+            limits: self.limits,
+        });
+        let task_name = self.tr.tf(TextKey::TaskExportTheme, &[("name", &name)]);
+        self.push_task(handle, task_name);
+        self.status = self.tr.t(TextKey::ExportingTheme);
     }
 
     pub fn open_path(&mut self, path: PathBuf, password: Option<SecretString>) {
@@ -1221,6 +1266,12 @@ impl ThzipApp {
             level: self.pack_state.sevenz_level.min(9),
             dict_size: self.pack_state.sevenz_dict_mib.saturating_mul(1024 * 1024),
         };
+        let comment = if kind == ArchiveKind::Zip && !append {
+            let text = self.pack_state.comment.trim();
+            (!text.is_empty()).then(|| text.to_owned())
+        } else {
+            None
+        };
         let handle = self.runner.submit(TaskOp::Pack {
             output,
             inputs: self.pack_state.sources.clone(),
@@ -1229,6 +1280,7 @@ impl ThzipApp {
             append,
             password,
             sevenz,
+            comment,
             limits: self.limits,
         });
         let task_key = if append {
@@ -1296,11 +1348,13 @@ impl ThzipApp {
                 reader,
             } => {
                 self.prepare_tab_for_open(&path);
+                let comment = reader.lock().ok().and_then(|reader| reader.comment());
                 self.archive_name = file_name(&path);
                 self.archive_kind = Some(kind);
                 self.archive_path = Some(path.clone());
                 self.reader = Some(reader);
                 self.entries = entries.to_vec();
+                self.comment = comment;
                 self.search.clear();
                 self.selected.clear();
                 self.last_selected = None;

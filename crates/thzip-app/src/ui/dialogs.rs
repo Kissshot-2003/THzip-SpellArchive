@@ -37,6 +37,8 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
     let append_mode = app.tr.t(TextKey::AppendMode);
     let aes_encrypt = app.tr.t(TextKey::AesEncrypt);
     let password_hint = app.tr.t(TextKey::Password);
+    let comment_label = app.tr.t(TextKey::Comment);
+    let comment_hint = app.tr.t(TextKey::CommentHint);
     let formats_hint = app.tr.t(TextKey::PackFormatsHint);
     let append_hint = app.tr.t(TextKey::PackAppendHint);
     let overwrite_hint = app.tr.t(TextKey::PackOverwriteHint);
@@ -222,6 +224,16 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
                         .hint_text(password_hint)
                         .desired_width(240.0),
                 );
+            }
+            if is_zip && !app.pack_state.append {
+                ui.horizontal(|ui| {
+                    ui.label(&comment_label);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut app.pack_state.comment)
+                            .hint_text(&comment_hint)
+                            .desired_width((ui.available_width() - 8.0).max(180.0)),
+                    );
+                });
             }
 
             ui.label(

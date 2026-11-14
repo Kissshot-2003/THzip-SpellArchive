@@ -266,6 +266,7 @@ fn packs_through_worker() {
         append: false,
         password: None,
         sevenz: thzip_core::SevenZOptions::default(),
+        comment: None,
         limits: thzip_core::Limits::default(),
     });
 

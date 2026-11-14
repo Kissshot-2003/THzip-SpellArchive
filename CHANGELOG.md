@@ -13,6 +13,8 @@
 - criterion 基准：格式嗅探、10k 条目 zip 列表、16 MiB 解压、4 MiB 7z 打包。
 - 便携模式：exe 同目录存在 `portable.flag` 或 `themes/` 时，配置、日志、handoff 写入 `<exe>\config\`，首次启动从 `%APPDATA%` 迁移。
 - CLI `--json`：`sniff` / `list` / `test` / `extract` / `pack` 输出单行 JSON。
+- zip 归档注释：创建时可填写，打开后在标题旁显示提示。
+- 主题包导出：设置页把当前主题目录打包为 zip。
 
 ### 变更
 

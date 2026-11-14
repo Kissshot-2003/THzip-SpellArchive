@@ -28,6 +28,8 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_default();
+    let comment = app.comment.clone();
+    let comment_label = app.tr.t(TextKey::Comment);
     let search_hint = app.tr.t(TextKey::SearchHint);
     let empty_text = app.tr.t(TextKey::EmptyArchive);
     let empty_hint = app.tr.t(TextKey::EmptyHint);
@@ -71,8 +73,12 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
             }
             if app.reader.is_some() {
                 ui.horizontal_wrapped(|ui| {
+                    let hover = match &comment {
+                        Some(text) => format!("{path_hint}\n\n{}: {text}", comment_label),
+                        None => path_hint.clone(),
+                    };
                     ui.label(egui::RichText::new(title.clone()).size(20.0).strong())
-                        .on_hover_text(path_hint);
+                        .on_hover_text(hover);
                     egui::Frame::default()
                         .fill(palette.accent_soft.gamma_multiply(0.72))
                         .corner_radius(egui::CornerRadius::same(5))
@@ -80,6 +86,20 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                         .show(ui, |ui| {
                             ui.label(egui::RichText::new(kind).size(11.0).color(palette.accent));
                         });
+                    if let Some(text) = &comment {
+                        egui::Frame::default()
+                            .fill(palette.warning.gamma_multiply(0.18))
+                            .corner_radius(egui::CornerRadius::same(5))
+                            .inner_margin(egui::Margin::symmetric(8, 3))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(comment_label.clone())
+                                        .size(11.0)
+                                        .color(palette.warning),
+                                )
+                                .on_hover_text(text.clone());
+                            });
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut search = app.search.clone();

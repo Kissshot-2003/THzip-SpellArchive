@@ -56,6 +56,11 @@ pub trait ArchiveReader: Send {
         false
     }
 
+    /// 归档注释（目前只有 zip 支持）；None 表示没有或该格式不支持。
+    fn comment(&self) -> Option<String> {
+        None
+    }
+
     /// 只读预检：净化路径、检测冲突、估算总量。不写盘。
     fn plan(
         &self,

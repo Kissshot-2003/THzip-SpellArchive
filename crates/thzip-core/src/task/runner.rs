@@ -50,6 +50,7 @@ pub enum TaskOp {
         append: bool,
         password: Option<SecretString>,
         sevenz: SevenZOptions,
+        comment: Option<String>,
         limits: Limits,
     },
     /// 重写归档：删除 `remove` 中的条目，并把 `rename` 中的条目改成新名字。
@@ -348,6 +349,7 @@ fn run_task(
             append,
             password,
             sevenz,
+            comment,
             limits,
         } => {
             if append && password.is_some() {
@@ -414,6 +416,21 @@ fn run_task(
                     return Ok(());
                 }
             };
+
+            if kind == ArchiveKind::Zip
+                && !append
+                && let Some(text) = comment.as_deref()
+                && let Err(err) = writer.set_comment(text)
+            {
+                send(
+                    tx,
+                    TaskEvent::Failed {
+                        task,
+                        error: err.reason(),
+                    },
+                );
+                return Ok(());
+            }
 
             let progress_state = std::cell::RefCell::new((Instant::now(), 0u64));
             let progress_tx = tx.clone();

@@ -228,3 +228,60 @@ fn tar_append_respects_cancel() {
     );
     assert!(matches!(result, Err(thzip_core::ArchiveError::Cancelled)));
 }
+
+#[test]
+fn tar_append_preserves_directory_mtime() {
+    let dir = TempDir::new("append-mtime");
+    let src = build_source(dir.path());
+    let limits = Limits::default();
+    let archive = dir.path().join("mtime.tar.gz");
+    let entries = scan_inputs(std::slice::from_ref(&src), &limits).unwrap();
+    let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
+    let subdir = src.join("子目录");
+    thzip_core::safety::set_mtime(&subdir, stamp).unwrap();
+    let mut writer = backend::create_writer(&archive, ArchiveKind::TarGz, Method::Store).unwrap();
+    write_entries(
+        writer.as_mut(),
+        &entries,
+        None,
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+
+    let extra = dir.path().join("extra.txt");
+    std::fs::write(&extra, b"x").unwrap();
+    let extra_entries = scan_inputs(std::slice::from_ref(&extra), &limits).unwrap();
+    let mut writer = backend::create_writer_append(
+        &archive,
+        ArchiveKind::TarGz,
+        Method::Store,
+        thzip_core::SevenZOptions::default(),
+        limits,
+        &CancelToken::new(),
+    )
+    .unwrap();
+    write_entries(
+        writer.as_mut(),
+        &extra_entries,
+        None,
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+
+    let reader = backend::open(&archive, None).unwrap();
+    let entry = reader
+        .entries()
+        .iter()
+        .find(|entry| entry.display.as_ref() == "素材/子目录")
+        .unwrap();
+    let mtime = entry.mtime.unwrap();
+    let diff = mtime
+        .duration_since(stamp)
+        .or_else(|_| stamp.duration_since(mtime))
+        .unwrap();
+    assert!(diff < std::time::Duration::from_secs(2), "{diff:?}");
+}

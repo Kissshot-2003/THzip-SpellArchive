@@ -1587,7 +1587,7 @@ impl ThzipApp {
         {
             return;
         }
-        let typing = ctx.egui_wants_keyboard_input();
+        let typing = ctx.text_edit_focused();
         let (mut open, mut extract, mut pack, mut test, mut search) =
             (false, false, false, false, false);
         let (mut select_all, mut delete, mut rename, mut refresh) = (false, false, false, false);

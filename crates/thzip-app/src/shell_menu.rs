@@ -62,7 +62,11 @@ pub fn is_installed() -> bool {
 pub fn refresh_if_installed(locale: Locale) -> io::Result<()> {
     let exe = std::env::current_exe()?;
     if is_installed() {
-        return install(&exe, locale);
+        install(&exe, locale)?;
+        if legacy_installed() {
+            remove_legacy()?;
+        }
+        return Ok(());
     }
     if legacy_installed() {
         install(&exe, locale)?;

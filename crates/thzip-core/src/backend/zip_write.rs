@@ -69,6 +69,9 @@ impl ZipArchiveWriter {
             let mut archive = zip::ZipArchive::new(file).map_err(map_zip_error)?;
             for index in 0..archive.len() {
                 if let Ok(entry) = archive.by_index_raw(index) {
+                    if entry.encrypted() {
+                        return Err(ArchiveError::Unsupported(FailReason::EncryptedRewrite));
+                    }
                     names.insert(entry.name().to_lowercase());
                 }
             }

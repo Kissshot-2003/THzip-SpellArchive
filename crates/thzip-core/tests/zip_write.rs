@@ -291,6 +291,20 @@ fn encrypted_archive_needs_password() {
         std::fs::read(target.join("secret.txt")).unwrap(),
         b"top secret".to_vec()
     );
+
+    // 加密包拒绝追加，避免新条目以明文写入。
+    let result = backend::create_writer_append(
+        &archive,
+        ArchiveKind::Zip,
+        Method::Deflate,
+        thzip_core::SevenZOptions::default(),
+        Limits::default(),
+        &CancelToken::new(),
+    );
+    assert!(matches!(
+        result,
+        Err(thzip_core::ArchiveError::Unsupported(_))
+    ));
 }
 
 #[test]

@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（127）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（128）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -85,7 +85,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 127 个测试
+cargo test --workspace                 # 128 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p thzip-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 127 通过；clippy 无告警。
+12. `cargo test --workspace` 128 通过；clippy 无告警。
 
 ---
 
@@ -321,7 +321,7 @@ UI 选目标目录
 - Store / Deflate / BZip2 / Zstd；zip64 大文件；本地 DOS 时间（Windows 用 `FileTimeToLocalFileTime`）。
 - GUI 打包弹窗对 zip 提供压缩方法下拉框，对 7z 提供压缩级别与字典大小；CLI 用
   `pack --method deflate|bzip2|zstd` 与 `--7z-level` / `--7z-dict`。
-- 追加：复制原包到临时文件 → `ZipWriter::new_append` → 原子替换；拒绝大小写重名。
+- 追加：复制原包到临时文件 → `ZipWriter::new_append` → 原子替换；拒绝大小写重名与加密包（避免明文混入）。
 - AES-256：`with_aes_encryption(AesMode::Aes256, …)`；密码走 `SecretString`。
 - 追加模式不允许设置新密码。
 
@@ -758,7 +758,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **127** 个测试。
+当前共 **128** 个测试。
 
 ### 9.2 测试分布
 
@@ -771,7 +771,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/zip_write.rs` | 9 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
-| `tests/tar_write.rs` | 4 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消 |
+| `tests/tar_write.rs` | 5 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消、目录 mtime 保留 |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
 | `tests/sevenz_write.rs` | 7 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝、重名条目、追加取消 |
 
@@ -811,7 +811,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 16 | 部分修复 | 写入支持 Store/Deflate/BZip2/Zstd；读取支持 Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；加密 LZMA/XZ 不支持 |
 | 17 | zip 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 增量原地追加风险高，暂不做 |
 | 18 | 打包扫描跳过符号链接 | 链接内容不会进包 | 需要时提供“跟随链接”+ 环检测 |
-| 19 | 追加模式不能设置新密码 | 加密包追加的新条目不加密 | 明确提示或禁止追加加密包 |
+| 19 | 已修复 | zip / 7z 检测到加密包时直接拒绝追加，避免新条目以明文写入；追加仍不能设置新密码 | 加密追加需密码重加密，暂不做 |
 | 20 | 7z 固实包单条提取进度按写出字节算 | 跳过前序数据时进度停滞/跳变 | 通过解码字节回调上报压缩进度 |
 | 21 | 已修复（部分） | 未加密 7z 支持追加（解包重建）；加密包拒绝追加 | 加密追加需要密码重加密，暂不做 |
 | 22 | 部分修复 | 7z 已可调 LZMA2 级别/字典；固实块仍未暴露（库的逐条 API 只能非固实） | 换 `push_archive_entries` 或等库暴露固实配置 |

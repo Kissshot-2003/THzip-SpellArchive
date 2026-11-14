@@ -18,7 +18,7 @@ themes/<主题 id>/
 schema = 1
 
 [meta]
-name = "Spell Default - Reimu"
+name = "THzip-SpellArchive - Reimu"
 author = "YourName"
 version = "1.0"
 license = "CC-BY-NC-SA-4.0"      # 必填
@@ -31,11 +31,10 @@ pack = "构筑封印结界"
 extract = "解除符卡封印"
 task_running = "咏唱进行中…"
 task_done = "符卡咏唱完成"
-warn_bomb = "检测到不稳定异常咒物，禁止展开！"
+search_hint = "搜索符卡名…"
 
 [effects]
-particles = true
-easter_eggs = true
+particles = true            # 预留；当前仅读取 particles
 
 [resource]
 IconArchive7z = "png/icon-archive.png"
@@ -50,14 +49,16 @@ BorderWarning = [4, 4, 4, 4]
 [color]
 accent = "#F03D52"
 accent_soft = "#3D1F33"
-accent_deep = "#8F1F33"
+progress_bg = "#0E1020"
 bg_window = "#171A2E"
 bg_panel = "#1F213B"
 bg_hover = "#292B47"
 border = "#404263"
 text_normal = "#F5F2E8"
 text_sub = "#A6A6BD"
-text_warn = "#FF5E6E"
+success = "#52E0A0"
+warning = "#FFC857"
+error = "#FF5E6E"
 ```
 
 ## 资源 Key
@@ -76,8 +77,8 @@ text_warn = "#FF5E6E"
 | `ParticleSparkle` / `ParticleSakura` | 透明 PNG | 否 |
 | `AvatarMain` | `avatars/<角色>-256.png` | 否（工具栏/设置页头像） |
 
-唯一真源就是本表。`res_key.rs`、示例 `theme.toml`、`assets/README.md` 由
-`xtask check-theme-keys` 比对，缺一即 CI 失败。
+Key 的枚举与名称为 `thzip-app/src/theme/mod.rs` 的 `ResKey`；
+`theme/loader.rs` 的测试会扫描 `themes/*/theme.toml`，未知 Key 或缺失文件会让测试失败。
 
 ## 解析规则（实现约束）
 
@@ -89,11 +90,13 @@ text_warn = "#FF5E6E"
 5. 回退链：当前主题 → 编译进 exe 的内置 fallback → 纯色占位。`themes/` 目录不存在也能启动。
 6. `[resource_nine_patch]` 缺失的面板图按拉伸处理并给出警告（宽窗口会明显变形）。
 7. `scale` 必须为正整数；像素素材只允许整数倍缩放（最终物理像素为 `scale` 的整数倍）。
+8. 主题包导入会执行 500 文件 / 单文件 8 MiB / 总量 64 MiB 限制，并拒绝可执行扩展名；
+   直接放在 `themes/` 下的主题只受贴图解码限制（SVG ≤ 8 MiB、最长边 ≤ 2048）。
 
 ## 安全
 
-- 主题包导入（v0.2）走 `safety::safe_extract`，拒绝 `.exe/.dll/.bat/.ps1/.scr`、符号链接。
-- SVG 仅允许 plain 主题使用；禁用外部资源引用，限制画布 ≤ 4096×4096、节点 ≤ 100k。
+- 主题包导入走 `ExtractDirSink`，拒绝 `.exe/.dll/.bat/.ps1/.scr` 等可执行文件；符号链接条目会拒绝导入。
+- SVG 禁用外部资源引用，单文件 ≤ 8 MiB、最长边 ≤ 2048。
 - 主题不允许自带字体。
 
 ## 文案 Key（与 `TextKey` 对应）
@@ -103,7 +106,8 @@ text_warn = "#FF5E6E"
 `search_hint` `theme` `language` `standard_terms` `first_run_hint` `dismiss`
 `empty_archive` `demo_badge` `go_up` `status_ready` `about`
 
-英文需要复数时使用 `key_one` / `key_other`；CJK 只用基础 key。占位符为 `{n}`。
+主题覆盖可以包含 `{name}`、`{count}` 等占位符；必须与内置文案保持同一组占位符，
+否则动态内容会被丢掉。英文与中文共用同一 key。
 
 ## 可发现性硬规则
 

@@ -2,8 +2,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason, NameIssue, path_text};
 use crate::limits::Limits;
+use crate::safety::bomb::LimitHit;
 use crate::task::CancelToken;
 use crate::types::Method;
 
@@ -42,7 +43,9 @@ impl Default for SevenZOptions {
 pub fn normalize_entry_name(name: &str) -> Result<String, ArchiveError> {
     let name = name.replace('\\', "/");
     if name.starts_with('/') {
-        return Err(ArchiveError::Other("归档内名字不能是绝对路径".to_owned()));
+        return Err(ArchiveError::Other(FailReason::InvalidName(
+            NameIssue::Absolute,
+        )));
     }
 
     let mut parts = Vec::new();
@@ -51,29 +54,35 @@ pub fn normalize_entry_name(name: &str) -> Result<String, ArchiveError> {
             continue;
         }
         if segment == ".." {
-            return Err(ArchiveError::Other("归档内名字不能包含 ..".to_owned()));
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::Parent,
+            )));
         }
         if segment.contains(':') {
-            return Err(ArchiveError::Other(
-                "归档内名字不能包含盘符或 NTFS 交换数据流".to_owned(),
-            ));
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::DriveOrAds,
+            )));
         }
         if segment.contains('\0') {
-            return Err(ArchiveError::Other("归档内名字不能包含 NUL".to_owned()));
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::Nul,
+            )));
         }
         parts.push(segment);
     }
 
     if parts.is_empty() {
-        return Err(ArchiveError::Other("归档内名字为空".to_owned()));
+        return Err(ArchiveError::Other(FailReason::InvalidName(
+            NameIssue::Empty,
+        )));
     }
     if parts.len() > MAX_DEPTH {
-        return Err(ArchiveError::LimitExceeded("归档内路径层级超过上限"));
+        return Err(ArchiveError::LimitExceeded(LimitHit::EntryPathDepth));
     }
 
     let joined = parts.join("/");
     if joined.len() > MAX_NAME_LEN {
-        return Err(ArchiveError::LimitExceeded("归档内名字过长"));
+        return Err(ArchiveError::LimitExceeded(LimitHit::EntryNameLength));
     }
     Ok(joined)
 }
@@ -101,7 +110,7 @@ impl PackEntry {
 /// 把输入路径展开成归档条目列表（目录递归、跳过符号链接、拒绝重名）。
 pub fn scan_inputs(inputs: &[PathBuf], limits: &Limits) -> Result<Vec<PackEntry>, ArchiveError> {
     if inputs.is_empty() {
-        return Err(ArchiveError::Other("没有选择要打包的文件".to_owned()));
+        return Err(ArchiveError::Other(FailReason::NoInputs));
     }
 
     let mut entries = Vec::new();
@@ -110,7 +119,11 @@ pub fn scan_inputs(inputs: &[PathBuf], limits: &Limits) -> Result<Vec<PackEntry>
         let base = input
             .file_name()
             .filter(|name| !name.is_empty())
-            .ok_or_else(|| ArchiveError::Other(format!("无法作为归档根：{}", input.display())))?
+            .ok_or_else(|| {
+                ArchiveError::Other(FailReason::InputNotRoot {
+                    path: path_text(input),
+                })
+            })?
             .to_string_lossy();
         let name = normalize_entry_name(&base)?;
         walk(input, &name, 0, limits, &mut entries, &mut seen)?;
@@ -127,14 +140,18 @@ fn walk(
     seen: &mut HashSet<String>,
 ) -> Result<(), ArchiveError> {
     if depth > MAX_DEPTH || depth > limits.max_path_depth {
-        return Err(ArchiveError::LimitExceeded("打包路径层级超过上限"));
+        return Err(ArchiveError::LimitExceeded(LimitHit::ScanDepth));
     }
     if entries.len() >= limits.max_entries as usize {
-        return Err(ArchiveError::LimitExceeded("打包条目数超过上限"));
+        return Err(ArchiveError::LimitExceeded(LimitHit::ScanEntries));
     }
 
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|err| ArchiveError::Other(format!("无法读取 {}: {err}", path.display())))?;
+    let meta = std::fs::symlink_metadata(path).map_err(|err| {
+        ArchiveError::Other(FailReason::ReadFailed {
+            path: path_text(path),
+            detail: err.to_string(),
+        })
+    })?;
     let file_type = meta.file_type();
 
     // 符号链接不跟随，避免把链接目标复制进归档或形成递归。
@@ -144,9 +161,9 @@ fn walk(
 
     let key = name.to_lowercase();
     if !seen.insert(key) {
-        return Err(ArchiveError::Other(format!(
-            "输入中存在同名条目（Windows 不区分大小写）：{name}"
-        )));
+        return Err(ArchiveError::Other(FailReason::DuplicateInputName {
+            name: name.to_owned(),
+        }));
     }
 
     if file_type.is_dir() {
@@ -158,11 +175,17 @@ fn walk(
         });
 
         let mut children = Vec::new();
-        for item in std::fs::read_dir(path)
-            .map_err(|err| ArchiveError::Other(format!("无法列出 {}: {err}", path.display())))?
-        {
+        for item in std::fs::read_dir(path).map_err(|err| {
+            ArchiveError::Other(FailReason::ListFailed {
+                path: path_text(path),
+                detail: err.to_string(),
+            })
+        })? {
             let item = item.map_err(|err| {
-                ArchiveError::Other(format!("无法列出 {}: {err}", path.display()))
+                ArchiveError::Other(FailReason::ListFailed {
+                    path: path_text(path),
+                    detail: err.to_string(),
+                })
             })?;
             let child_name = item.file_name();
             if child_name.is_empty() {
@@ -225,15 +248,11 @@ pub trait ArchiveWriter: Send {
         _cancel: &CancelToken,
         _progress: &dyn Fn(u64),
     ) -> Result<(), ArchiveError> {
-        Err(ArchiveError::Unsupported(
-            "该格式的写入后端尚未接入（骨架阶段）".to_owned(),
-        ))
+        Err(ArchiveError::Unsupported(FailReason::BackendMissingWrite))
     }
 
     fn add_dir(&mut self, _src: &Path, _name_in_archive: &str) -> Result<(), ArchiveError> {
-        Err(ArchiveError::Unsupported(
-            "该格式的写入后端尚未接入（骨架阶段）".to_owned(),
-        ))
+        Err(ArchiveError::Unsupported(FailReason::BackendMissingWrite))
     }
 
     fn set_comment(&mut self, _text: &str) -> Result<(), ArchiveError> {
@@ -241,8 +260,6 @@ pub trait ArchiveWriter: Send {
     }
 
     fn finish(self: Box<Self>) -> Result<FinishReport, ArchiveError> {
-        Err(ArchiveError::Unsupported(
-            "该格式的写入后端尚未接入（骨架阶段）".to_owned(),
-        ))
+        Err(ArchiveError::Unsupported(FailReason::BackendMissingWrite))
     }
 }

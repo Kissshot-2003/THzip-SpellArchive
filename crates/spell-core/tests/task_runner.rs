@@ -241,7 +241,7 @@ fn cancellation_stops_extract() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            TaskEvent::Failed { error, .. } if error.contains("已取消")
+            TaskEvent::Failed { error, .. } if error.to_string().contains("已取消")
         )),
         "取消后应返回「已取消」失败事件"
     );
@@ -359,7 +359,7 @@ fn rejects_theme_without_manifest() {
     });
     assert!(events.iter().any(|event| matches!(
         event,
-        TaskEvent::Failed { error, .. } if error.contains("theme.toml")
+        TaskEvent::Failed { error, .. } if error.to_string().contains("theme.toml")
     )));
 }
 
@@ -392,7 +392,7 @@ fn rejects_theme_with_executables() {
     });
     assert!(events.iter().any(|event| matches!(
         event,
-        TaskEvent::Failed { error, .. } if error.contains("不允许")
+        TaskEvent::Failed { error, .. } if error.to_string().contains("不允许")
     )));
 }
 
@@ -428,7 +428,7 @@ fn rejects_theme_with_too_many_entries() {
     });
     assert!(events.iter().any(|event| matches!(
         event,
-        TaskEvent::Failed { error, .. } if error.contains("条目过多")
+        TaskEvent::Failed { error, .. } if error.to_string().contains("条目过多")
     )));
 }
 
@@ -450,6 +450,6 @@ fn missing_password_reports_need_password() {
     });
     assert!(events.iter().any(|event| matches!(
         event,
-        TaskEvent::Failed { error, .. } if !error.is_empty()
+        TaskEvent::Failed { error, .. } if !error.to_string().is_empty()
     )));
 }

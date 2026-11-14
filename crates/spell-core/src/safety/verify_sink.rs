@@ -1,4 +1,4 @@
-use crate::error::SinkError;
+use crate::error::{FailReason, SinkError};
 use crate::limits::Limits;
 use crate::reader::ExtractSink;
 use crate::safety::bomb::Budget;
@@ -34,7 +34,7 @@ impl ExtractSink for VerifySink {
         if let Some(budget) = self.budget.as_mut() {
             budget
                 .on_entry()
-                .map_err(|hit| SinkError::Limit(hit.message()))?;
+                .map_err(SinkError::Limit)?;
         }
         self.current = Some(Current {
             id,
@@ -47,16 +47,16 @@ impl ExtractSink for VerifySink {
 
     fn on_data(&mut self, id: EntryId, chunk: &[u8]) -> Result<(), SinkError> {
         let Some(current) = self.current.as_mut() else {
-            return Err(SinkError::Other(format!("条目 {id} 未开始")));
+            return Err(SinkError::Other(FailReason::EntryNotStarted { id }));
         };
         if current.id != id {
-            return Err(SinkError::Other("条目顺序错乱".to_owned()));
+            return Err(SinkError::Other(FailReason::EntryOrder));
         }
 
         if let Some(budget) = self.budget.as_mut() {
             budget
                 .on_write(current.written, chunk.len() as u64, 0)
-                .map_err(|hit| SinkError::Limit(hit.message()))?;
+                .map_err(SinkError::Limit)?;
         }
 
         current.hasher.update(chunk);

@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use crate::error::{ArchiveError, FailReason};
+
 /// `foo.7z.001` -> true
 pub fn is_volume_name(name: &str) -> bool {
     let Some((_, digits)) = name.rsplit_once('.') else {
@@ -19,18 +21,18 @@ pub fn is_volume_name(name: &str) -> bool {
 /// 收集同组分卷：`data.7z.001`、`data.7z.002` ...
 ///
 /// 7z 分卷本质是按字节切分，读取时拼接成逻辑流即可；zip 的 `.z01` 是另一套格式，不支持。
-pub fn collect_volumes(first: &Path) -> io::Result<Vec<PathBuf>> {
+pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
     let name = first
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "分卷文件名无效"))?;
+        .ok_or(ArchiveError::Other(FailReason::VolumeNameInvalid))?;
     if !is_volume_name(name) {
         return Ok(vec![first.to_path_buf()]);
     }
 
     let parent = first
         .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "分卷没有父目录"))?;
+        .ok_or(ArchiveError::Other(FailReason::VolumeNoParent))?;
     let Some((prefix, digits)) = name.rsplit_once('.') else {
         return Ok(vec![first.to_path_buf()]);
     };
@@ -67,10 +69,9 @@ pub fn collect_volumes(first: &Path) -> io::Result<Vec<PathBuf>> {
         .map(|index| format!("{index:0width$}"))
         .collect();
     if !missing.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("分卷不完整，缺少：{}", missing.join(", ")),
-        ));
+        return Err(ArchiveError::Other(FailReason::VolumeIncomplete {
+            missing: missing.join(", "),
+        }));
     }
 
     Ok(found.into_values().collect())
@@ -91,7 +92,7 @@ pub struct MultiVolumeReader {
 impl MultiVolumeReader {
     pub fn open(paths: &[PathBuf]) -> io::Result<Self> {
         if paths.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "没有分卷"));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "no volumes"));
         }
         let mut sizes = Vec::with_capacity(paths.len());
         let mut total = 0u64;
@@ -150,7 +151,7 @@ impl Seek for MultiVolumeReader {
         if target < 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "分卷流不能 seek 到负偏移",
+                "cannot seek before start of volumes",
             ));
         }
         let target = (target as u64).min(self.total);
@@ -198,7 +199,6 @@ mod tests {
         }
 
         let err = super::collect_volumes(&dir.join("a.7z.001")).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
         assert!(err.to_string().contains("003"), "{err}");
         assert!(!err.to_string().contains("002"), "{err}");
 

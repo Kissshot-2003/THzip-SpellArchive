@@ -26,12 +26,12 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（104）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（107）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：最新提交 `c2e5a6e`，工作区干净，无远端。
-- **下一步建议**：错误文案结构化（#31）、正则替换批量改名、tracing 日志或代码签名。
+- **下一步建议**：正则替换批量改名、tracing 日志或代码签名。
 
 ---
 
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 104 个测试
+cargo test --workspace                 # 107 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 104 通过；clippy 无告警。
+12. `cargo test --workspace` 107 通过；clippy 无告警。
 
 ---
 
@@ -193,6 +193,7 @@ spell_archive/
 | `prefs.rs` | schema 3 配置（含排序键）、handoff、日志路径 |
 | `logging.rs` | 文本日志 + panic hook，5 MiB 轮转 |
 | `i18n/mod.rs` | zh-CN / en-US 全量文案 + 主题覆盖 + 标准术语开关 + `{name}` 占位符格式化 + 完整性测试 |
+| `i18n/errors.rs` | `FailReason` 的中文/英文翻译；密码相关标记 |
 | `theme/{mod,loader}.rs` | 主题扫描、纹理路径解析、按需解码、九宫格切片、签名轮询、主题目录定位 |
 | `tray.rs` | 托盘图标与本地化菜单 |
 | `shell_menu.rs` | HKCU 右键菜单：打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip；启动自检 exe 路径 |
@@ -451,6 +452,10 @@ pub enum TaskOp {
 `ArchiveError` 负责流程级错误（打开、密码、限额、取消、IO、Unsupported）；
 `SinkError` 负责写盘/预算错误。逐条失败进入 `ExtractReport.failed`，不中断整包。
 
+两者的载荷都是 `FailReason`（错误码 + 路径/条目 ID 等参数），不再带预翻译文案。
+`ArchiveError::reason()` 返回可跨线程、可克隆的 `FailReason`；GUI 用
+`i18n::errors::reason(locale, &reason)` 翻译，CLI/日志继续用 `Display` 的中文兜底。
+
 ---
 
 ## 6. 安全设计
@@ -650,8 +655,9 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
   zh-CN 与 en-US 必须使用同一组占位符，由单元测试强制校验。
 - `TextKey::ALL` 覆盖全部 Key；测试校验 Key 唯一、两种语言均非空、占位符一致。
 - 主题 `[text_map]` 仍可覆盖任意 Key；未覆盖时回退内置语言包。
-- 已知边界：`spell-core` 的 `ArchiveError` 文案仍是中文，英文界面下任务失败详情/警告
-  可能显示中文（见技术债 #31）。
+- 任务失败详情不再夹中文：`spell-core` 用 `FailReason` 输出结构化原因，
+  `spell-app/src/i18n/errors.rs` 负责中文/英文翻译；`ArchiveError` 的 `Display`
+  仍保留中文，供 CLI 与日志使用。
 
 ---
 
@@ -714,14 +720,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **104** 个测试。
+当前共 **107** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
-|---|---:|---|
+|---|---|---:|---|
 | `spell-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `spell-app` 单元测试 | 19 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4 |
+| `spell-app` 单元测试 | 22 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、错误翻译/密码标记 3 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
@@ -779,7 +785,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
 | 29 | 已修复 | 托盘菜单走 i18n，语言切换后 `rebuild_tray` |
 | 30 | 已修复 | 启动时 `refresh_if_installed` 自动改写为当前 exe 路径 |
-| 31 | `spell-core` 错误文案是中文 | 英文界面下失败详情/警告可能夹中文 | 改为结构化错误码，由 `spell-app` 翻译 |
+| 31 | 已修复 | `ArchiveError` / `SinkError` 改用 `FailReason` 结构化原因；UI 按当前语言翻译 | `spell-app/src/i18n/errors.rs` |
 
 ---
 
@@ -796,7 +802,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### P2 功能
 
 - 正则替换模式的批量改名；当前模板支持 `{name}` / `{n}` / `{ext}`。
-- 把 `spell-core` 错误文案改为错误码 + UI 层翻译（见 #31）。
 - `tracing` 结构化日志（当前是带级别/模块的文本日志）。
 - 代码签名；Inno 脚本已就绪。
 - RAR 超大条目的性能与磁盘占用优化。
@@ -862,7 +867,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（104 通过）
+- [ ] `cargo test --workspace`（107 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p spell-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

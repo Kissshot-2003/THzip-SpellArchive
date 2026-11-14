@@ -30,7 +30,7 @@ impl AtomicFile {
     pub fn create(target: &Path) -> io::Result<Self> {
         let parent = target
             .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "目标路径没有父目录"))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
         if !parent.exists() {
             std::fs::create_dir_all(parent)?;
         }
@@ -63,7 +63,7 @@ impl AtomicFile {
     }
 
     pub fn file_mut(&mut self) -> &mut File {
-        self.file.as_mut().expect("AtomicFile 已提交，不能再写入")
+        self.file.as_mut().expect("AtomicFile already committed")
     }
 
     /// flush + fsync 后原子替换目标。失败时原文件保持不变。

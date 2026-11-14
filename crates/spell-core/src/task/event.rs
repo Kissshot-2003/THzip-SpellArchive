@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::error::FailReason;
 use crate::plan::ExtractPlan;
 use crate::reader::{ArchiveReader, ExtractReport};
 use crate::types::{ArchiveEntry, ArchiveKind, EntryId};
@@ -101,7 +102,7 @@ pub enum TaskEvent {
     EntryFailed {
         task: TaskId,
         entry: EntryId,
-        error: String,
+        error: FailReason,
     },
     Finished {
         task: TaskId,
@@ -126,7 +127,7 @@ pub enum TaskEvent {
     },
     Failed {
         task: TaskId,
-        error: String,
+        error: FailReason,
     },
 }
 

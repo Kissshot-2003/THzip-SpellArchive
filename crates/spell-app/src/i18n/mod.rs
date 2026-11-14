@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::theme::Theme;
 
+pub mod errors;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
     ZhCn,

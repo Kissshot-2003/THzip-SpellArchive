@@ -3,7 +3,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason, path_text};
 use crate::safety::atomic_fs::AtomicFile;
 use crate::secret::SecretString;
 use crate::task::CancelToken;
@@ -59,9 +59,11 @@ impl SevenZArchiveWriter {
     }
 
     fn writer(&mut self) -> Result<&mut sevenz_rust2::ArchiveWriter<AtomicFile>, ArchiveError> {
-        self.inner
-            .as_mut()
-            .ok_or_else(|| ArchiveError::Other("7z 写入器已中止".to_owned()))
+        self.inner.as_mut().ok_or_else(|| {
+            ArchiveError::Other(FailReason::WriterClosed {
+                format: "7z".to_owned(),
+            })
+        })
     }
 
     fn abort_on<T>(&mut self, result: Result<T, ArchiveError>) -> Result<T, ArchiveError> {
@@ -83,19 +85,21 @@ impl ArchiveWriter for SevenZArchiveWriter {
     ) -> Result<(), ArchiveError> {
         let result = (|| -> Result<(), ArchiveError> {
             let name = normalize_entry_name(name_in_archive)?;
-            let meta = std::fs::symlink_metadata(src)
-                .map_err(|err| ArchiveError::Other(format!("无法读取 {}: {err}", src.display())))?;
+            let meta = std::fs::symlink_metadata(src).map_err(|err| {
+                ArchiveError::Other(FailReason::ReadFailed {
+                    path: path_text(src),
+                    detail: err.to_string(),
+                })
+            })?;
             if meta.file_type().is_symlink() {
-                return Err(ArchiveError::Unsupported(format!(
-                    "不写入符号链接：{}",
-                    src.display()
-                )));
+                return Err(ArchiveError::Unsupported(FailReason::SymlinkNotAllowed {
+                    path: path_text(src),
+                }));
             }
             if !meta.is_file() {
-                return Err(ArchiveError::Other(format!(
-                    "不是普通文件：{}",
-                    src.display()
-                )));
+                return Err(ArchiveError::Other(FailReason::NotRegularFile {
+                    path: path_text(src),
+                }));
             }
 
             let entry = sevenz_rust2::ArchiveEntry::from_path(src, name);
@@ -139,10 +143,11 @@ impl ArchiveWriter for SevenZArchiveWriter {
     }
 
     fn finish(mut self: Box<Self>) -> Result<FinishReport, ArchiveError> {
-        let writer = self
-            .inner
-            .take()
-            .ok_or_else(|| ArchiveError::Other("7z 写入器已中止".to_owned()))?;
+        let writer = self.inner.take().ok_or_else(|| {
+            ArchiveError::Other(FailReason::WriterClosed {
+                format: "7z".to_owned(),
+            })
+        })?;
         let mut atomic = writer.finish()?;
         atomic.flush()?;
         let bytes_out = atomic.file_mut().metadata()?.len();
@@ -167,7 +172,7 @@ struct ProgressReader<'a, R> {
 impl<R: Read> Read for ProgressReader<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.cancel.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "已取消"));
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
         }
         let n = self.inner.read(buf)?;
         if n > 0 {
@@ -183,7 +188,9 @@ fn map_sz_error(err: sevenz_rust2::Error) -> ArchiveError {
         sevenz_rust2::Error::PasswordRequired => ArchiveError::PasswordRequired,
         sevenz_rust2::Error::MaybeBadPassword(_) => ArchiveError::BadPassword,
         sevenz_rust2::Error::Io(err, _) => ArchiveError::Io(err),
-        sevenz_rust2::Error::FileOpen(err, path) => ArchiveError::Open(format!("{path}: {err}")),
-        other => ArchiveError::Other(format!("7z 写入失败: {other}")),
+        sevenz_rust2::Error::FileOpen(err, path) => {
+            ArchiveError::Open(FailReason::Raw(format!("{path}: {err}")))
+        }
+        other => ArchiveError::Other(FailReason::Raw(format!("7z write failed: {other}"))),
     }
 }

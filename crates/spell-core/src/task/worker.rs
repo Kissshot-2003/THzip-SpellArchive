@@ -13,7 +13,7 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     } else if let Some(text) = payload.downcast_ref::<String>() {
         text.clone()
     } else {
-        "worker panic（未知载荷）".to_owned()
+        "worker panic (unknown payload)".to_owned()
     }
 }
 

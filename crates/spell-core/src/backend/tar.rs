@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use crate::backend::common::detect_conflict;
 use crate::backend::decoder::open_reader;
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, ResolvedAction,
@@ -85,7 +85,9 @@ impl ArchiveReader for TarReader {
         limits: &Limits,
     ) -> Result<ExtractPlan, ArchiveError> {
         if self.entries.len() > limits.max_entries as usize {
-            return Err(ArchiveError::LimitExceeded("条目数超过上限"));
+            return Err(ArchiveError::LimitExceeded(
+                crate::safety::bomb::LimitHit::EntryCount,
+            ));
         }
 
         let mut plan = ExtractPlan {
@@ -97,7 +99,7 @@ impl ArchiveReader for TarReader {
             let entry = self
                 .entries
                 .get(id as usize)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {id} 不存在")))?;
+                .ok_or(ArchiveError::Other(FailReason::EntryMissing { id }))?;
 
             let mut item = PlannedItem {
                 id,
@@ -127,13 +129,12 @@ impl ArchiveReader for TarReader {
 
             let rel = match sanitize_rel(&entry.display, limits) {
                 Ok(rel) => rel,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeName {
+                        name: entry.display.to_string(),
+                        issue,
                     });
-                    item.action = PlanAction::Reject(detail);
                     plan.items.push(item);
                     continue;
                 }
@@ -141,13 +142,9 @@ impl ArchiveReader for TarReader {
 
             let abs = match resolve_under(target, &rel, limits) {
                 Ok(path) => path,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
-                    });
-                    item.action = PlanAction::Reject(detail);
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeTarget { issue });
                     plan.items.push(item);
                     continue;
                 }
@@ -156,8 +153,7 @@ impl ArchiveReader for TarReader {
 
             if let Some(conflict) = detect_conflict(id, &abs, entry.kind)? {
                 if matches!(conflict.kind, ConflictKind::ReparsePoint) {
-                    item.action =
-                        PlanAction::Reject("目标已存在且是重解析点（junction/symlink）".to_owned());
+                    item.action = PlanAction::Reject(FailReason::TargetIsReparsePoint);
                 } else {
                     item.action = PlanAction::Overwrite;
                 }
@@ -224,7 +220,7 @@ impl ArchiveReader for TarReader {
             }
 
             if let Err(err) = sink.on_entry_begin(ours.id, &ours) {
-                report.failed.push((ours.id, err.to_string()));
+                report.failed.push((ours.id, err.reason()));
                 drain(&mut entry);
                 continue;
             }
@@ -244,7 +240,7 @@ impl ArchiveReader for TarReader {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Err(err) = sink.on_data(ours.id, &buf[..n]) {
-                            report.failed.push((ours.id, err.to_string()));
+                            report.failed.push((ours.id, err.reason()));
                             ok = false;
                             break;
                         }
@@ -252,7 +248,7 @@ impl ArchiveReader for TarReader {
                     Err(err) => {
                         report
                             .failed
-                            .push((ours.id, format!("读取条目失败: {err}")));
+                            .push((ours.id, FailReason::EntryReadFailed { detail: err.to_string() }));
                         ok = false;
                         break;
                     }
@@ -299,7 +295,7 @@ impl ArchiveReader for TarReader {
                 continue;
             }
             if let Err(err) = sink.on_entry_begin(ours.id, &ours) {
-                report.failed.push((ours.id, err.to_string()));
+                report.failed.push((ours.id, err.reason()));
                 drain(&mut entry);
                 continue;
             }
@@ -314,7 +310,7 @@ impl ArchiveReader for TarReader {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Err(err) = sink.on_data(ours.id, &buf[..n]) {
-                            report.failed.push((ours.id, err.to_string()));
+                            report.failed.push((ours.id, err.reason()));
                             ok = false;
                             break;
                         }
@@ -322,7 +318,7 @@ impl ArchiveReader for TarReader {
                     Err(err) => {
                         report
                             .failed
-                            .push((ours.id, format!("读取条目失败: {err}")));
+                            .push((ours.id, FailReason::EntryReadFailed { detail: err.to_string() }));
                         ok = false;
                         break;
                     }
@@ -345,7 +341,7 @@ fn record_entry(sink: &mut dyn ExtractSink, id: EntryId, ok: bool, report: &mut 
     match sink.on_entry_end(id, ok) {
         Ok(()) if ok => report.succeeded.push(id),
         Ok(()) => {}
-        Err(err) => report.failed.push((id, err.to_string())),
+        Err(err) => report.failed.push((id, err.reason())),
     }
 }
 
@@ -404,6 +400,8 @@ fn map_io(err: std::io::Error) -> ArchiveError {
 fn map_entry_error(err: std::io::Error) -> ArchiveError {
     ArchiveError::CorruptEntry {
         entry: None,
-        detail: err.to_string(),
+        cause: FailReason::EntryReadFailed {
+            detail: err.to_string(),
+        },
     }
 }

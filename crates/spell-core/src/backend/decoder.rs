@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::types::ArchiveKind;
 
 /// 打开 tar 容器或单文件流的解压读取器。调用方负责按需再包一层 tar。
@@ -20,10 +20,9 @@ pub(crate) fn open_reader(path: &Path, kind: ArchiveKind) -> Result<Box<dyn Read
             Box::new(lz4_flex::frame::FrameDecoder::new(file))
         }
         other => {
-            return Err(ArchiveError::Unsupported(format!(
-                "不是可解压容器：{}",
-                other.label()
-            )));
+            return Err(ArchiveError::Unsupported(FailReason::NotDecompressible {
+                format: other.label().to_owned(),
+            }));
         }
     };
     Ok(reader)

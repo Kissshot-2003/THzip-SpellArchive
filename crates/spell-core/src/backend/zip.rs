@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::backend::common::detect_conflict;
 use crate::backend::name_codec;
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, resolve_all,
@@ -50,7 +50,7 @@ const LZMA_DICT_LIMIT: u32 = 512 * 1024 * 1024;
 
 impl ZipReader {
     pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
-        let file = File::open(path).map_err(|err| ArchiveError::Open(err.to_string()))?;
+        let file = File::open(path).map_err(|err| ArchiveError::Open(FailReason::Raw(err.to_string())))?;
         let reader = BufReader::with_capacity(256 * 1024, file);
         let mut archive = zip::ZipArchive::new(reader).map_err(map_open_error)?;
 
@@ -114,7 +114,11 @@ impl ZipReader {
     fn archive_mut(&mut self) -> Result<&mut zip::ZipArchive<BufReader<File>>, ArchiveError> {
         self.archive
             .as_mut()
-            .ok_or_else(|| ArchiveError::Other("zip 归档已关闭".to_owned()))
+            .ok_or_else(|| {
+                ArchiveError::Other(FailReason::ArchiveClosed {
+                    format: "zip".to_owned(),
+                })
+            })
     }
 }
 
@@ -134,7 +138,9 @@ impl ArchiveReader for ZipReader {
         limits: &Limits,
     ) -> Result<ExtractPlan, ArchiveError> {
         if self.entries.len() > limits.max_entries as usize {
-            return Err(ArchiveError::LimitExceeded("条目数超过上限"));
+            return Err(ArchiveError::LimitExceeded(
+                crate::safety::bomb::LimitHit::EntryCount,
+            ));
         }
 
         let mut plan = ExtractPlan {
@@ -146,7 +152,7 @@ impl ArchiveReader for ZipReader {
             let entry = self
                 .entries
                 .get(id as usize)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {id} 不存在")))?;
+                .ok_or(ArchiveError::Other(FailReason::EntryMissing { id }))?;
 
             let mut item = PlannedItem {
                 id,
@@ -182,7 +188,7 @@ impl ArchiveReader for ZipReader {
             if unsupported {
                 plan.warnings.push(PlanWarning::UnsupportedMethod {
                     id,
-                    method: entry.method.label().to_owned(),
+                    method: entry.method,
                 });
                 item.action = PlanAction::Skip;
                 plan.items.push(item);
@@ -191,13 +197,12 @@ impl ArchiveReader for ZipReader {
 
             let rel = match sanitize_rel(&entry.display, limits) {
                 Ok(rel) => rel,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeName {
+                        name: entry.display.to_string(),
+                        issue,
                     });
-                    item.action = PlanAction::Reject(detail);
                     plan.items.push(item);
                     continue;
                 }
@@ -205,13 +210,9 @@ impl ArchiveReader for ZipReader {
 
             let abs = match resolve_under(target, &rel, limits) {
                 Ok(path) => path,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
-                    });
-                    item.action = PlanAction::Reject(detail);
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeTarget { issue });
                     plan.items.push(item);
                     continue;
                 }
@@ -220,8 +221,7 @@ impl ArchiveReader for ZipReader {
 
             if let Some(conflict) = detect_conflict(id, &abs, entry.kind)? {
                 if matches!(conflict.kind, ConflictKind::ReparsePoint) {
-                    item.action =
-                        PlanAction::Reject("目标已存在且是重解析点（junction/symlink）".to_owned());
+                    item.action = PlanAction::Reject(FailReason::TargetIsReparsePoint);
                 } else {
                     // 暂定为覆盖，最终由 DecisionTable 决定。
                     item.action = PlanAction::Overwrite;
@@ -276,7 +276,7 @@ impl ArchiveReader for ZipReader {
 
             let entry = self.entries[item.id as usize].clone();
             if let Err(err) = sink.on_entry_begin(item.id, &entry) {
-                report.failed.push((item.id, err.to_string()));
+                report.failed.push((item.id, err.reason()));
                 continue;
             }
 
@@ -289,7 +289,7 @@ impl ArchiveReader for ZipReader {
                 Ok(file) => file,
                 Err(err) => {
                     let _ = sink.on_entry_end(item.id, false);
-                    report.failed.push((item.id, err.to_string()));
+                    report.failed.push((item.id, err.reason()));
                     continue;
                 }
             };
@@ -304,7 +304,7 @@ impl ArchiveReader for ZipReader {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Err(err) = sink.on_data(item.id, &buf[..n]) {
-                            report.failed.push((item.id, err.to_string()));
+                            report.failed.push((item.id, err.reason()));
                             entry_ok = false;
                             break;
                         }
@@ -312,7 +312,7 @@ impl ArchiveReader for ZipReader {
                     Err(err) => {
                         report
                             .failed
-                            .push((item.id, format!("读取条目失败: {err}")));
+                            .push((item.id, FailReason::EntryReadFailed { detail: err.to_string() }));
                         entry_ok = false;
                         break;
                     }
@@ -346,7 +346,7 @@ impl ArchiveReader for ZipReader {
             }
 
             if let Err(err) = sink.on_entry_begin(entry.id, &entry) {
-                report.failed.push((entry.id, err.to_string()));
+                report.failed.push((entry.id, err.reason()));
                 continue;
             }
 
@@ -354,7 +354,7 @@ impl ArchiveReader for ZipReader {
                 Ok(file) => file,
                 Err(err) => {
                     let _ = sink.on_entry_end(entry.id, false);
-                    report.failed.push((entry.id, err.to_string()));
+                    report.failed.push((entry.id, err.reason()));
                     continue;
                 }
             };
@@ -369,7 +369,7 @@ impl ArchiveReader for ZipReader {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Err(err) = sink.on_data(entry.id, &buf[..n]) {
-                            report.failed.push((entry.id, err.to_string()));
+                            report.failed.push((entry.id, err.reason()));
                             ok = false;
                             break;
                         }
@@ -377,7 +377,7 @@ impl ArchiveReader for ZipReader {
                     Err(err) => {
                         report
                             .failed
-                            .push((entry.id, format!("CRC/数据校验失败: {err}")));
+                            .push((entry.id, FailReason::EntryCrcFailed { detail: err.to_string() }));
                         ok = false;
                         break;
                     }
@@ -403,16 +403,16 @@ impl ZipReader {
 
         if matches!(method, Method::Xz) {
             if encrypted {
-                return Err(ArchiveError::Unsupported(
-                    "加密的 XZ zip 条目暂不支持解压".to_owned(),
-                ));
+                return Err(ArchiveError::Unsupported(FailReason::EncryptedXzZipEntry));
             }
             let raw = self
                 .archive_mut()?
                 .by_index_raw(index)
                 .map_err(map_entry_error)?;
             let stream = liblzma::stream::Stream::new_stream_decoder(u64::from(LZMA_DICT_LIMIT), 0)
-                .map_err(|err| ArchiveError::Other(format!("XZ 解码器初始化失败: {err}")))?;
+                .map_err(|err| {
+                    ArchiveError::Other(FailReason::Raw(format!("XZ 解码器初始化失败: {err}")))
+                })?;
             return Ok(ZipEntryReader::Xz(Box::new(
                 liblzma::bufread::XzDecoder::new_stream(BufReader::new(raw), stream),
             )));
@@ -420,9 +420,7 @@ impl ZipReader {
 
         if matches!(method, Method::Lzma) {
             if encrypted {
-                return Err(ArchiveError::Unsupported(
-                    "加密的 LZMA zip 条目暂不支持解压".to_owned(),
-                ));
+                return Err(ArchiveError::Unsupported(FailReason::EncryptedLzmaZipEntry));
             }
             let mut raw = self
                 .archive_mut()?
@@ -434,23 +432,26 @@ impl ZipReader {
             raw.read_exact(&mut header).map_err(ArchiveError::Io)?;
             let props_size = usize::from(u16::from_le_bytes([header[2], header[3]]));
             if !(5..=64).contains(&props_size) {
-                return Err(ArchiveError::Unsupported(
-                    "zip LZMA 头属性长度异常".to_owned(),
-                ));
+                return Err(ArchiveError::Unsupported(FailReason::CorruptLzmaHeader));
             }
             let mut props = vec![0u8; props_size];
             raw.read_exact(&mut props).map_err(ArchiveError::Io)?;
 
             let dict_size = u32::from_le_bytes([props[1], props[2], props[3], props[4]]);
             if dict_size > LZMA_DICT_LIMIT {
-                return Err(ArchiveError::Unsupported(format!(
-                    "LZMA 字典 {dict_size} 字节超过上限 {LZMA_DICT_LIMIT}"
-                )));
+                return Err(ArchiveError::Unsupported(FailReason::DictionaryTooLarge {
+                    size: u64::from(dict_size),
+                    limit: u64::from(LZMA_DICT_LIMIT),
+                }));
             }
 
             let reader =
                 lzma_rust2::LzmaReader::new_with_props(raw, size, props[0], dict_size, None)
-                    .map_err(|err| ArchiveError::Other(format!("LZMA 解码器初始化失败: {err}")))?;
+                    .map_err(|err| {
+                        ArchiveError::Other(FailReason::Raw(format!(
+                            "LZMA decoder init failed: {err}"
+                        )))
+                    })?;
             return Ok(ZipEntryReader::Lzma(Box::new(reader)));
         }
 
@@ -484,7 +485,7 @@ fn finish_entry(
         }
         Ok(()) => Ok(()),
         Err(err) => {
-            report.failed.push((id, err.to_string()));
+            report.failed.push((id, err.reason()));
             Ok(())
         }
     }
@@ -536,14 +537,16 @@ fn map_open_error(err: zip::result::ZipError) -> ArchiveError {
             ArchiveError::PasswordRequired
         }
         zip::result::ZipError::UnsupportedArchive(reason) => {
-            ArchiveError::Unsupported(reason.to_owned())
+            ArchiveError::Unsupported(FailReason::Raw(reason.to_owned()))
         }
-        zip::result::ZipError::InvalidArchive(reason) => ArchiveError::Open(reason.into_owned()),
+        zip::result::ZipError::InvalidArchive(reason) => {
+            ArchiveError::Open(FailReason::Raw(reason.into_owned()))
+        }
         zip::result::ZipError::FileNotFound => {
-            ArchiveError::Open("中央目录中找不到条目".to_owned())
+            ArchiveError::Open(FailReason::CentralDirectoryMissing)
         }
         zip::result::ZipError::Io(err) => ArchiveError::Io(err),
-        other => ArchiveError::Open(other.to_string()),
+        other => ArchiveError::Open(FailReason::Raw(other.to_string())),
     }
 }
 

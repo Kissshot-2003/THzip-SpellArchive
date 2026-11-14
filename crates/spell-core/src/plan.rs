@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::types::{EntryId, EntryKind};
+use crate::error::FailReason;
+use crate::safety::bomb::LimitHit;
+use crate::safety::path_sanitize::SanitizeError;
+use crate::types::{EntryId, EntryKind, Method};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverwritePolicy {
@@ -18,7 +21,7 @@ pub enum PlanAction {
     Overwrite,
     Skip,
     Rename(String),
-    Reject(String),
+    Reject(FailReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,11 +41,11 @@ pub struct Conflict {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanWarning {
-    BombSuspected { reason: String },
+    BombSuspected { hit: LimitHit },
     SymlinkSkipped { id: EntryId },
     SuspiciousDisplayName { id: EntryId, detail: String },
-    UnsupportedMethod { id: EntryId, method: String },
-    UnsafePath { id: EntryId, detail: String },
+    UnsupportedMethod { id: EntryId, method: Method },
+    UnsafePath { id: EntryId, issue: SanitizeError },
     DuplicatePath { id: EntryId, renamed_to: String },
     LongPath,
 }
@@ -109,7 +112,7 @@ pub enum ResolvedAction {
         overwrite: bool,
     },
     Skip,
-    Reject(String),
+    Reject(FailReason),
 }
 
 pub fn resolve_all(

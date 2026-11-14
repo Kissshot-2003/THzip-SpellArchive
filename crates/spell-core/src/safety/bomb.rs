@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::limits::Limits;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,6 +10,10 @@ pub enum LimitHit {
     Ratio,
     DictionarySize,
     Nesting,
+    EntryPathDepth,
+    EntryNameLength,
+    ScanDepth,
+    ScanEntries,
 }
 
 impl LimitHit {
@@ -19,7 +25,17 @@ impl LimitHit {
             LimitHit::Ratio => "解压膨胀倍率异常（疑似压缩炸弹）",
             LimitHit::DictionarySize => "压缩字典超出内存上限",
             LimitHit::Nesting => "嵌套归档层数超过上限",
+            LimitHit::EntryPathDepth => "归档内路径层级超过上限",
+            LimitHit::EntryNameLength => "归档内名字过长",
+            LimitHit::ScanDepth => "打包路径层级超过上限",
+            LimitHit::ScanEntries => "打包条目数超过上限",
         }
+    }
+}
+
+impl fmt::Display for LimitHit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.message())
     }
 }
 

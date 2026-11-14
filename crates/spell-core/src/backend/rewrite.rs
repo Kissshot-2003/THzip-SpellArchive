@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend;
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, OverwritePolicy};
 use crate::safety::{ExtractDirSink, write_atomic};
@@ -58,18 +58,15 @@ pub fn rewrite_with_names(
         | ArchiveKind::TarZst
         | ArchiveKind::TarLz4 => {}
         other => {
-            return Err(ArchiveError::Unsupported(format!(
-                "暂不支持修改 {} 归档",
-                other.label()
-            )));
+            return Err(ArchiveError::Unsupported(FailReason::RewriteUnsupported {
+                format: other.label().to_owned(),
+            }));
         }
     }
 
     let mut reader = backend::open(path, None)?;
     if reader.entries().iter().any(|entry| entry.encrypted) {
-        return Err(ArchiveError::Unsupported(
-            "加密归档暂不支持修改条目".to_owned(),
-        ));
+        return Err(ArchiveError::Unsupported(FailReason::EncryptedRewrite));
     }
 
     let entries = reader.entries().to_vec();
@@ -91,10 +88,9 @@ pub fn rewrite_with_names(
         let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
         let report = reader.extract(&plan, &decisions, cancel, &mut sink)?;
         if !report.failed.is_empty() {
-            return Err(ArchiveError::Other(format!(
-                "保留条目解压失败 {} 条，已取消重写",
-                report.failed.len()
-            )));
+            return Err(ArchiveError::Other(FailReason::RewriteExtractFailed {
+                count: report.failed.len(),
+            }));
         }
 
         // 先关掉源归档句柄，Windows 才能在最后原子替换文件。
@@ -109,12 +105,12 @@ pub fn rewrite_with_names(
             if cancel.is_cancelled() {
                 return Err(ArchiveError::Cancelled);
             }
-            let entry = entries
-                .get(item.id as usize)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {} 不存在", item.id)))?;
-            let final_name = finals
-                .get(&item.id)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {} 缺少目标名字", item.id)))?;
+            let entry = entries.get(item.id as usize).ok_or(ArchiveError::Other(
+                FailReason::EntryMissing { id: item.id },
+            ))?;
+            let final_name = finals.get(&item.id).ok_or(ArchiveError::Other(
+                FailReason::RenameTargetMissing { id: item.id },
+            ))?;
             if entry.kind.is_dir() {
                 writer.add_dir(&item.rel_path, final_name)?;
                 continue;
@@ -166,9 +162,9 @@ fn final_names(
                 if entry.kind.is_dir() {
                     let original = entry.display.trim_end_matches('/');
                     if name.starts_with(&format!("{original}/")) {
-                        return Err(ArchiveError::Other(format!(
-                            "不能把目录 {original} 移动到自身内部"
-                        )));
+                        return Err(ArchiveError::Other(FailReason::MoveIntoSelf {
+                            name: original.to_owned(),
+                        }));
                     }
                 }
                 name
@@ -177,9 +173,9 @@ fn final_names(
         };
 
         if check_duplicates && !seen.insert(final_name.to_lowercase()) {
-            return Err(ArchiveError::Other(format!(
-                "重命名后存在重名条目: {final_name}"
-            )));
+            return Err(ArchiveError::Other(FailReason::RenameDuplicate {
+                name: final_name,
+            }));
         }
         finals.insert(entry.id, final_name);
     }

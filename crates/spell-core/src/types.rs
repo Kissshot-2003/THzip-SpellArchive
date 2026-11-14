@@ -106,7 +106,7 @@ impl Method {
             Method::Ppmd => "PPMd",
             // winzip AES：压缩方法字段被 99 覆盖，实际方法在 extra field 里。
             Method::Unknown(99) => "AES",
-            Method::Unknown(_) => "未知",
+            Method::Unknown(_) => "Unknown",
         }
     }
 }

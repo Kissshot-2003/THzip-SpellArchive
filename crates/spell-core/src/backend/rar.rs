@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use unrar_ng::{Archive, CursorBeforeHeader, OpenArchive, Process};
 
 use crate::backend::common::detect_conflict;
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, resolve_all,
@@ -118,9 +118,9 @@ impl RarReader {
         let mut archive = self.open_processing()?;
         for _ in 0..count {
             let Some(header) = archive.read_header().map_err(map_error)? else {
-                return Err(ArchiveError::Other(
-                    "RAR 条目数与列表不一致，无法继续".to_owned(),
-                ));
+                return Err(ArchiveError::Other(FailReason::EntryCountMismatch {
+                    format: "RAR".to_owned(),
+                }));
             };
             archive = header.skip().map_err(map_error)?;
         }
@@ -144,7 +144,9 @@ impl ArchiveReader for RarReader {
         limits: &Limits,
     ) -> Result<ExtractPlan, ArchiveError> {
         if self.entries.len() > limits.max_entries as usize {
-            return Err(ArchiveError::LimitExceeded("条目数超过上限"));
+            return Err(ArchiveError::LimitExceeded(
+                crate::safety::bomb::LimitHit::EntryCount,
+            ));
         }
 
         let mut plan = ExtractPlan {
@@ -156,7 +158,7 @@ impl ArchiveReader for RarReader {
             let entry = self
                 .entries
                 .get(id as usize)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {id} 不存在")))?;
+                .ok_or(ArchiveError::Other(FailReason::EntryMissing { id }))?;
 
             let mut item = PlannedItem {
                 id,
@@ -183,13 +185,12 @@ impl ArchiveReader for RarReader {
 
             let rel = match sanitize_rel(&entry.display, limits) {
                 Ok(rel) => rel,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeName {
+                        name: entry.display.to_string(),
+                        issue,
                     });
-                    item.action = PlanAction::Reject(detail);
                     plan.items.push(item);
                     continue;
                 }
@@ -197,13 +198,9 @@ impl ArchiveReader for RarReader {
 
             let abs = match resolve_under(target, &rel, limits) {
                 Ok(path) => path,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
-                    });
-                    item.action = PlanAction::Reject(detail);
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeTarget { issue });
                     plan.items.push(item);
                     continue;
                 }
@@ -212,8 +209,7 @@ impl ArchiveReader for RarReader {
 
             if let Some(conflict) = detect_conflict(id, &abs, entry.kind)? {
                 if matches!(conflict.kind, ConflictKind::ReparsePoint) {
-                    item.action =
-                        PlanAction::Reject("目标已存在且是重解析点（junction/symlink）".to_owned());
+                    item.action = PlanAction::Reject(FailReason::TargetIsReparsePoint);
                 } else {
                     item.action = PlanAction::Overwrite;
                 }
@@ -280,7 +276,7 @@ impl ArchiveReader for RarReader {
             }
 
             if let Err(err) = sink.on_entry_begin(id, &entry) {
-                report.failed.push((id, err.to_string()));
+                report.failed.push((id, err.reason()));
                 archive = header.skip().map_err(map_error)?;
                 continue;
             }
@@ -307,7 +303,7 @@ impl ArchiveReader for RarReader {
                         ) {
                             return Err(mapped);
                         }
-                        report.failed.push((id, mapped.to_string()));
+                        report.failed.push((id, mapped.reason()));
                         archive = self.skip_to(index)?;
                         continue;
                     }
@@ -320,7 +316,7 @@ impl ArchiveReader for RarReader {
                         let _ = std::fs::remove_file(&temp);
                         report
                             .failed
-                            .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                            .push((id, FailReason::StagedReadFailed { detail: err.to_string() }));
                         archive = next;
                         continue;
                     }
@@ -337,7 +333,7 @@ impl ArchiveReader for RarReader {
                         Ok(0) => break,
                         Ok(n) => {
                             if let Err(err) = sink.on_data(id, &chunk[..n]) {
-                                report.failed.push((id, err.to_string()));
+                                report.failed.push((id, err.reason()));
                                 entry_ok = false;
                                 break;
                             }
@@ -345,7 +341,7 @@ impl ArchiveReader for RarReader {
                         Err(err) => {
                             report
                                 .failed
-                                .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                                .push((id, FailReason::StagedReadFailed { detail: err.to_string() }));
                             entry_ok = false;
                             break;
                         }
@@ -366,7 +362,7 @@ impl ArchiveReader for RarReader {
                         ) {
                             return Err(mapped);
                         }
-                        report.failed.push((id, mapped.to_string()));
+                        report.failed.push((id, mapped.reason()));
                         archive = self.skip_to(index)?;
                         continue;
                     }
@@ -378,7 +374,7 @@ impl ArchiveReader for RarReader {
                         return Err(ArchiveError::Cancelled);
                     }
                     if let Err(err) = sink.on_data(id, chunk) {
-                        report.failed.push((id, err.to_string()));
+                        report.failed.push((id, err.reason()));
                         entry_ok = false;
                         break;
                     }
@@ -423,7 +419,7 @@ impl ArchiveReader for RarReader {
             }
 
             if let Err(err) = sink.on_entry_begin(id, &entry) {
-                report.failed.push((id, err.to_string()));
+                report.failed.push((id, err.reason()));
                 archive = header.skip().map_err(map_error)?;
                 continue;
             }
@@ -442,7 +438,7 @@ impl ArchiveReader for RarReader {
                         ) {
                             return Err(mapped);
                         }
-                        report.failed.push((id, mapped.to_string()));
+                        report.failed.push((id, mapped.reason()));
                         archive = self.skip_to(index)?;
                         continue;
                     }
@@ -454,7 +450,7 @@ impl ArchiveReader for RarReader {
                         let _ = std::fs::remove_file(&temp);
                         report
                             .failed
-                            .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                            .push((id, FailReason::StagedReadFailed { detail: err.to_string() }));
                         archive = next;
                         continue;
                     }
@@ -472,7 +468,7 @@ impl ArchiveReader for RarReader {
                         Ok(0) => break,
                         Ok(n) => {
                             if let Err(err) = sink.on_data(id, &chunk[..n]) {
-                                report.failed.push((id, err.to_string()));
+                                report.failed.push((id, err.reason()));
                                 ok = false;
                                 break;
                             }
@@ -480,7 +476,7 @@ impl ArchiveReader for RarReader {
                         Err(err) => {
                             report
                                 .failed
-                                .push((id, format!("读取 RAR 临时文件失败: {err}")));
+                                .push((id, FailReason::StagedReadFailed { detail: err.to_string() }));
                             ok = false;
                             break;
                         }
@@ -502,7 +498,7 @@ impl ArchiveReader for RarReader {
                             return Err(ArchiveError::Cancelled);
                         }
                         if let Err(err) = sink.on_data(id, chunk) {
-                            report.failed.push((id, err.to_string()));
+                            report.failed.push((id, err.reason()));
                             ok = false;
                             break;
                         }
@@ -519,7 +515,7 @@ impl ArchiveReader for RarReader {
                     ) {
                         return Err(mapped);
                     }
-                    report.failed.push((id, mapped.to_string()));
+                    report.failed.push((id, mapped.reason()));
                     archive = self.skip_to(index)?;
                 }
             }
@@ -545,7 +541,7 @@ fn finish_entry(
         }
         Ok(()) => Ok(()),
         Err(err) => {
-            report.failed.push((id, err.to_string()));
+            report.failed.push((id, err.reason()));
             Ok(())
         }
     }
@@ -571,8 +567,12 @@ fn map_error(err: unrar_ng::error::UnrarError) -> ArchiveError {
     match err.code {
         Code::MissingPassword => ArchiveError::PasswordRequired,
         Code::BadPassword => ArchiveError::BadPassword,
-        Code::BadArchive | Code::UnknownFormat | Code::EOpen => ArchiveError::Open(err.to_string()),
-        other => ArchiveError::Other(format!("RAR 处理失败: {other:?}")),
+        Code::BadArchive | Code::UnknownFormat | Code::EOpen => {
+            ArchiveError::Open(FailReason::Raw(err.to_string()))
+        }
+        other => ArchiveError::Other(FailReason::RarFailed {
+            detail: format!("{other:?}"),
+        }),
     }
 }
 

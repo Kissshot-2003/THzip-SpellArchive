@@ -289,8 +289,8 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
     }
     for warning in &plan.warnings {
         match warning {
-            PlanWarning::UnsafePath { id, detail } => {
-                println!("  不安全路径（条目 {id}）: {detail}")
+            PlanWarning::UnsafePath { id, issue } => {
+                println!("  不安全路径（条目 {id}）: {issue}")
             }
             PlanWarning::SuspiciousDisplayName { id, detail } => {
                 println!("  可疑文件名（条目 {id}）: {detail}")
@@ -299,9 +299,9 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
             PlanWarning::DuplicatePath { id, renamed_to } => {
                 println!("  重名（条目 {id}）→ {renamed_to}")
             }
-            PlanWarning::BombSuspected { reason } => println!("  疑似炸弹: {reason}"),
+            PlanWarning::BombSuspected { hit } => println!("  疑似炸弹: {hit}"),
             PlanWarning::UnsupportedMethod { id, method } => {
-                println!("  不支持的压缩方法（条目 {id}）: {method}")
+                println!("  不支持的压缩方法（条目 {id}）: {}", method.label())
             }
             PlanWarning::LongPath => println!("  存在超长路径"),
         }

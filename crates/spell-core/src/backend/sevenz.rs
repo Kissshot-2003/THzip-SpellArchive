@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime};
 
 use crate::backend::common::detect_conflict;
 use crate::backend::volume::{MultiVolumeReader, collect_volumes, is_volume_name};
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, ResolvedAction,
@@ -105,7 +105,9 @@ impl ArchiveReader for SevenZReader {
         limits: &Limits,
     ) -> Result<ExtractPlan, ArchiveError> {
         if self.entries.len() > limits.max_entries as usize {
-            return Err(ArchiveError::LimitExceeded("条目数超过上限"));
+            return Err(ArchiveError::LimitExceeded(
+                crate::safety::bomb::LimitHit::EntryCount,
+            ));
         }
 
         let mut plan = ExtractPlan {
@@ -117,7 +119,7 @@ impl ArchiveReader for SevenZReader {
             let entry = self
                 .entries
                 .get(id as usize)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {id} 不存在")))?;
+                .ok_or(ArchiveError::Other(FailReason::EntryMissing { id }))?;
 
             let mut item = PlannedItem {
                 id,
@@ -137,13 +139,12 @@ impl ArchiveReader for SevenZReader {
 
             let rel = match sanitize_rel(&entry.display, limits) {
                 Ok(rel) => rel,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeName {
+                        name: entry.display.to_string(),
+                        issue,
                     });
-                    item.action = PlanAction::Reject(detail);
                     plan.items.push(item);
                     continue;
                 }
@@ -151,13 +152,9 @@ impl ArchiveReader for SevenZReader {
 
             let abs = match resolve_under(target, &rel, limits) {
                 Ok(path) => path,
-                Err(err) => {
-                    let detail = err.to_string();
-                    plan.warnings.push(PlanWarning::UnsafePath {
-                        id,
-                        detail: detail.clone(),
-                    });
-                    item.action = PlanAction::Reject(detail);
+                Err(issue) => {
+                    plan.warnings.push(PlanWarning::UnsafePath { id, issue });
+                    item.action = PlanAction::Reject(FailReason::UnsafeTarget { issue });
                     plan.items.push(item);
                     continue;
                 }
@@ -166,8 +163,7 @@ impl ArchiveReader for SevenZReader {
 
             if let Some(conflict) = detect_conflict(id, &abs, entry.kind)? {
                 if matches!(conflict.kind, ConflictKind::ReparsePoint) {
-                    item.action =
-                        PlanAction::Reject("目标已存在且是重解析点（junction/symlink）".to_owned());
+                    item.action = PlanAction::Reject(FailReason::TargetIsReparsePoint);
                 } else {
                     item.action = PlanAction::Overwrite;
                 }
@@ -244,7 +240,7 @@ impl ArchiveReader for SevenZReader {
 
             let ours = self.entries[id as usize].clone();
             if let Err(err) = sink.on_entry_begin(id, &ours) {
-                report.failed.push((id, err.to_string()));
+                report.failed.push((id, err.reason()));
                 drain(data);
                 return Ok(true);
             }
@@ -260,13 +256,15 @@ impl ArchiveReader for SevenZReader {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Err(err) = sink.on_data(id, &buf[..n]) {
-                            report.failed.push((id, err.to_string()));
+                            report.failed.push((id, err.reason()));
                             ok = false;
                             break;
                         }
                     }
                     Err(err) => {
-                        report.failed.push((id, format!("读取条目失败: {err}")));
+                        report
+                            .failed
+                            .push((id, FailReason::EntryReadFailed { detail: err.to_string() }));
                         ok = false;
                         break;
                     }
@@ -281,7 +279,7 @@ impl ArchiveReader for SevenZReader {
             match sink.on_entry_end(id, ok) {
                 Ok(()) if ok => report.succeeded.push(id),
                 Ok(()) => {}
-                Err(err) => report.failed.push((id, err.to_string())),
+                Err(err) => report.failed.push((id, err.reason())),
             }
             Ok(true)
         });
@@ -334,7 +332,7 @@ impl ArchiveReader for SevenZReader {
             }
 
             if let Err(err) = sink.on_entry_begin(id, ours) {
-                report.failed.push((id, err.to_string()));
+                report.failed.push((id, err.reason()));
                 drain(data);
                 return Ok(true);
             }
@@ -350,13 +348,15 @@ impl ArchiveReader for SevenZReader {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Err(err) = sink.on_data(id, &buf[..n]) {
-                            report.failed.push((id, err.to_string()));
+                            report.failed.push((id, err.reason()));
                             ok = false;
                             break;
                         }
                     }
                     Err(err) => {
-                        report.failed.push((id, format!("读取条目失败: {err}")));
+                        report
+                            .failed
+                            .push((id, FailReason::EntryReadFailed { detail: err.to_string() }));
                         ok = false;
                         break;
                     }
@@ -369,7 +369,7 @@ impl ArchiveReader for SevenZReader {
             match sink.on_entry_end(id, ok) {
                 Ok(()) if ok => report.succeeded.push(id),
                 Ok(()) => {}
-                Err(err) => report.failed.push((id, err.to_string())),
+                Err(err) => report.failed.push((id, err.reason())),
             }
             Ok(true)
         });
@@ -482,15 +482,24 @@ fn map_sz_error(err: sevenz_rust2::Error) -> ArchiveError {
         sevenz_rust2::Error::MaybeBadPassword(_) => ArchiveError::BadPassword,
         sevenz_rust2::Error::ChecksumVerificationFailed => ArchiveError::CorruptEntry {
             entry: None,
-            detail: "7z 数据校验失败".to_owned(),
+            cause: FailReason::ChecksumFailed {
+                format: "7z".to_owned(),
+            },
         },
         sevenz_rust2::Error::Io(err, _) => ArchiveError::Io(err),
-        sevenz_rust2::Error::FileOpen(err, path) => ArchiveError::Open(format!("{path}: {err}")),
-        sevenz_rust2::Error::BadSignature(_) => ArchiveError::Open("7z 签名无效".to_owned()),
-        sevenz_rust2::Error::UnsupportedCompressionMethod(method) => {
-            ArchiveError::Unsupported(format!("7z 压缩方法不支持: {method}"))
+        sevenz_rust2::Error::FileOpen(err, path) => {
+            ArchiveError::Open(FailReason::Raw(format!("{path}: {err}")))
         }
-        other => ArchiveError::Open(other.to_string()),
+        sevenz_rust2::Error::BadSignature(_) => ArchiveError::Open(FailReason::SignatureInvalid {
+            format: "7z".to_owned(),
+        }),
+        sevenz_rust2::Error::UnsupportedCompressionMethod(method) => {
+            ArchiveError::Unsupported(FailReason::UnsupportedMethod {
+                format: "7z".to_owned(),
+                method: method.to_string(),
+            })
+        }
+        other => ArchiveError::Open(FailReason::Raw(other.to_string())),
     }
 }
 

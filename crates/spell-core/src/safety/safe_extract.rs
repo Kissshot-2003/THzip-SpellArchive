@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::error::SinkError;
+use crate::error::{FailReason, SinkError};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, ExtractPlan, ResolvedAction, resolve_all};
 use crate::reader::ExtractSink;
@@ -56,9 +56,7 @@ impl ExtractSink for ExtractDirSink {
         let path = match self.actions.get(&id) {
             Some(ResolvedAction::Write { path, .. }) => path.clone(),
             _ => {
-                return Err(SinkError::Other(format!(
-                    "条目 {id} 的决策不是写入，后端不应调用 on_entry_begin"
-                )));
+                return Err(SinkError::Other(FailReason::DecisionNotWrite { id }));
             }
         };
 
@@ -76,10 +74,9 @@ impl ExtractSink for ExtractDirSink {
 
         // 目标本身是 junction / symlink：拒绝，不顺着它写出去。
         if is_reparse_point(&path)? {
-            return Err(SinkError::Other(format!(
-                "{} 已存在且是重解析点，拒绝覆盖",
-                path.display()
-            )));
+            return Err(SinkError::Other(FailReason::ReparsePointOverwrite {
+                path: path.display().to_string(),
+            }));
         }
 
         let atomic = AtomicFile::create(&path)?;
@@ -104,9 +101,9 @@ impl ExtractSink for ExtractDirSink {
         } = self
             .current
             .as_mut()
-            .ok_or_else(|| SinkError::Other(format!("条目 {id} 未调用 on_entry_begin")))?
+            .ok_or(SinkError::Other(FailReason::EntryNotBegun { id }))?
         else {
-            return Err(SinkError::Other(format!("目录条目 {id} 不应有数据")));
+            return Err(SinkError::Other(FailReason::DirHasData { id }));
         };
 
         let len = chunk.len() as u64;
@@ -130,7 +127,7 @@ impl ExtractSink for ExtractDirSink {
 
     fn on_entry_end(&mut self, id: EntryId, ok: bool) -> Result<(), SinkError> {
         let Some(current) = self.current.take() else {
-            return Err(SinkError::Other(format!("条目 {id} 未开始")));
+            return Err(SinkError::Other(FailReason::EntryNotStarted { id }));
         };
 
         let CurrentEntry::File {
@@ -169,10 +166,9 @@ impl ExtractSink for ExtractDirSink {
 
 fn ensure_safe_dir(path: &std::path::Path) -> Result<(), SinkError> {
     if is_reparse_point(path)? {
-        return Err(SinkError::Other(format!(
-            "{} 是重解析点，拒绝写入",
-            path.display()
-        )));
+        return Err(SinkError::Other(FailReason::ReparsePointWrite {
+            path: path.display().to_string(),
+        }));
     }
     if !path.exists() {
         std::fs::create_dir_all(path)?;
@@ -181,5 +177,5 @@ fn ensure_safe_dir(path: &std::path::Path) -> Result<(), SinkError> {
 }
 
 fn limit_error(hit: LimitHit) -> SinkError {
-    SinkError::Limit(hit.message())
+    SinkError::Limit(hit)
 }

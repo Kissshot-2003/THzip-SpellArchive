@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason, path_text};
 use crate::safety::atomic_fs::AtomicFile;
 use crate::secret::SecretString;
 use crate::task::CancelToken;
@@ -88,17 +88,19 @@ impl ZipArchiveWriter {
     }
 
     fn writer(&mut self) -> Result<&mut zip::ZipWriter<AtomicFile>, ArchiveError> {
-        self.inner
-            .as_mut()
-            .ok_or_else(|| ArchiveError::Other("zip 写入器已中止".to_owned()))
+        self.inner.as_mut().ok_or_else(|| {
+            ArchiveError::Other(FailReason::WriterClosed {
+                format: "zip".to_owned(),
+            })
+        })
     }
 
     fn reserve_name(&mut self, name: &str) -> Result<(), ArchiveError> {
         let key = name.to_lowercase();
         if !self.names.insert(key) {
-            return Err(ArchiveError::Other(format!(
-                "归档内重名（Windows 不区分大小写）：{name}"
-            )));
+            return Err(ArchiveError::Other(FailReason::DuplicateArchiveName {
+                name: name.to_owned(),
+            }));
         }
         Ok(())
     }
@@ -123,19 +125,21 @@ impl ArchiveWriter for ZipArchiveWriter {
     ) -> Result<(), ArchiveError> {
         let result = (|| -> Result<(), ArchiveError> {
             let name = normalize_entry_name(name_in_archive)?;
-            let meta = std::fs::symlink_metadata(src)
-                .map_err(|err| ArchiveError::Other(format!("无法读取 {}: {err}", src.display())))?;
+            let meta = std::fs::symlink_metadata(src).map_err(|err| {
+                ArchiveError::Other(FailReason::ReadFailed {
+                    path: path_text(src),
+                    detail: err.to_string(),
+                })
+            })?;
             if meta.file_type().is_symlink() {
-                return Err(ArchiveError::Unsupported(format!(
-                    "不写入符号链接：{}",
-                    src.display()
-                )));
+                return Err(ArchiveError::Unsupported(FailReason::SymlinkNotAllowed {
+                    path: path_text(src),
+                }));
             }
             if !meta.is_file() {
-                return Err(ArchiveError::Other(format!(
-                    "不是普通文件：{}",
-                    src.display()
-                )));
+                return Err(ArchiveError::Other(FailReason::NotRegularFile {
+                    path: path_text(src),
+                }));
             }
 
             self.reserve_name(&name)?;
@@ -207,10 +211,11 @@ impl ArchiveWriter for ZipArchiveWriter {
     }
 
     fn finish(mut self: Box<Self>) -> Result<FinishReport, ArchiveError> {
-        let inner = self
-            .inner
-            .take()
-            .ok_or_else(|| ArchiveError::Other("zip 写入器已中止".to_owned()))?;
+        let inner = self.inner.take().ok_or_else(|| {
+            ArchiveError::Other(FailReason::WriterClosed {
+                format: "zip".to_owned(),
+            })
+        })?;
         let mut atomic = inner.finish().map_err(map_zip_error)?;
         let bytes_out = atomic.file_mut().metadata()?.len();
         atomic.commit()?;
@@ -230,10 +235,10 @@ fn map_method(method: Method) -> Result<zip::CompressionMethod, ArchiveError> {
         Method::Deflate => Ok(zip::CompressionMethod::Deflated),
         Method::Bzip2 => Ok(zip::CompressionMethod::Bzip2),
         Method::Zstd => Ok(zip::CompressionMethod::Zstd),
-        other => Err(ArchiveError::Unsupported(format!(
-            "zip 创建暂不支持压缩方法 {}",
-            other.label()
-        ))),
+        other => Err(ArchiveError::Unsupported(FailReason::UnsupportedMethod {
+            format: "zip".to_owned(),
+            method: other.label().to_owned(),
+        })),
     }
 }
 
@@ -249,7 +254,7 @@ fn zip_method_to_method(method: zip::CompressionMethod) -> Method {
 fn map_zip_error(err: zip::result::ZipError) -> ArchiveError {
     match err {
         zip::result::ZipError::Io(err) => ArchiveError::Io(err),
-        other => ArchiveError::Other(format!("zip 写入失败: {other}")),
+        other => ArchiveError::Other(FailReason::Raw(format!("zip write failed: {other}"))),
     }
 }
 

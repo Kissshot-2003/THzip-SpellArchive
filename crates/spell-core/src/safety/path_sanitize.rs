@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::limits::Limits;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SanitizeError {
     #[error("条目名为空")]
     Empty,

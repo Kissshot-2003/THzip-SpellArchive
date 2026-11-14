@@ -1318,8 +1318,9 @@ impl SpellApp {
                 }
             }
             TaskEvent::EntryFailed { task, error, .. } => {
+                let text = crate::i18n::errors::reason(self.locale, &error);
                 if let Some(view) = self.task_mut(task) {
-                    view.detail = Some(error);
+                    view.detail = Some(text);
                 }
             }
             TaskEvent::Finished { task, report } => {
@@ -1450,16 +1451,17 @@ impl SpellApp {
             }
             TaskEvent::Failed { task, error } => {
                 crate::logging::error("task", &format!("{task} failed: {error}"));
+                let text = crate::i18n::errors::reason(self.locale, &error);
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Failed;
-                    view.detail = Some(error.clone());
+                    view.detail = Some(text.clone());
                 }
-                if error.contains("密码") {
+                if error.is_password_related() {
                     if let Some(path) = self.archive_path.clone() {
                         self.pending_password = Some(PendingPassword {
                             path,
                             input: String::new(),
-                            error: Some(error.clone()),
+                            error: Some(text.clone()),
                         });
                     }
                 }
@@ -1472,7 +1474,7 @@ impl SpellApp {
                     self.pending_rewrite = None;
                     self.open_path(path, None);
                 }
-                self.status = self.tr.tf(TextKey::TaskFailed, &[("error", &error)]);
+                self.status = self.tr.tf(TextKey::TaskFailed, &[("error", &text)]);
             }
         }
     }

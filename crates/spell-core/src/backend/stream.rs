@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::backend::common::detect_conflict;
 use crate::backend::decoder::open_reader;
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlannedItem, ResolvedAction, resolve_all,
@@ -73,7 +73,7 @@ impl ArchiveReader for StreamReader {
             let entry = self
                 .entries
                 .get(id as usize)
-                .ok_or_else(|| ArchiveError::Other(format!("条目 {id} 不存在")))?;
+                .ok_or(ArchiveError::Other(FailReason::EntryMissing { id }))?;
             let mut item = PlannedItem {
                 id,
                 rel_path: PathBuf::new(),
@@ -82,17 +82,19 @@ impl ArchiveReader for StreamReader {
                 action: PlanAction::Create,
             };
 
-            let rel = sanitize_rel(&entry.display, limits).map_err(|err| {
-                ArchiveError::Other(format!("不安全的名字 {}: {err}", entry.display))
+            let rel = sanitize_rel(&entry.display, limits).map_err(|issue| {
+                ArchiveError::Other(FailReason::UnsafeName {
+                    name: entry.display.to_string(),
+                    issue,
+                })
             })?;
             let abs = resolve_under(target, &rel, limits)
-                .map_err(|err| ArchiveError::Other(format!("目标路径不安全: {err}")))?;
+                .map_err(|issue| ArchiveError::Other(FailReason::UnsafeTarget { issue }))?;
             item.rel_path = abs.clone();
 
             if let Some(conflict) = detect_conflict(id, &abs, entry.kind)? {
                 if matches!(conflict.kind, ConflictKind::ReparsePoint) {
-                    item.action =
-                        PlanAction::Reject("目标已存在且是重解析点（junction/symlink）".to_owned());
+                    item.action = PlanAction::Reject(FailReason::TargetIsReparsePoint);
                 } else {
                     item.action = PlanAction::Overwrite;
                 }
@@ -133,7 +135,7 @@ impl ArchiveReader for StreamReader {
         }
 
         if let Err(err) = sink.on_entry_begin(entry.id, &entry) {
-            report.failed.push((entry.id, err.to_string()));
+            report.failed.push((entry.id, err.reason()));
             report.elapsed = start.elapsed();
             return Ok(report);
         }
@@ -150,13 +152,15 @@ impl ArchiveReader for StreamReader {
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(err) = sink.on_data(entry.id, &buf[..n]) {
-                        report.failed.push((entry.id, err.to_string()));
+                        report.failed.push((entry.id, err.reason()));
                         ok = false;
                         break;
                     }
                 }
                 Err(err) => {
-                    report.failed.push((entry.id, format!("解压失败: {err}")));
+                    report
+                        .failed
+                        .push((entry.id, FailReason::EntryExtractFailed { detail: err.to_string() }));
                     ok = false;
                     break;
                 }
@@ -166,7 +170,7 @@ impl ArchiveReader for StreamReader {
         match sink.on_entry_end(entry.id, ok) {
             Ok(()) if ok => report.succeeded.push(entry.id),
             Ok(()) => {}
-            Err(err) => report.failed.push((entry.id, err.to_string())),
+            Err(err) => report.failed.push((entry.id, err.reason())),
         }
 
         report.bytes_written = sink.bytes_written();
@@ -187,7 +191,7 @@ impl ArchiveReader for StreamReader {
         let mut buf = vec![0u8; READ_BUF];
 
         if let Err(err) = sink.on_entry_begin(entry.id, &entry) {
-            report.failed.push((entry.id, err.to_string()));
+            report.failed.push((entry.id, err.reason()));
             report.elapsed = start.elapsed();
             return Ok(report);
         }
@@ -201,13 +205,15 @@ impl ArchiveReader for StreamReader {
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(err) = sink.on_data(entry.id, &buf[..n]) {
-                        report.failed.push((entry.id, err.to_string()));
+                        report.failed.push((entry.id, err.reason()));
                         ok = false;
                         break;
                     }
                 }
                 Err(err) => {
-                    report.failed.push((entry.id, format!("校验失败: {err}")));
+                    report
+                        .failed
+                        .push((entry.id, FailReason::EntryVerifyFailed { detail: err.to_string() }));
                     ok = false;
                     break;
                 }
@@ -216,7 +222,7 @@ impl ArchiveReader for StreamReader {
         match sink.on_entry_end(entry.id, ok) {
             Ok(()) if ok => report.succeeded.push(entry.id),
             Ok(()) => {}
-            Err(err) => report.failed.push((entry.id, err.to_string())),
+            Err(err) => report.failed.push((entry.id, err.reason())),
         }
 
         report.bytes_written = sink.bytes_written();
@@ -230,7 +236,9 @@ fn decompressed_size(path: &Path, kind: ArchiveKind) -> Result<u64, ArchiveError
     let mut reader = open_reader(path, kind)?;
     std::io::copy(&mut reader, &mut std::io::sink()).map_err(|err| ArchiveError::CorruptEntry {
         entry: None,
-        detail: format!("无法读取压缩流: {err}"),
+        cause: FailReason::StreamReadFailed {
+            detail: err.to_string(),
+        },
     })
 }
 

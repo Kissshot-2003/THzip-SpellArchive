@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason, path_text};
 use crate::safety::atomic_fs::AtomicFile;
 use crate::task::CancelToken;
 use crate::types::{ArchiveKind, Method};
@@ -46,7 +46,7 @@ impl Sink {
             Sink::Lz4(builder) => builder
                 .into_inner()?
                 .finish()
-                .map_err(|err| ArchiveError::Other(format!("lz4 收尾失败: {err}")))?,
+                .map_err(|err| ArchiveError::Other(FailReason::Raw(format!("lz4 finish failed: {err}"))))?,
         };
         Ok(atomic)
     }
@@ -75,7 +75,7 @@ impl TarArchiveWriter {
             ))),
             ArchiveKind::TarXz => Sink::Xz(Box::new(tar::Builder::new(
                 lzma_rust2::XzWriter::new(atomic, lzma_rust2::XzOptions::default())
-                    .map_err(|err| ArchiveError::Other(format!("xz 初始化失败: {err}")))?,
+                    .map_err(|err| ArchiveError::Other(FailReason::Raw(format!("xz init failed: {err}"))))?,
             ))),
             ArchiveKind::TarZst => Sink::Zst(tar::Builder::new(zstd::stream::write::Encoder::new(
                 atomic, 3,
@@ -84,10 +84,9 @@ impl TarArchiveWriter {
                 lz4_flex::frame::FrameEncoder::new(atomic),
             )),
             other => {
-                return Err(ArchiveError::Unsupported(format!(
-                    "暂不支持创建 {}",
-                    other.label()
-                )));
+                return Err(ArchiveError::Unsupported(FailReason::CreateUnsupported {
+                    format: other.label().to_owned(),
+                }));
             }
         };
 
@@ -101,16 +100,18 @@ impl TarArchiveWriter {
     }
 
     fn sink(&mut self) -> Result<&mut Sink, ArchiveError> {
-        self.sink
-            .as_mut()
-            .ok_or_else(|| ArchiveError::Other("tar 写入器已中止".to_owned()))
+        self.sink.as_mut().ok_or_else(|| {
+            ArchiveError::Other(FailReason::WriterClosed {
+                format: "tar".to_owned(),
+            })
+        })
     }
 
     fn reserve_name(&mut self, name: &str) -> Result<(), ArchiveError> {
         if !self.names.insert(name.to_lowercase()) {
-            return Err(ArchiveError::Other(format!(
-                "归档内重名（Windows 不区分大小写）：{name}"
-            )));
+            return Err(ArchiveError::Other(FailReason::DuplicateArchiveName {
+                name: name.to_owned(),
+            }));
         }
         Ok(())
     }
@@ -127,19 +128,21 @@ impl ArchiveWriter for TarArchiveWriter {
     ) -> Result<(), ArchiveError> {
         let result = (|| -> Result<(), ArchiveError> {
             let name = normalize_entry_name(name_in_archive)?;
-            let meta = std::fs::symlink_metadata(src)
-                .map_err(|err| ArchiveError::Other(format!("无法读取 {}: {err}", src.display())))?;
+            let meta = std::fs::symlink_metadata(src).map_err(|err| {
+                ArchiveError::Other(FailReason::ReadFailed {
+                    path: path_text(src),
+                    detail: err.to_string(),
+                })
+            })?;
             if meta.file_type().is_symlink() {
-                return Err(ArchiveError::Unsupported(format!(
-                    "不写入符号链接：{}",
-                    src.display()
-                )));
+                return Err(ArchiveError::Unsupported(FailReason::SymlinkNotAllowed {
+                    path: path_text(src),
+                }));
             }
             if !meta.is_file() {
-                return Err(ArchiveError::Other(format!(
-                    "不是普通文件：{}",
-                    src.display()
-                )));
+                return Err(ArchiveError::Other(FailReason::NotRegularFile {
+                    path: path_text(src),
+                }));
             }
             self.reserve_name(&name)?;
 
@@ -218,10 +221,11 @@ impl ArchiveWriter for TarArchiveWriter {
     }
 
     fn finish(mut self: Box<Self>) -> Result<FinishReport, ArchiveError> {
-        let sink = self
-            .sink
-            .take()
-            .ok_or_else(|| ArchiveError::Other("tar 写入器已中止".to_owned()))?;
+        let sink = self.sink.take().ok_or_else(|| {
+            ArchiveError::Other(FailReason::WriterClosed {
+                format: "tar".to_owned(),
+            })
+        })?;
         let mut atomic = sink.finish()?;
         atomic.flush()?;
         let bytes_out = atomic.file_mut().metadata()?.len();
@@ -246,7 +250,7 @@ struct ProgressReader<'a, R> {
 impl<R: Read> Read for ProgressReader<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.cancel.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "已取消"));
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
         }
         let n = self.inner.read(buf)?;
         if n > 0 {

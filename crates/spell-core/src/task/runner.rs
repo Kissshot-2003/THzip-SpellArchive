@@ -6,7 +6,7 @@ use std::time::Instant;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use crate::backend;
-use crate::error::ArchiveError;
+use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
 use crate::reader::{ArchiveReader, ExtractSink};
@@ -122,7 +122,9 @@ fn worker_loop(op_rx: Receiver<(TaskId, CancelToken, TaskOp)>, ev_tx: Sender<Tas
         if let Err(message) = result {
             let _ = ev_tx.send(TaskEvent::Failed {
                 task,
-                error: format!("任务异常: {message}"),
+                error: FailReason::Panic {
+                    message,
+                },
             });
         }
     }
@@ -175,7 +177,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -222,7 +224,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -276,7 +278,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -333,7 +335,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -353,7 +355,7 @@ fn run_task(
                     tx,
                     TaskEvent::Failed {
                         task,
-                        error: "追加模式暂不支持设置新密码".to_owned(),
+                        error: FailReason::AppendPasswordUnsupported,
                     },
                 );
                 return Ok(());
@@ -366,7 +368,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                     return Ok(());
@@ -407,7 +409,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                     return Ok(());
@@ -456,7 +458,7 @@ fn run_task(
                             tx,
                             TaskEvent::Failed {
                                 task,
-                                error: err.to_string(),
+                                error: err.reason(),
                             },
                         );
                     }
@@ -466,7 +468,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -530,7 +532,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -555,7 +557,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                     return Ok(());
@@ -572,7 +574,7 @@ fn run_task(
                     tx,
                     TaskEvent::Failed {
                         task,
-                        error: "主题包格式不对，需要 <主题目录>/theme.toml".to_owned(),
+                        error: FailReason::ThemeManifestMissing,
                     },
                 );
                 return Ok(());
@@ -591,7 +593,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                     return Ok(());
@@ -643,7 +645,7 @@ fn run_task(
                         tx,
                         TaskEvent::Failed {
                             task,
-                            error: err.to_string(),
+                            error: err.reason(),
                         },
                     );
                 }
@@ -654,7 +656,7 @@ fn run_task(
 }
 
 /// 主题包安全限制：总数 / 单文件 / 解压总量 / 禁止可执行扩展名。
-fn validate_theme_entries(entries: &[ArchiveEntry]) -> Result<(), String> {
+fn validate_theme_entries(entries: &[ArchiveEntry]) -> Result<(), FailReason> {
     const MAX_FILES: usize = 500;
     const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
     const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
@@ -663,10 +665,10 @@ fn validate_theme_entries(entries: &[ArchiveEntry]) -> Result<(), String> {
     ];
 
     if entries.len() > MAX_FILES {
-        return Err(format!(
-            "主题包条目过多：{}（上限 {MAX_FILES}）",
-            entries.len()
-        ));
+        return Err(FailReason::ThemeTooManyEntries {
+            count: entries.len(),
+            limit: MAX_FILES,
+        });
     }
 
     let mut total = 0u64;
@@ -675,21 +677,23 @@ fn validate_theme_entries(entries: &[ArchiveEntry]) -> Result<(), String> {
             continue;
         }
         if entry.size > MAX_FILE_BYTES {
-            return Err(format!(
-                "主题文件 {} 超过 8 MiB（{} 字节）",
-                entry.display, entry.size
-            ));
+            return Err(FailReason::ThemeFileTooLarge {
+                name: entry.display.to_string(),
+                size: entry.size,
+            });
         }
         total = total.saturating_add(entry.size);
         if total > MAX_TOTAL_BYTES {
-            return Err("主题包解压后超过 64 MiB".to_owned());
+            return Err(FailReason::ThemeTotalTooLarge);
         }
         let name = entry.display.to_ascii_lowercase();
         if let Some(ext) = name.rsplit('.').next()
             && name.contains('.')
             && FORBIDDEN.contains(&ext)
         {
-            return Err(format!("主题包包含不允许的文件类型：{}", entry.display));
+            return Err(FailReason::ThemeForbiddenFile {
+                name: entry.display.to_string(),
+            });
         }
     }
     Ok(())

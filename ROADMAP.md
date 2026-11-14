@@ -21,7 +21,7 @@
 | Phase 1 | 质量护栏：fuzz、差分测试、基准、GUI 冒烟 | 3–5 天 | Phase 0 | 进行中 |
 | Phase 2 | 产品功能收尾：便携模式、注释、主题导出、任务模板、预览 | 1–2 周 | Phase 0 | 已完成 |
 | Phase 3 | 格式与 CLI 增强：`--json`、zip 加密 LZMA/XZ、7z 固实进度、分卷创建 | 1–2 周 | Phase 1 | 未开始 |
-| Phase 4 | 性能与架构：单文件懒加载、RAR 大条目、拆分 `app.rs`、handoff IPC | 1–2 周 | Phase 1 | 未开始 |
+| Phase 4 | 性能与架构：单文件懒加载、RAR 大条目、拆分 `app.rs`、handoff IPC | 1–2 周 | Phase 1 | 进行中 |
 | Phase 5 | 发布 1.0：签名、安装包实测、升级/迁移回归、文档定稿 | 1 周 | Phase 2–4 | 未开始 |
 
 优先级：**P0 = Phase 0 + 1**（不做会出事）；**P1 = Phase 2**（用户可感知）；**P2 = Phase 3 + 4**。
@@ -76,9 +76,10 @@
 
 - [ ] 单文件流尺寸懒加载，去掉打开时双读（HANDOVER 24）
 - [ ] RAR 超大条目流式中转，替代整文件落盘
-- [ ] 拆分 `app.rs`：`state/`、`actions/`、`events/`，先机械迁移再改
+- [x] 拆分 `app.rs` 第一批：类型与默认值移到 `app/state.rs`，主文件从 2627 降到约 2380 行
+- [ ] 继续拆分 `filter/`、`relocate/`、`pack/`，目标主文件 < 1500 行
 - [ ] 单实例 handoff 轮询改 `WM_COPYDATA`（HANDOVER 28）
-- [ ] 拆分后 128 个测试不做修改仍全绿
+- [x] 拆分后 138 个测试不做修改仍全绿
 
 **退出标准**：冷启动耗时与峰值内存有前后对比；`app.rs` 单文件低于 800 行。
 

@@ -138,12 +138,11 @@ impl TarArchiveWriter {
 
         // 解压子项会刷新目录 mtime；在写回前恢复归档内记录的时间。
         for item in &plan.items {
-            if let Some(entry) = entries.get(item.id as usize) {
-                if entry.kind.is_dir() {
-                    if let Some(time) = entry.mtime {
-                        let _ = crate::safety::set_mtime(&item.rel_path, time);
-                    }
-                }
+            if let Some(entry) = entries.get(item.id as usize)
+                && entry.kind.is_dir()
+                && let Some(time) = entry.mtime
+            {
+                let _ = crate::safety::set_mtime(&item.rel_path, time);
             }
         }
 

@@ -107,12 +107,11 @@ impl SevenZArchiveWriter {
 
         // 解压子项会刷新目录 mtime；在写回前恢复归档内记录的时间。
         for item in &plan.items {
-            if let Some(entry) = entries.get(item.id as usize) {
-                if entry.kind.is_dir() {
-                    if let Some(time) = entry.mtime {
-                        let _ = crate::safety::set_mtime(&item.rel_path, time);
-                    }
-                }
+            if let Some(entry) = entries.get(item.id as usize)
+                && entry.kind.is_dir()
+                && let Some(time) = entry.mtime
+            {
+                let _ = crate::safety::set_mtime(&item.rel_path, time);
             }
         }
 
@@ -179,7 +178,12 @@ impl ArchiveWriter for SevenZArchiveWriter {
                 }));
             }
 
-            let entry = sevenz_rust2::ArchiveEntry::from_path(src, name);
+            let mut entry = sevenz_rust2::ArchiveEntry::from_path(src, name);
+            entry.has_windows_attributes = true;
+            entry.windows_attributes = 0x20; // FILE_ATTRIBUTE_ARCHIVE
+            if meta.permissions().readonly() {
+                entry.windows_attributes |= 0x01; // FILE_ATTRIBUTE_READONLY
+            }
             let file = File::open(src)?;
             let reader = ProgressReader {
                 inner: file,
@@ -202,10 +206,14 @@ impl ArchiveWriter for SevenZArchiveWriter {
         self.abort_on(result)
     }
 
-    fn add_dir(&mut self, _src: &Path, name_in_archive: &str) -> Result<(), ArchiveError> {
+    fn add_dir(&mut self, src: &Path, name_in_archive: &str) -> Result<(), ArchiveError> {
         let result = (|| -> Result<(), ArchiveError> {
             let name = normalize_entry_name(name_in_archive)?;
-            let entry = sevenz_rust2::ArchiveEntry::new_directory(&name);
+            let mut entry = sevenz_rust2::ArchiveEntry::from_path(src, name);
+            entry.has_stream = false;
+            entry.is_directory = true;
+            entry.has_windows_attributes = true;
+            entry.windows_attributes = 0x10; // FILE_ATTRIBUTE_DIRECTORY
             self.writer()?
                 .push_archive_entry::<&[u8]>(entry, None)
                 .map_err(map_sz_error)?;

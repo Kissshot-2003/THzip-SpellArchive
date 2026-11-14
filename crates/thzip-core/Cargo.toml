@@ -24,3 +24,23 @@ liblzma.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Time"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+zip.workspace = true
+
+[[bench]]
+name = "classify"
+harness = false
+
+[[bench]]
+name = "list_entries"
+harness = false
+
+[[bench]]
+name = "extract_zip"
+harness = false
+
+[[bench]]
+name = "pack_sevenz"
+harness = false

@@ -169,10 +169,10 @@ impl ArchiveWriter for ZipArchiveWriter {
                 .compression_method(zip_method)
                 .unix_permissions(0o644)
                 .large_file(meta.len() >= u32::MAX as u64);
-            if let Ok(modified) = meta.modified() {
-                if let Some(dt) = system_time_to_dos(modified) {
-                    options = options.last_modified_time(dt);
-                }
+            if let Ok(modified) = meta.modified()
+                && let Some(dt) = system_time_to_dos(modified)
+            {
+                options = options.last_modified_time(dt);
             }
 
             if let Some(password) = password.as_ref() {

@@ -31,3 +31,21 @@ jobs:
 
       - name: Build CLI
         run: cargo build -p thzip-cli --release
+
+  differential:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install pinned 7-Zip
+        shell: pwsh
+        run: |
+          $exe = ./scripts/install-7zip-ci.ps1
+          "THZIP_7Z=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Differential tests
+        run: cargo test -p thzip-core --test differential -- --nocapture

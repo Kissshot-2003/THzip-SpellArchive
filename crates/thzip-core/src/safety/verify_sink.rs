@@ -70,10 +70,10 @@ impl ExtractSink for VerifySink {
         if !ok {
             return Ok(());
         }
-        if let Some(expected) = current.expected {
-            if current.hasher.finalize() != expected {
-                self.crc_mismatch.push(current.id);
-            }
+        if let Some(expected) = current.expected
+            && current.hasher.finalize() != expected
+        {
+            self.crc_mismatch.push(current.id);
         }
         Ok(())
     }

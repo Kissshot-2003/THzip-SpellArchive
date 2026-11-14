@@ -44,10 +44,10 @@ pub fn sniff_file(path: &Path) -> std::io::Result<ArchiveKind> {
         ArchiveKind::Lz4 => Some(ArchiveKind::TarLz4),
         _ => None,
     };
-    if let Some(tar_kind) = tar_kind {
-        if looks_like_tar(path, kind) {
-            return Ok(tar_kind);
-        }
+    if let Some(tar_kind) = tar_kind
+        && looks_like_tar(path, kind)
+    {
+        return Ok(tar_kind);
     }
 
     Ok(kind)

@@ -443,10 +443,10 @@ impl ThzipApp {
         self.tr.locale = self.locale;
         self.status = self.tr.t(TextKey::StatusReady);
         self.rebuild_tray();
-        if crate::shell_menu::is_installed() {
-            if let Ok(exe) = std::env::current_exe() {
-                let _ = crate::shell_menu::install(&exe, self.locale);
-            }
+        if crate::shell_menu::is_installed()
+            && let Ok(exe) = std::env::current_exe()
+        {
+            let _ = crate::shell_menu::install(&exe, self.locale);
         }
         self.touch_settings();
     }
@@ -1538,14 +1538,14 @@ impl ThzipApp {
                     view.phase = TaskPhase::Failed;
                     view.detail = Some(text.clone());
                 }
-                if error.is_password_related() {
-                    if let Some(path) = self.archive_path.clone() {
-                        self.pending_password = Some(PendingPassword {
-                            path,
-                            input: String::new(),
-                            error: Some(text.clone()),
-                        });
-                    }
+                if error.is_password_related()
+                    && let Some(path) = self.archive_path.clone()
+                {
+                    self.pending_password = Some(PendingPassword {
+                        path,
+                        input: String::new(),
+                        error: Some(text.clone()),
+                    });
                 }
                 if let Some(path) = self
                     .pending_rewrite
@@ -1960,10 +1960,10 @@ pub(crate) fn build_relocate(
             .get(&index)
             .cloned()
             .unwrap_or_else(|| entry.display.trim_end_matches('/').to_owned());
-        if let Some(previous) = seen.insert(final_name.to_lowercase(), index) {
-            if rename.contains_key(&index) || rename.contains_key(&previous) {
-                return Err(RelocateError::Duplicate(final_name));
-            }
+        if let Some(previous) = seen.insert(final_name.to_lowercase(), index)
+            && (rename.contains_key(&index) || rename.contains_key(&previous))
+        {
+            return Err(RelocateError::Duplicate(final_name));
         }
     }
 

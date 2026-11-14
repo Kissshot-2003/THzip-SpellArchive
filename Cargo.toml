@@ -2,11 +2,12 @@
 resolver = "3"
 members = ["crates/thzip-core", "crates/thzip-app", "crates/thzip-cli"]
 default-members = ["crates/thzip-app"]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.93"
 license = "MIT"
 authors = ["THzip-SpellArchive contributors"]
 
@@ -38,7 +39,7 @@ zip = { version = "4.6", default-features = false, features = [
 crc32fast = "1"
 crossbeam-channel = "0.5"
 rfd = "0.15"
-sevenz-rust2 = { version = "0.20", features = ["deflate", "zstd", "lz4"] }
+sevenz-rust2 = { version = "0.24.2", features = ["deflate", "zstd", "lz4"] }
 tar = "0.4"
 flate2 = "1"
 bzip2 = "0.6"

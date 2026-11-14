@@ -115,10 +115,11 @@ fn is_reserved_name(segment: &str) -> bool {
         return true;
     }
     for prefix in ["COM", "LPT"] {
-        if let Some(rest) = upper.strip_prefix(prefix) {
-            if rest.len() == 1 && rest.as_bytes()[0].is_ascii_digit() {
-                return true;
-            }
+        if let Some(rest) = upper.strip_prefix(prefix)
+            && rest.len() == 1
+            && rest.as_bytes()[0].is_ascii_digit()
+        {
+            return true;
         }
     }
     false

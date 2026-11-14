@@ -5,9 +5,21 @@
 
 ## [Unreleased]
 
-### 计划中
+### 新增
 
-- 见 `ROADMAP.md` 的 Phase 1 – Phase 5。
+- CI：stable 测试 / clippy / fmt，tag 触发可复现打包并上传 Release。
+- 差分测试：与固定 SHA-256 的 7-Zip 26.04 双向比对列出、解压与 AES 密码。
+- fuzz：4 个 cargo-fuzz 目标 + stable 确定性变异 smoke 测试。
+- criterion 基准：格式嗅探、10k 条目 zip 列表、16 MiB 解压、4 MiB 7z 打包。
+
+### 变更
+
+- 最低 Rust 版本提升到 1.93。
+- `sevenz-rust2` 升级到 0.24.2。
+
+### 修复
+
+- 7z 目录曾被写成 K_ANTI 反条目；升级后目录正确，并写入 Windows 属性（目录 0x10 / 文件 0x20，只读追加 0x01）。
 
 ## [0.2.0] - 2026-11-15
 

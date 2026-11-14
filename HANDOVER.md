@@ -78,7 +78,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ### 2.1 环境
 
 - Windows 10/11 x64
-- Rust stable（当前验证 1.99.1；`rust-version = 1.85`，edition 2024）
+- Rust stable（当前验证 1.99.1；`rust-version = 1.93`，edition 2024）
 - MSVC Build Tools（`zstd` 需要 C 编译；其余主要是 Rust）
 - 可选：系统 `7z`、`tar` 仅用于手工构造测试包
 
@@ -87,8 +87,19 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 128 个测试
+cargo test --workspace                 # 132 个测试
 cargo clippy --workspace --all-targets -- -D warnings
+
+# 差分测试：先安装固定版 7-Zip，再指向其 exe
+powershell -File scripts/install-7zip-ci.ps1
+$env:THZIP_7Z = "$env:ProgramFiles\7-Zip\7z.exe"
+cargo test -p thzip-core --test differential
+
+# 基准（criterion）
+cargo bench -p thzip-core
+
+# fuzz 目标只做编译检查；真正跑需要 nightly + cargo-fuzz（见 fuzz/README.md）
+cargo check --manifest-path fuzz\Cargo.toml
 
 cargo run -p thzip-app                 # GUI
 cargo run -p thzip-app -- <归档>        # 启动并直接打开
@@ -131,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 128 通过；clippy 无告警。
+12. `cargo test --workspace` 132 通过；clippy 无告警。
 
 ---
 
@@ -332,7 +343,8 @@ UI 选目标目录
 
 读取：
 
-- `sevenz-rust2 = 0.20`（兼容 rust-version 1.85；已启用 `deflate` / `zstd` / `lz4` features）。
+- `sevenz-rust2 = 0.24.2`（MSRV 1.93；已启用 `deflate` / `zstd` / `lz4` features）。
+  0.20.2 会把无流目录写成 K_ANTI 反条目，升级后已修复；写入时显式带 Windows 属性（目录 0x10 / 文件 0x20）。
 - LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4 由 crate 支持。
 - 固实包：跳过未选条目时必须把子流 drain 掉，否则后续条目错位。
 - AES-256 头加密：无密码 `open` 返回 `PasswordRequired`。
@@ -762,7 +774,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **128** 个测试。
+当前共 **132** 个测试。
 
 ### 9.2 测试分布
 
@@ -778,6 +790,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/tar_write.rs` | 5 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消、目录 mtime 保留、解压恢复目录 mtime |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
 | `tests/sevenz_write.rs` | 7 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝、重名条目、追加取消 |
+| `tests/fuzz_smoke.rs` | 1 | 6 个 fixture × 48 次确定性变异 + 512 个随机头，保证不 panic |
+| `tests/differential.rs` | 3 | 与固定版 7-Zip 双向列出、解压、AES-256 密码互通；未设置 `THZIP_7Z` 时跳过 |
 
 ### 9.3 手工验收（每次改格式/任务层都跑）
 
@@ -908,7 +922,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（128 通过）
+- [ ] `cargo test --workspace`（132 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

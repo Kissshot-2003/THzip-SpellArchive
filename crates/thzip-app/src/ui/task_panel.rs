@@ -143,11 +143,11 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 });
         });
 
-    if let Some(id) = cancel_id {
-        if let Some(task) = app.tasks.iter().find(|task| task.id == id) {
-            task.cancel.cancel();
-            app.status = app.tr.tf(TextKey::CancellingTask, &[("name", &task.name)]);
-        }
+    if let Some(id) = cancel_id
+        && let Some(task) = app.tasks.iter().find(|task| task.id == id)
+    {
+        task.cancel.cancel();
+        app.status = app.tr.tf(TextKey::CancellingTask, &[("name", &task.name)]);
     }
     if clear_finished {
         app.clear_finished_tasks();

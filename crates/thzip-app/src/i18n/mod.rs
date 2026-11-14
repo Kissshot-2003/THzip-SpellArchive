@@ -1168,10 +1168,10 @@ impl Translator {
 
     /// 三层回退：主题覆盖 → 内置语言包。
     pub fn t(&self, key: TextKey) -> String {
-        if !self.prefer_standard {
-            if let Some(value) = self.overrides.get(key.key()) {
-                return value.clone();
-            }
+        if !self.prefer_standard
+            && let Some(value) = self.overrides.get(key.key())
+        {
+            return value.clone();
         }
         builtin(self.locale, key).to_owned()
     }

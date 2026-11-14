@@ -46,20 +46,20 @@ impl Prefs {
     }
 
     fn load_at(config: Option<PathBuf>, legacy: Option<PathBuf>) -> Self {
-        if let Some(path) = config.as_ref() {
-            if let Ok(text) = std::fs::read_to_string(path) {
-                return Self::parse(&text);
-            }
+        if let Some(path) = config.as_ref()
+            && let Ok(text) = std::fs::read_to_string(path)
+        {
+            return Self::parse(&text);
         }
         // 首次以新名字启动：把旧 SpellArchive 配置复制过来，保留主题/语言/目录等设置。
-        if let Some(legacy) = legacy.as_ref() {
-            if let Ok(text) = std::fs::read_to_string(legacy) {
-                let prefs = Self::parse(&text);
-                if let Some(path) = config.as_ref() {
-                    let _ = prefs.save_to(path);
-                }
-                return prefs;
+        if let Some(legacy) = legacy.as_ref()
+            && let Ok(text) = std::fs::read_to_string(legacy)
+        {
+            let prefs = Self::parse(&text);
+            if let Some(path) = config.as_ref() {
+                let _ = prefs.save_to(path);
             }
+            return prefs;
         }
         Self::default()
     }
@@ -112,10 +112,10 @@ fn legacy_config_dir() -> Option<PathBuf> {
 }
 
 fn app_data_dir(name: &str) -> Option<PathBuf> {
-    if let Ok(app_data) = std::env::var("APPDATA") {
-        if !app_data.is_empty() {
-            return Some(PathBuf::from(app_data).join(name));
-        }
+    if let Ok(app_data) = std::env::var("APPDATA")
+        && !app_data.is_empty()
+    {
+        return Some(PathBuf::from(app_data).join(name));
     }
     Some(PathBuf::from("."))
 }

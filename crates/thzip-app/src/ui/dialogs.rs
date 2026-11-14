@@ -570,11 +570,11 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new(&encrypted_notice).color(palette.warning));
             }
-            if let Some(free) = free {
-                if total > free {
-                    ui.add_space(4.0);
-                    ui.label(egui::RichText::new(&low_space_notice).color(palette.error));
-                }
+            if let Some(free) = free
+                && total > free
+            {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(&low_space_notice).color(palette.error));
             }
 
             ui.add_space(10.0);

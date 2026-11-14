@@ -162,10 +162,10 @@ impl ExtractSink for ExtractDirSink {
             return Ok(());
         }
 
-        if let Some(expected) = expected_crc {
-            if hasher.finalize() != expected {
-                self.crc_mismatch.push(current_id);
-            }
+        if let Some(expected) = expected_crc
+            && hasher.finalize() != expected
+        {
+            self.crc_mismatch.push(current_id);
         }
 
         atomic.commit()?;

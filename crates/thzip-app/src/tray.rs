@@ -68,11 +68,11 @@ impl Tray {
 
 fn load_icon() -> Option<tray_icon::Icon> {
     let mut bases = vec![PathBuf::from("themes")];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            bases.push(dir.join("themes"));
-            bases.push(dir.join("../../themes"));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        bases.push(dir.join("themes"));
+        bases.push(dir.join("../../themes"));
     }
 
     for base in bases {
@@ -91,7 +91,7 @@ fn load_icon() -> Option<tray_icon::Icon> {
 
     // 找不到主题素材时用纯色占位，托盘仍然可用。
     let mut rgba = vec![0u8; 32 * 32 * 4];
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[0xF0, 0x3D, 0x52, 0xFF]);
     }
     tray_icon::Icon::from_rgba(rgba, 32, 32).ok()

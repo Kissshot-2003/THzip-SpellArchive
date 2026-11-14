@@ -18,7 +18,7 @@
 | 阶段 | 目标 | 预估 | 依赖 | 状态 |
 |---|---|---|---|---|
 | Phase 0 | 基线固化：远端、CI、版本单一来源、可复现打包、CHANGELOG | 1 天 | 无 | 已完成 |
-| Phase 1 | 质量护栏：fuzz、差分测试、基准、GUI 冒烟 | 3–5 天 | Phase 0 | 未开始 |
+| Phase 1 | 质量护栏：fuzz、差分测试、基准、GUI 冒烟 | 3–5 天 | Phase 0 | 进行中 |
 | Phase 2 | 产品功能收尾：便携模式、注释、主题导出、任务模板、预览 | 1–2 周 | Phase 0 | 未开始 |
 | Phase 3 | 格式与 CLI 增强：`--json`、zip 加密 LZMA/XZ、7z 固实进度、分卷创建 | 1–2 周 | Phase 1 | 未开始 |
 | Phase 4 | 性能与架构：单文件懒加载、RAR 大条目、拆分 `app.rs`、handoff IPC | 1–2 周 | Phase 1 | 未开始 |
@@ -42,11 +42,12 @@
 
 ## 3. Phase 1：质量护栏
 
-- [ ] `cargo-fuzz` 4 个 target：`sniff`、zip 中央目录、7z 头、tar 头
-- [ ] 差分测试：固定 SHA-256 的 `7zr.exe` 语料对照（设计文档 13.2）
-- [ ] `criterion` 基准：10 万条目列表、解压吞吐、7z 创建内存峰值
+- [x] `cargo-fuzz` 4 个 target：`classify`、zip 中央目录、7z 头、tar 头（stable 另有 `fuzz_smoke` 确定性变异）
+- [x] 差分测试：固定 SHA-256 的 7-Zip 26.04，双向列出 / 解压 / AES 密码互通
+- [x] `criterion` 基准：10k 条目列表、16 MiB 解压、4 MiB 7z 打包（10 万条目与内存峰值待补）
 - [ ] `egui_kittest` 冒烟：打开 → 预检 → 解压 → 取消
 - [ ] 把基准结果写入 CI 基线并在 README 记录红线
+- [x] 顺带修复：`sevenz-rust2` 0.20.2 把目录写成 K_ANTI 反条目；升级 0.24.2 并写入 Windows 属性
 
 **退出标准**：fuzz 连续 72 小时无崩溃；差分语料 20 个全过；基准有前后对比数据。
 

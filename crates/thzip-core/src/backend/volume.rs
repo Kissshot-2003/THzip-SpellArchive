@@ -52,10 +52,10 @@ pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
         if rest.is_empty() || rest.len() > 4 || !rest.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        if let Ok(index) = rest.parse::<u32>() {
-            if index > 0 {
-                found.insert(index, entry.path());
-            }
+        if let Ok(index) = rest.parse::<u32>()
+            && index > 0
+        {
+            found.insert(index, entry.path());
         }
     }
 

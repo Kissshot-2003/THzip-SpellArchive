@@ -1,0 +1,42 @@
+[package]
+name = "thzip-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+thzip-core = { path = "../crates/thzip-core" }
+
+[[bin]]
+name = "classify"
+path = "fuzz_targets/classify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip_central_directory"
+path = "fuzz_targets/zip_central_directory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sevenz_header"
+path = "fuzz_targets/sevenz_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_header"
+path = "fuzz_targets/tar_header.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

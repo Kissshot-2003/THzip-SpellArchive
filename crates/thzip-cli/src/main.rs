@@ -5,10 +5,11 @@ use thzip_core::ArchiveError;
 use thzip_core::backend;
 use thzip_core::limits::Limits;
 use thzip_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy, PlanWarning};
+use thzip_core::reader::ExtractReport;
 use thzip_core::safety::{ExtractDirSink, VerifySink};
 use thzip_core::secret::SecretString;
 use thzip_core::task::CancelToken;
-use thzip_core::types::{ArchiveKind, EntryId, Method};
+use thzip_core::types::{ArchiveKind, EntryId, EntryKind, Method};
 use thzip_core::writer::{SevenZOptions, scan_inputs, write_entries};
 
 fn main() -> ExitCode {
@@ -27,9 +28,13 @@ fn main() -> ExitCode {
             println!("spell {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Some("sniff") => with_path(&args, sniff),
-        Some("list") => with_path(&args, |path| list(path, password_from(&args))),
-        Some("test") => with_path(&args, |path| test(path, password_from(&args))),
+        Some("sniff") => with_path(&args, |path| sniff(path, has_json(&args))),
+        Some("list") => with_path(&args, |path| {
+            list(path, password_from(&args), has_json(&args))
+        }),
+        Some("test") => with_path(&args, |path| {
+            test(path, password_from(&args), has_json(&args))
+        }),
         Some("extract") => extract(&args),
         Some("pack") => pack(&args),
         Some(other) => {
@@ -62,16 +67,20 @@ fn usage() {
         "thzip — THzip-SpellArchive 命令行
 
 用法:
-  thzip sniff   <文件>                    识别归档格式（magic bytes）
-  thzip list    <文件> [--password <pw>]  列出条目
-  thzip test    <文件> [--password <pw>]  完整性测试（CRC 校验）
-  thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>]
+  thzip sniff   <文件> [--json]           识别归档格式（magic bytes）
+  thzip list    <文件> [--password <pw>] [--json]
+                                          列出条目
+  thzip test    <文件> [--password <pw>] [--json]
+                                          完整性测试（CRC 校验）
+  thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>] [--json]
                                           安全解压；默认跳过已有文件
   thzip pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
                 [--7z-level <0-9>] [--7z-dict <MiB>]
-                [--force] [--append] [--password <pw>]
+                [--force] [--append] [--password <pw>] [--json]
                                           创建 zip / 7z / tar 家族；--password 用于 zip / 7z 加密
   thzip --version
+
+  --json 把结果以单行 JSON 写到 stdout；错误仍写 stderr 并返回非零退出码。
 
 说明:
   - 不带目标目录时解压到「文件所在目录/去扩展名」。
@@ -86,15 +95,24 @@ fn usage() {
     );
 }
 
-fn sniff(path: &Path) -> ExitCode {
+fn sniff(path: &Path, json: bool) -> ExitCode {
     match backend::sniff_file(path) {
         Ok(kind) => {
-            println!("{}: {}", path.display(), kind.label());
-            if kind.is_single_stream() {
-                println!("  （单文件流容器，会解压为单个文件）");
-            }
-            if kind == ArchiveKind::Unknown {
-                println!("  提示：magic bytes 未命中，可能是加密头或未知格式");
+            if json {
+                println!(
+                    "{{\"path\":{},\"format\":{},\"single_stream\":{}}}",
+                    json_escape(&path.display().to_string()),
+                    json_escape(kind.label()),
+                    kind.is_single_stream()
+                );
+            } else {
+                println!("{}: {}", path.display(), kind.label());
+                if kind.is_single_stream() {
+                    println!("  （单文件流容器，会解压为单个文件）");
+                }
+                if kind == ArchiveKind::Unknown {
+                    println!("  提示：magic bytes 未命中，可能是加密头或未知格式");
+                }
             }
             ExitCode::SUCCESS
         }
@@ -105,9 +123,13 @@ fn sniff(path: &Path) -> ExitCode {
     }
 }
 
-fn list(path: &Path, password: Option<SecretString>) -> ExitCode {
+fn list(path: &Path, password: Option<SecretString>, json: bool) -> ExitCode {
     match backend::open(path, password.as_ref()) {
         Ok(reader) => {
+            if json {
+                println!("{}", list_json(path, reader.as_ref()));
+                return ExitCode::SUCCESS;
+            }
             println!(
                 "{}（{}）共 {} 条",
                 path.display(),
@@ -138,25 +160,30 @@ fn list(path: &Path, password: Option<SecretString>) -> ExitCode {
     }
 }
 
-fn test(path: &Path, password: Option<SecretString>) -> ExitCode {
+fn test(path: &Path, password: Option<SecretString>, json: bool) -> ExitCode {
     match backend::open(path, password.as_ref()) {
         Ok(mut reader) => {
+            let kind = reader.kind();
             let cancel = CancelToken::new();
             let mut sink = VerifySink::with_limits(Limits::default());
             match reader.test(&Limits::default(), &cancel, &mut sink) {
                 Ok(report) => {
-                    println!(
-                        "测试完成：成功 {} 条，失败 {} 条，CRC 不符 {} 条，读取 {} 字节",
-                        report.succeeded.len(),
-                        report.failed.len(),
-                        report.crc_mismatch.len(),
-                        report.bytes_written
-                    );
-                    for (id, error) in &report.failed {
-                        println!("  条目 {id} 失败: {error}");
-                    }
-                    for id in &report.crc_mismatch {
-                        println!("  条目 {id} CRC 不符");
+                    if json {
+                        println!("{}", report_json("test", path, kind, None, &report));
+                    } else {
+                        println!(
+                            "测试完成：成功 {} 条，失败 {} 条，CRC 不符 {} 条，读取 {} 字节",
+                            report.succeeded.len(),
+                            report.failed.len(),
+                            report.crc_mismatch.len(),
+                            report.bytes_written
+                        );
+                        for (id, error) in &report.failed {
+                            println!("  条目 {id} 失败: {error}");
+                        }
+                        for id in &report.crc_mismatch {
+                            println!("  条目 {id} CRC 不符");
+                        }
                     }
                     if report.failed.is_empty() && report.crc_mismatch.is_empty() {
                         ExitCode::SUCCESS
@@ -192,6 +219,7 @@ fn extract(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     let password = password_from(args);
+    let json = has_json(args);
     let input = Path::new(input);
 
     let target = match args.get(2) {
@@ -217,7 +245,9 @@ fn extract(args: &[String]) -> ExitCode {
         }
     };
 
-    print_plan(&plan, &target);
+    if !json {
+        print_plan(&plan, &target);
+    }
 
     let decisions = DecisionTable {
         default: if force {
@@ -234,23 +264,31 @@ fn extract(args: &[String]) -> ExitCode {
 
     let cancel = CancelToken::new();
     let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
+    let kind = reader.kind();
 
     match reader.extract(&plan, &decisions, &cancel, &mut sink) {
         Ok(report) => {
-            println!(
-                "解压完成：成功 {} 条，跳过 {} 条，失败 {} 条，CRC 不符 {} 条，写出 {} 字节，耗时 {:.2?}",
-                report.succeeded.len(),
-                report.skipped.len(),
-                report.failed.len(),
-                report.crc_mismatch.len(),
-                report.bytes_written,
-                report.elapsed
-            );
-            for (id, error) in &report.failed {
-                println!("  条目 {id} 失败: {error}");
-            }
-            for id in &report.crc_mismatch {
-                println!("  条目 {id} CRC 不符（文件已保留）");
+            if json {
+                println!(
+                    "{}",
+                    report_json("extract", input, kind, Some(&target), &report)
+                );
+            } else {
+                println!(
+                    "解压完成：成功 {} 条，跳过 {} 条，失败 {} 条，CRC 不符 {} 条，写出 {} 字节，耗时 {:.2?}",
+                    report.succeeded.len(),
+                    report.skipped.len(),
+                    report.failed.len(),
+                    report.crc_mismatch.len(),
+                    report.bytes_written,
+                    report.elapsed
+                );
+                for (id, error) in &report.failed {
+                    println!("  条目 {id} 失败: {error}");
+                }
+                for id in &report.crc_mismatch {
+                    println!("  条目 {id} CRC 不符（文件已保留）");
+                }
             }
             if report.failed.is_empty() {
                 ExitCode::SUCCESS
@@ -311,6 +349,7 @@ fn pack(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let output = Path::new(output);
+    let json = has_json(args);
     let store = args.iter().any(|arg| arg == "--store" || arg == "-s");
     let force = args.iter().any(|arg| arg == "--force" || arg == "-f");
     let append = args.iter().any(|arg| arg == "--append" || arg == "-a");
@@ -464,14 +503,16 @@ fn pack(args: &[String]) -> ExitCode {
         }
         other => other.label().to_owned(),
     };
-    println!(
-        "{}：{} 个条目，原始 {} 字节 → {}（{}）",
-        if append { "追加" } else { "打包" },
-        entries.len(),
-        total,
-        output.display(),
-        detail
-    );
+    if !json {
+        println!(
+            "{}：{} 个条目，原始 {} 字节 → {}（{}）",
+            if append { "追加" } else { "打包" },
+            entries.len(),
+            total,
+            output.display(),
+            detail
+        );
+    }
 
     let cancel = CancelToken::new();
     let created = if append {
@@ -489,7 +530,7 @@ fn pack(args: &[String]) -> ExitCode {
 
     let last_report = std::cell::Cell::new(0u64);
     let progress = |done: u64| {
-        if done.saturating_sub(last_report.get()) >= 64 * 1024 * 1024 {
+        if !json && done.saturating_sub(last_report.get()) >= 64 * 1024 * 1024 {
             last_report.set(done);
             println!("  已读 {done} / {total} 字节");
         }
@@ -502,10 +543,24 @@ fn pack(args: &[String]) -> ExitCode {
 
     match writer.finish() {
         Ok(report) => {
-            println!(
-                "完成：{} 个条目，读入 {} 字节，写出 {} 字节，耗时 {:.2?}",
-                report.entries, report.bytes_in, report.bytes_out, report.elapsed
-            );
+            if json {
+                println!(
+                    "{{\"op\":{},\"path\":{},\"format\":{},\"appended\":{},\"entries\":{},\"bytes_in\":{},\"bytes_out\":{},\"elapsed_ms\":{}}}",
+                    json_escape(if append { "append" } else { "pack" }),
+                    json_escape(&output.display().to_string()),
+                    json_escape(kind.label()),
+                    append,
+                    report.entries,
+                    report.bytes_in,
+                    report.bytes_out,
+                    report.elapsed.as_millis()
+                );
+            } else {
+                println!(
+                    "完成：{} 个条目，读入 {} 字节，写出 {} 字节，耗时 {:.2?}",
+                    report.entries, report.bytes_in, report.bytes_out, report.elapsed
+                );
+            }
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -552,6 +607,141 @@ fn default_target(input: &Path) -> PathBuf {
     }
 }
 
+fn has_json(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--json")
+}
+
+fn json_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn opt_u64(value: Option<u64>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+}
+
+fn opt_u32(value: Option<u32>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+}
+
+fn opt_time(value: Option<std::time::SystemTime>) -> String {
+    value
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or_else(|| "null".to_owned(), |delta| delta.as_secs().to_string())
+}
+
+fn kind_label(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::File => "file",
+        EntryKind::Dir => "dir",
+        EntryKind::Symlink => "symlink",
+        EntryKind::Hardlink => "hardlink",
+        EntryKind::Other => "other",
+    }
+}
+
+fn list_json(path: &Path, reader: &dyn thzip_core::ArchiveReader) -> String {
+    let mut out = String::from("{\"op\":\"list\",\"path\":");
+    out.push_str(&json_escape(&path.display().to_string()));
+    out.push_str(",\"format\":");
+    out.push_str(&json_escape(reader.kind().label()));
+    out.push_str(",\"entries\":[");
+    for (index, entry) in reader.entries().iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"id\":");
+        out.push_str(&entry.id.to_string());
+        out.push_str(",\"name\":");
+        out.push_str(&json_escape(&entry.display));
+        out.push_str(",\"kind\":");
+        out.push_str(&json_escape(kind_label(entry.kind)));
+        out.push_str(",\"size\":");
+        out.push_str(&entry.size.to_string());
+        out.push_str(",\"packed\":");
+        out.push_str(&opt_u64(entry.packed));
+        out.push_str(",\"method\":");
+        out.push_str(&json_escape(entry.method.label()));
+        out.push_str(",\"encrypted\":");
+        out.push_str(if entry.encrypted { "true" } else { "false" });
+        out.push_str(",\"crc32\":");
+        out.push_str(&opt_u32(entry.crc32));
+        out.push_str(",\"mtime\":");
+        out.push_str(&opt_time(entry.mtime));
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
+}
+
+fn report_json(
+    op: &str,
+    path: &Path,
+    kind: ArchiveKind,
+    target: Option<&Path>,
+    report: &ExtractReport,
+) -> String {
+    let mut out = String::from("{\"op\":");
+    out.push_str(&json_escape(op));
+    out.push_str(",\"path\":");
+    out.push_str(&json_escape(&path.display().to_string()));
+    out.push_str(",\"format\":");
+    out.push_str(&json_escape(kind.label()));
+    out.push_str(",\"target\":");
+    out.push_str(
+        &target
+            .map(|target| json_escape(&target.display().to_string()))
+            .unwrap_or_else(|| "null".to_owned()),
+    );
+    out.push_str(",\"ok\":");
+    out.push_str(
+        if report.failed.is_empty() && report.crc_mismatch.is_empty() {
+            "true"
+        } else {
+            "false"
+        },
+    );
+    out.push_str(&format!(
+        ",\"succeeded\":{},\"skipped\":{},\"bytes_written\":{},\"elapsed_ms\":{},\"failed\":[",
+        report.succeeded.len(),
+        report.skipped.len(),
+        report.bytes_written,
+        report.elapsed.as_millis()
+    ));
+    for (index, (id, reason)) in report.failed.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"id\":");
+        out.push_str(&id.to_string());
+        out.push_str(",\"reason\":");
+        out.push_str(&json_escape(&reason.to_string()));
+        out.push('}');
+    }
+    out.push_str("],\"crc_mismatch\":[");
+    for (index, id) in report.crc_mismatch.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&id.to_string());
+    }
+    out.push_str("]}");
+    out
+}
+
 fn report_open_error(err: &ArchiveError) {
     match err {
         ArchiveError::PasswordRequired => {
@@ -559,5 +749,16 @@ fn report_open_error(err: &ArchiveError) {
         }
         ArchiveError::BadPassword => eprintln!("密码错误"),
         other => eprintln!("打开失败: {other}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_escape;
+
+    #[test]
+    fn escapes_quotes_backslashes_and_controls() {
+        assert_eq!(json_escape("a\"b\\c\n"), "\"a\\\"b\\\\c\\n\"");
+        assert_eq!(json_escape("灵梦"), "\"灵梦\"");
     }
 }

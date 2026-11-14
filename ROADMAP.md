@@ -53,7 +53,7 @@
 
 ## 4. Phase 2：产品功能收尾
 
-- [ ] 便携模式：`portable.flag` 或同目录 `themes/` → 配置写 `./config/`
+- [x] 便携模式：`portable.flag` 或同目录 `themes/` → 配置写 `./config/`（含首次迁移）
 - [ ] 归档注释读写（`set_comment` 已在 writer 层，补 UI 与 7z/tar 提示）
 - [ ] 主题包导出（与导入对称，复用安全解压/限额）
 - [ ] 任务模板 TOML（保存常用格式 + 参数 + 目标）
@@ -64,7 +64,7 @@
 
 ## 5. Phase 3：格式与 CLI 增强
 
-- [ ] CLI `--json`：`list` / `test` / `extract` 机读输出
+- [x] CLI `--json`：`sniff` / `list` / `test` / `extract` / `pack` 机读输出（提前完成）
 - [ ] zip 加密 LZMA/XZ 读取（当前明确不支持）
 - [ ] 7z 固实包按压缩字节上报进度（见 HANDOVER 已知问题 20）
 - [ ] 分卷 `.7z.001` 创建

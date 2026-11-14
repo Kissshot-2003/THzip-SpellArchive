@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thzip_core::safety::write_atomic;
@@ -42,7 +42,22 @@ impl Default for Prefs {
 
 impl Prefs {
     pub fn load() -> Self {
-        Self::load_at(config_path(), legacy_config_path())
+        let config = config_path();
+        if let Some(path) = config.as_ref()
+            && path.is_file()
+        {
+            return Self::load_at(config, legacy_config_path());
+        }
+        // 首次便携启动：优先沿用 %APPDATA% 里的新名配置，再退回旧名配置。
+        if is_portable() {
+            let appdata = app_data_dir("THzip-SpellArchive").map(|dir| dir.join("prefs.toml"));
+            let prefs = Self::load_at(appdata, legacy_config_path());
+            if let Some(path) = config.as_ref() {
+                let _ = prefs.save_to(path);
+            }
+            return prefs;
+        }
+        Self::load_at(config, legacy_config_path())
     }
 
     fn load_at(config: Option<PathBuf>, legacy: Option<PathBuf>) -> Self {
@@ -93,8 +108,31 @@ impl Prefs {
     }
 }
 
-/// `%APPDATA%\THzip-SpellArchive\prefs.toml`；没有 APPDATA 时退回当前目录。
+/// 便携配置路径：`<exe 目录>\config\prefs.toml`。
+pub fn portable_config_path(root: &Path) -> PathBuf {
+    root.join("config").join("prefs.toml")
+}
+
+/// exe 同目录存在 `portable.flag` 或 `themes/` 即视为便携模式。
+fn is_portable_dir(dir: &Path) -> bool {
+    dir.join("portable.flag").is_file() || dir.join("themes").is_dir()
+}
+
+pub fn is_portable() -> bool {
+    portable_root().is_some()
+}
+
+fn portable_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.to_path_buf();
+    is_portable_dir(&dir).then_some(dir)
+}
+
+/// 便携模式写 `<exe 目录>\config\`，否则写 `%APPDATA%\THzip-SpellArchive\`。
 pub fn config_path() -> Option<PathBuf> {
+    if let Some(root) = portable_root() {
+        return Some(portable_config_path(&root));
+    }
     config_dir().map(|dir| dir.join("prefs.toml"))
 }
 
@@ -122,7 +160,7 @@ fn app_data_dir(name: &str) -> Option<PathBuf> {
 
 /// 第二实例把“要打开的文件”写在这里，第一实例轮询取走。
 pub fn handoff_path() -> Option<PathBuf> {
-    config_dir().map(|dir| dir.join("handoff.txt"))
+    config_path().map(|path| path.with_file_name("handoff.txt"))
 }
 
 /// 旧名的 handoff 路径：升级期间若旧版仍在运行，把启动参数交给它。
@@ -131,12 +169,45 @@ pub fn legacy_handoff_path() -> Option<PathBuf> {
 }
 
 pub fn log_path() -> Option<PathBuf> {
-    config_dir().map(|dir| dir.join("thzip-spellarchive.log"))
+    config_path().map(|path| path.with_file_name("thzip-spellarchive.log"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::Prefs;
+    use std::path::PathBuf;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "thzip-prefs-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn portable_detection_uses_flag_or_themes() {
+        let dir = temp_dir("portable");
+        assert!(!super::is_portable_dir(&dir));
+
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        assert!(super::is_portable_dir(&dir));
+        std::fs::remove_dir_all(dir.join("themes")).unwrap();
+
+        std::fs::write(dir.join("portable.flag"), b"").unwrap();
+        assert!(super::is_portable_dir(&dir));
+
+        assert_eq!(
+            super::portable_config_path(&dir),
+            dir.join("config").join("prefs.toml")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parses_partial_config_with_defaults() {

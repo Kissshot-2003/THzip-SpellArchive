@@ -18,7 +18,11 @@ fn main() -> eframe::Result<()> {
     let instance = match SingleInstance::new("SpellArchive.v1") {
         Ok(instance) => instance,
         Err(err) => {
-            logging::write(&format!("single-instance failed: {err}"));
+            logging::error_fields(
+                "startup",
+                "single-instance failed",
+                &[("error", &err.to_string())],
+            );
             eprintln!("单实例检查失败: {err}");
             return Ok(());
         }

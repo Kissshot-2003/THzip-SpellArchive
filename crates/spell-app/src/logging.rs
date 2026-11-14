@@ -67,19 +67,18 @@ pub fn write(message: &str) {
     log(Level::Info, "app", message);
 }
 
-pub fn warn(module: &str, message: &str) {
-    log(Level::Warn, module, message);
-}
-
-pub fn error(module: &str, message: &str) {
-    log(Level::Error, module, message);
-}
-
 pub fn debug(module: &str, message: &str) {
     log(Level::Debug, module, message);
 }
 
 pub fn log(level: Level, module: &str, message: &str) {
+    log_fields(level, module, message, &[]);
+}
+
+/// 结构化日志：消息后追加 `key=value` 字段，值含空白/引号/等号时自动加引号。
+///
+/// 例：`[42] [ERROR task] task failed task=3 error="RAR 处理失败: ..."`
+pub fn log_fields(level: Level, module: &str, message: &str, fields: &[(&str, &str)]) {
     let Some(lock) = LOG.get() else {
         return;
     };
@@ -93,17 +92,75 @@ pub fn log(level: Level, module: &str, message: &str) {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
-    let _ = writeln!(file, "{}", format_line(seconds, level, module, message));
+    let _ = writeln!(
+        file,
+        "{}",
+        format_line_with_fields(seconds, level, module, message, fields)
+    );
     let _ = file.flush();
+}
+
+pub fn error_fields(module: &str, message: &str, fields: &[(&str, &str)]) {
+    log_fields(Level::Error, module, message, fields);
+}
+
+pub fn warn_fields(module: &str, message: &str, fields: &[(&str, &str)]) {
+    log_fields(Level::Warn, module, message, fields);
+}
+
+pub fn info_fields(module: &str, message: &str, fields: &[(&str, &str)]) {
+    log_fields(Level::Info, module, message, fields);
 }
 
 fn format_line(seconds: u64, level: Level, module: &str, message: &str) -> String {
     format!("[{seconds}] [{} {module}] {message}", level.label())
 }
 
+fn format_line_with_fields(
+    seconds: u64,
+    level: Level,
+    module: &str,
+    message: &str,
+    fields: &[(&str, &str)],
+) -> String {
+    let mut line = format_line(seconds, level, module, message);
+    for (key, value) in fields {
+        line.push(' ');
+        line.push_str(key);
+        line.push('=');
+        line.push_str(&field_value(value));
+    }
+    line
+}
+
+/// 值含空白、引号、反斜杠或 `=` 时加双引号，并转义内部特殊字符。
+fn field_value(value: &str) -> String {
+    let needs_quotes = value.is_empty()
+        || value
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '"' | '\\' | '='));
+    if !needs_quotes {
+        return value.to_owned();
+    }
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Level, format_line};
+    use super::{Level, field_value, format_line, format_line_with_fields};
 
     #[test]
     fn formats_level_and_module() {
@@ -111,5 +168,28 @@ mod tests {
             format_line(42, Level::Warn, "prefs", "save failed"),
             "[42] [WARN prefs] save failed"
         );
+    }
+
+    #[test]
+    fn appends_structured_fields() {
+        assert_eq!(
+            format_line_with_fields(
+                7,
+                Level::Error,
+                "task",
+                "task failed",
+                &[("task", "3"), ("phase", "extract")],
+            ),
+            "[7] [ERROR task] task failed task=3 phase=extract"
+        );
+    }
+
+    #[test]
+    fn quotes_values_with_spaces_and_escapes() {
+        assert_eq!(field_value("plain"), "plain");
+        assert_eq!(field_value("C:\\Users\\a b"), "\"C:\\\\Users\\\\a b\"");
+        assert_eq!(field_value("say \"hi\"\n"), "\"say \\\"hi\\\"\\n\"");
+        assert_eq!(field_value("a=b"), "\"a=b\"");
+        assert_eq!(field_value(""), "\"\"");
     }
 }

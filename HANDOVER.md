@@ -3,7 +3,7 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
+> 最后更新：2026-11（结构化日志字段、结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
 
 ---
 
@@ -26,12 +26,12 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（112）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（114）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：最新提交 `c2e5a6e`，工作区干净，无远端。
-- **下一步建议**：tracing 日志或代码签名。
+- **下一步建议**：代码签名或 RAR 大条目优化。
 
 ---
 
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 112 个测试
+cargo test --workspace                 # 114 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 112 通过；clippy 无告警。
+12. `cargo test --workspace` 114 通过；clippy 无告警。
 
 ---
 
@@ -638,6 +638,9 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 - `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`（级别/模块前缀）；启动、任务失败、设置保存失败、
   主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
+- 结构化事件用 `log_fields` / `*_fields`：消息后追加 `key=value`，值含空白/引号/等号时自动加引号转义；
+  任务失败记录 `task` / `error`，归档重写记录 `path` / `entries` / `bytes_out`，主题导入记录计数。
+  仍保持零额外依赖，不引入 `tracing`（见 ADR）。
 - 文件浏览器使用 `natural_cmp`：`file2` 排在 `file10` 前，数字段按数值比较。
 - 归档表支持表头排序与多选；排序键和方向写入 `prefs.toml`，重启后保持。
 - 搜索框支持子串、`*`/`?` 通配；`re:` 前缀按正则匹配（不区分大小写，非法正则退回子串）。
@@ -723,14 +726,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **112** 个测试。
+当前共 **114** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
 | `spell-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `spell-app` 单元测试 | 27 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3 |
+| `spell-app` 单元测试 | 29 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
@@ -767,7 +770,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 7 | 已修复 | 排序写入 prefs schema 3；搜索支持子串、`*`/`?` 通配和 `re:` 正则 |
 | 8 | 已修复 | 资源加载支持 SVG 光栅化（8 MiB / 最长边 2048，不加载外部资源） |
 | 9 | 已修复 | `ui/nine_patch.rs` 支持九宫格；`PanelBg` 已用于归档主面板背景 |
-| 10 | 部分修复 | 文本日志已带级别/模块（INFO/WARN/ERROR/DEBUG），未引入 `tracing` |
+| 10 | 已修复 | 文本日志带级别/模块与 `key=value` 结构化字段；未引入 `tracing`，保持零额外依赖 |
 | 11 | 已修复 | schema 3；缺失字段由 serde default 补齐，读入后升级版本号 |
 | 12 | 已修复 | 多文件拖入/多标签页；每个归档独立 reader、搜索与选中集 |
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
@@ -804,7 +807,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### P2 功能
 
-- `tracing` 结构化日志（当前是带级别/模块的文本日志）。
 - 代码签名；Inno 脚本已就绪。
 - RAR 超大条目的性能与磁盘占用优化。
 
@@ -852,7 +854,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 解压接口 | plan → decisions → extract 两阶段 | worker 不能同步询问 UI |
 | 覆盖 | 临时文件 + ReplaceFileW | 直接写会截断原文件 |
 | 任务 | 2 worker + crossbeam-channel | UI 不卡；取消/进度事件统一 |
-| 日志 | 文本文件 + panic hook | 零额外依赖，足够定位用户报错 |
+| 日志 | 文本文件 + panic hook + `key=value` 字段 | 零额外依赖；结构化字段足够定位用户报错 |
 | 文案 | i18n 与主题解耦 | 换素体主题不能丢中文 |
 | 表格 | egui_extras TableBuilder | 手工拼列必然错位 |
 | 工程结构 | workspace，core 零 UI 依赖 | 用 Cargo 强制分层 |

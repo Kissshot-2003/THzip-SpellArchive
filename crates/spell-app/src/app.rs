@@ -362,7 +362,11 @@ impl SpellApp {
         app.refresh_dir();
         // exe 移动或升级后，右键菜单里的旧路径自动修正。
         if let Err(err) = crate::shell_menu::refresh_if_installed(locale) {
-            crate::logging::warn("shell_menu", &format!("refresh failed: {err}"));
+            crate::logging::warn_fields(
+                "shell_menu",
+                "refresh failed",
+                &[("error", &err.to_string())],
+            );
         }
         app.apply_startup(startup);
         app
@@ -666,7 +670,7 @@ impl SpellApp {
             sort_asc: self.sort_asc,
         };
         if let Err(err) = prefs.save() {
-            crate::logging::warn("prefs", &format!("save failed: {err}"));
+            crate::logging::warn_fields("prefs", "save failed", &[("error", &err.to_string())]);
         }
         self.settings_dirty = false;
         self.last_settings_save = Instant::now();
@@ -1424,7 +1428,15 @@ impl SpellApp {
                     view.progress = 1.0;
                     view.detail = Some(summary.clone());
                 }
-                crate::logging::write(&format!("archive rewritten: {}", path.display()));
+                crate::logging::info_fields(
+                    "archive",
+                    "rewritten",
+                    &[
+                        ("path", &path.display().to_string()),
+                        ("entries", &report.entries.to_string()),
+                        ("bytes_out", &report.bytes_out.to_string()),
+                    ],
+                );
                 self.status = summary;
                 if self
                     .pending_rewrite
@@ -1478,7 +1490,16 @@ impl SpellApp {
                     view.progress = 1.0;
                     view.detail = Some(summary.clone());
                 }
-                crate::logging::write(&format!("theme imported from {}", source.display()));
+                crate::logging::info_fields(
+                    "theme",
+                    "imported",
+                    &[
+                        ("source", &source.display().to_string()),
+                        ("ok", &report.succeeded.len().to_string()),
+                        ("skipped", &report.skipped.len().to_string()),
+                        ("failed", &report.failed.len().to_string()),
+                    ],
+                );
                 self.status = if report.failed.is_empty() {
                     summary
                 } else {
@@ -1489,7 +1510,13 @@ impl SpellApp {
                 self.next_theme_check = Instant::now();
             }
             TaskEvent::Failed { task, error } => {
-                crate::logging::error("task", &format!("{task} failed: {error}"));
+                let task_text = task.to_string();
+                let error_text = error.to_string();
+                crate::logging::error_fields(
+                    "task",
+                    "failed",
+                    &[("task", &task_text), ("error", &error_text)],
+                );
                 let text = crate::i18n::errors::reason(self.locale, &error);
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Failed;

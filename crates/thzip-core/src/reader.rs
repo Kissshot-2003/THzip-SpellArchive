@@ -78,6 +78,7 @@ pub trait ArchiveReader: Send {
 
     fn test(
         &mut self,
+        _limits: &Limits,
         _cancel: &CancelToken,
         _sink: &mut dyn ExtractSink,
     ) -> Result<ExtractReport, ArchiveError> {

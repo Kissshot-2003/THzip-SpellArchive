@@ -82,7 +82,7 @@ fn lists_and_extracts_simple_rar() {
     let mut reader = backend::open(&archive, None).unwrap();
     let cancel = CancelToken::new();
     let mut sink = VerifySink::with_limits(Limits::default());
-    let report = reader.test(&cancel, &mut sink).unwrap();
+    let report = reader.test(&Limits::default(), &cancel, &mut sink).unwrap();
     assert_eq!(report.failed.len(), 0);
     assert_eq!(report.crc_mismatch.len(), 0);
 }

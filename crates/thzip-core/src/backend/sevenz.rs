@@ -315,6 +315,7 @@ impl ArchiveReader for SevenZReader {
 
     fn test(
         &mut self,
+        _limits: &Limits,
         cancel: &CancelToken,
         sink: &mut dyn ExtractSink,
     ) -> Result<ExtractReport, ArchiveError> {
@@ -698,7 +699,9 @@ mod tests {
         let archive = make_archive(dir.path());
         let mut reader = SevenZReader::new(&archive, None).unwrap();
         let mut sink = VerifySink::with_limits(Limits::default());
-        let report = reader.test(&CancelToken::new(), &mut sink).unwrap();
+        let report = reader
+            .test(&Limits::default(), &CancelToken::new(), &mut sink)
+            .unwrap();
         assert!(report.failed.is_empty(), "{:?}", report.failed);
         assert!(report.succeeded.len() >= 2);
         assert!(report.crc_mismatch.is_empty());

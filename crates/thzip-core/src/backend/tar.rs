@@ -282,6 +282,7 @@ impl ArchiveReader for TarReader {
 
     fn test(
         &mut self,
+        _limits: &Limits,
         cancel: &CancelToken,
         sink: &mut dyn ExtractSink,
     ) -> Result<ExtractReport, ArchiveError> {

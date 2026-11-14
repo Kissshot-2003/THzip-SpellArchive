@@ -33,6 +33,14 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    // 升级过渡：旧版仍在运行时，把启动参数交给旧版，避免同时开两个窗口。
+    if legacy_instance_running() {
+        logging::write("legacy instance running: handoff");
+        handoff_to_legacy();
+        activate_window("SpellArchive");
+        return Ok(());
+    }
+
     let prefs = prefs::Prefs::load();
     let window_size = prefs
         .window_size
@@ -62,25 +70,44 @@ fn main() -> eframe::Result<()> {
 
 fn handoff_to_existing() {
     let request = startup::StartupRequest::parse(std::env::args().skip(1));
-    if !request.paths.is_empty() {
-        if let Some(handoff) = prefs::handoff_path() {
-            if let Some(parent) = handoff.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&handoff, request.to_handoff());
-        }
+    write_handoff(prefs::handoff_path(), &request);
+    activate_window("THzip-SpellArchive");
+}
+
+/// 旧版正在运行时，把启动参数写到旧 AppData 的 handoff 并激活旧窗口。
+fn handoff_to_legacy() {
+    let request = startup::StartupRequest::parse(std::env::args().skip(1));
+    write_handoff(prefs::legacy_handoff_path(), &request);
+}
+
+fn write_handoff(path: Option<std::path::PathBuf>, request: &startup::StartupRequest) {
+    let Some(path) = path else {
+        return;
+    };
+    if request.paths.is_empty() {
+        return;
     }
-    activate_existing_window();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, request.to_handoff());
+}
+
+fn legacy_instance_running() -> bool {
+    match SingleInstance::new("SpellArchive.v1") {
+        Ok(instance) => !instance.is_single(),
+        Err(_) => false,
+    }
 }
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn activate_existing_window() {
+fn activate_window(window_title: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow,
     };
 
-    let title: Vec<u16> = "THzip-SpellArchive\0".encode_utf16().collect();
+    let title: Vec<u16> = window_title.encode_utf16().chain(Some(0)).collect();
     let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
     if !hwnd.is_null() {
         unsafe {
@@ -91,4 +118,4 @@ fn activate_existing_window() {
 }
 
 #[cfg(not(windows))]
-fn activate_existing_window() {}
+fn activate_window(_window_title: &str) {}

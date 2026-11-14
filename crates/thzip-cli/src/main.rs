@@ -143,7 +143,7 @@ fn test(path: &Path, password: Option<SecretString>) -> ExitCode {
         Ok(mut reader) => {
             let cancel = CancelToken::new();
             let mut sink = VerifySink::with_limits(Limits::default());
-            match reader.test(&cancel, &mut sink) {
+            match reader.test(&Limits::default(), &cancel, &mut sink) {
                 Ok(report) => {
                     println!(
                         "测试完成：成功 {} 条，失败 {} 条，CRC 不符 {} 条，读取 {} 字节",

@@ -122,7 +122,9 @@ fn single_stream_roundtrip() {
 
         let mut reader = backend::open(&archive, None).unwrap();
         let mut verify = thzip_core::safety::VerifySink::with_limits(limits);
-        let report = reader.test(&CancelToken::new(), &mut verify).unwrap();
+        let report = reader
+            .test(&Limits::default(), &CancelToken::new(), &mut verify)
+            .unwrap();
         assert!(report.failed.is_empty(), "{kind:?}: {:?}", report.failed);
         assert_eq!(report.succeeded.len(), 1);
     }

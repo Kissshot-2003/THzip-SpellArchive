@@ -340,6 +340,7 @@ impl ArchiveReader for ZipReader {
 
     fn test(
         &mut self,
+        limits: &Limits,
         cancel: &CancelToken,
         sink: &mut dyn ExtractSink,
     ) -> Result<ExtractReport, ArchiveError> {
@@ -360,7 +361,7 @@ impl ArchiveReader for ZipReader {
                 continue;
             }
 
-            let mut zip_file = match self.open_entry(entry.id, Limits::default().max_dict_size) {
+            let mut zip_file = match self.open_entry(entry.id, limits.max_dict_size) {
                 Ok(file) => file,
                 Err(err) => {
                     let _ = sink.on_entry_end(entry.id, false);

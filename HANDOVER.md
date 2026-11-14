@@ -206,6 +206,7 @@ spell_archive/
 main
  ├─ SingleInstance::new("THzip-SpellArchive.v1")
  │   └─ 非首实例：把启动参数写入 handoff.txt → 激活已有窗口 → 退出
+ │   └─ 旧版仍在运行：写入旧 AppData handoff → 激活旧窗口 → 退出（改名过渡）
  └─ run_native（首实例）
      └─ ThzipApp::new
          ├─ install_cjk_fonts          # simhei.ttf → Deng.ttf
@@ -411,7 +412,7 @@ pub trait ArchiveReader: Send {
     fn plan(&self, ids: &[EntryId], target: &Path, limits: &Limits) -> Result<ExtractPlan, ArchiveError>;
     fn extract(&mut self, plan: &ExtractPlan, decisions: &DecisionTable,
                cancel: &CancelToken, sink: &mut dyn ExtractSink) -> Result<ExtractReport, ArchiveError>;
-    fn test(&mut self, cancel: &CancelToken, sink: &mut dyn ExtractSink) -> Result<ExtractReport, ArchiveError>;
+    fn test(&mut self, limits: &Limits, cancel: &CancelToken, sink: &mut dyn ExtractSink) -> Result<ExtractReport, ArchiveError>;
 }
 ```
 
@@ -652,7 +653,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 7.14 日志与自然排序
 
 - `logging.rs` 写 `%APPDATA%\THzip-SpellArchive\thzip-spellarchive.log`（级别/模块前缀）；启动、任务失败、设置保存失败、
-  主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
+  主题导入、panic 都会落盘；超过 5 MiB 时启动阶段与运行期都会截断重写。
 - 结构化事件用 `log_fields` / `*_fields`：消息后追加 `key=value`，值含空白/引号/等号时自动加引号转义；
   任务失败记录 `task` / `error`，归档重写记录 `path` / `entries` / `bytes_out`，主题导入记录计数。
   仍保持零额外依赖，不引入 `tracing`（见 ADR）。

@@ -88,6 +88,14 @@ pub fn log_fields(level: Level, module: &str, message: &str, fields: &[(&str, &s
     let Some(file) = guard.as_mut() else {
         return;
     };
+    // 运行期也遵守 5 MiB 上限：超过后清空重写，避免长会话无限增长。
+    if file
+        .metadata()
+        .map(|meta| meta.len() > MAX_LOG_BYTES)
+        .unwrap_or(false)
+    {
+        let _ = file.set_len(0);
+    }
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())

@@ -216,7 +216,7 @@ fn test_command_verifies_crc() {
     let mut reader = backend::open(&archive, None).unwrap();
     let cancel = CancelToken::new();
     let mut sink = thzip_core::safety::VerifySink::with_limits(Limits::default());
-    let report = reader.test(&cancel, &mut sink).unwrap();
+    let report = reader.test(&Limits::default(), &cancel, &mut sink).unwrap();
     assert_eq!(report.failed.len(), 0);
     assert_eq!(report.crc_mismatch.len(), 0);
 }
@@ -258,7 +258,7 @@ fn non_deflate_methods_read_and_extract() {
         let mut reader = backend::open(&archive, None).unwrap();
         let cancel = CancelToken::new();
         let mut sink = thzip_core::safety::VerifySink::with_limits(Limits::default());
-        let report = reader.test(&cancel, &mut sink).unwrap();
+        let report = reader.test(&Limits::default(), &cancel, &mut sink).unwrap();
         assert_eq!(report.failed.len(), 0, "{zip_method:?}");
         assert_eq!(report.crc_mismatch.len(), 0, "{zip_method:?}");
     }
@@ -357,7 +357,7 @@ fn lzma_and_deflate64_fixtures_extract() {
         let mut reader = backend::open(&archive, None).unwrap();
         let cancel = CancelToken::new();
         let mut sink = thzip_core::safety::VerifySink::with_limits(Limits::default());
-        let report = reader.test(&cancel, &mut sink).unwrap();
+        let report = reader.test(&Limits::default(), &cancel, &mut sink).unwrap();
         assert_eq!(report.failed.len(), 0, "{file}");
         assert_eq!(report.crc_mismatch.len(), 0, "{file}");
     }

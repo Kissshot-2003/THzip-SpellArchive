@@ -125,6 +125,11 @@ pub fn handoff_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("handoff.txt"))
 }
 
+/// 旧名的 handoff 路径：升级期间若旧版仍在运行，把启动参数交给它。
+pub fn legacy_handoff_path() -> Option<PathBuf> {
+    legacy_config_dir().map(|dir| dir.join("handoff.txt"))
+}
+
 pub fn log_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("thzip-spellarchive.log"))
 }

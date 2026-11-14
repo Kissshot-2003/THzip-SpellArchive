@@ -70,7 +70,7 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 
 - 把 `%APPDATA%\SpellArchive\prefs.toml` 复制到 `%APPDATA%\THzip-SpellArchive\prefs.toml`（主题、语言、目录、排序、窗口大小保留）。
 - 如果检测到旧 `SpellArchive` 资源管理器右键菜单，会按新名重装并删除旧注册表键。
-- exe 名、单实例键、日志文件名已更新；新旧版本不会互相转交启动参数。
+- exe 名、单实例键、日志文件名已更新；升级期间若旧版仍在运行，新版会把启动参数交给旧版，待旧版退出后再启动新版。
 - 自定义主题包在旧安装目录时，请复制到新目录的 `themes/` 或重新导入。
 
 ## 设计文档

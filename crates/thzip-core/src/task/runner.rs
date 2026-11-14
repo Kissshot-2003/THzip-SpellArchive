@@ -312,7 +312,7 @@ fn run_task(
             let sink = VerifySink::with_limits(limits);
             let mut sink = ProgressSink::new(sink, tx.clone(), task);
             let mut guard = lock_reader(&reader);
-            match guard.test(cancel, &mut sink) {
+            match guard.test(&limits, cancel, &mut sink) {
                 Ok(report) => {
                     send(
                         tx,

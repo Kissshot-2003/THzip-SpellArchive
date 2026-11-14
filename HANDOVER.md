@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（128）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（129）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -85,7 +85,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 128 个测试
+cargo test --workspace                 # 129 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p thzip-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 128 通过；clippy 无告警。
+12. `cargo test --workspace` 129 通过；clippy 无告警。
 
 ---
 
@@ -417,6 +417,7 @@ pub trait ArchiveReader: Send {
 ```
 
 `ExtractSink::on_data` 是唯一写盘/计数点；预算、进度、CRC 都挂这里。
+所有条目结束后后端调用 `ExtractSink::finish()`，用于恢复目录 mtime。
 
 ### 5.3 创建契约
 
@@ -759,7 +760,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **128** 个测试。
+当前共 **129** 个测试。
 
 ### 9.2 测试分布
 
@@ -772,7 +773,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/zip_write.rs` | 9 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
-| `tests/tar_write.rs` | 5 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消、目录 mtime 保留 |
+| `tests/tar_write.rs` | 5 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消、目录 mtime 保留、解压恢复目录 mtime |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
 | `tests/sevenz_write.rs` | 7 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝、重名条目、追加取消 |
 
@@ -818,7 +819,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 22 | 部分修复 | 7z 已可调 LZMA2 级别/字典；固实块仍未暴露（库的逐条 API 只能非固实） | 换 `push_archive_entries` 或等库暴露固实配置 |
 | 23 | 已修复 | 缺卷时错误信息列出缺失卷号 |
 | 24 | 单文件流打开时先解压一遍求大小 | 大文件打开/解压读两遍 | 列表尺寸懒加载或显示“未知” |
-| 25 | 部分修复 | 解压统一恢复 mtime；tar 写入按只读属性生成 444/644、目录 555/755，并保留目录 mtime |
+| 25 | 已修复 | 解压收尾阶段按深度倒序恢复目录 mtime；tar 写入按只读属性生成 444/644、目录 555/755 |
 | 26 | 部分修复 | tar 家族支持追加（解包重建 + 原子替换），仍不支持加密 | 加密不在 tar 规范内，保持不支持 |
 | 27 | 已修复 | 多卷自动定位第一卷；大条目临时文件中转，无 512 MiB 硬上限 |
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |

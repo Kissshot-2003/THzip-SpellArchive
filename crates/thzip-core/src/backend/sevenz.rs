@@ -307,6 +307,7 @@ impl ArchiveReader for SevenZReader {
         }
         result.map_err(map_sz_error)?;
 
+        let _ = sink.finish();
         report.bytes_written = sink.bytes_written();
         report.crc_mismatch = sink.take_crc_mismatch();
         report.elapsed = start.elapsed();

@@ -285,3 +285,37 @@ fn tar_append_preserves_directory_mtime() {
         .unwrap();
     assert!(diff < std::time::Duration::from_secs(2), "{diff:?}");
 }
+
+#[test]
+fn tar_extract_restores_directory_mtime() {
+    let dir = TempDir::new("extract-dir-mtime");
+    let src = build_source(dir.path());
+    let limits = Limits::default();
+    let archive = dir.path().join("dir-mtime.tar.gz");
+    let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
+    thzip_core::safety::set_mtime(&src.join("子目录"), stamp).unwrap();
+    let entries = scan_inputs(std::slice::from_ref(&src), &limits).unwrap();
+    let mut writer = backend::create_writer(&archive, ArchiveKind::TarGz, Method::Store).unwrap();
+    write_entries(
+        writer.as_mut(),
+        &entries,
+        None,
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    let actual = std::fs::metadata(target.join("素材/子目录"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let diff = actual
+        .duration_since(stamp)
+        .or_else(|_| stamp.duration_since(actual))
+        .unwrap();
+    assert!(diff < std::time::Duration::from_secs(2), "{diff:?}");
+}

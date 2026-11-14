@@ -20,6 +20,8 @@ pub struct ExtractDirSink {
     current: Option<CurrentEntry>,
     pub bytes_written: u64,
     pub crc_mismatch: Vec<EntryId>,
+    /// 目录条目在子项写完后统一恢复 mtime。
+    dir_times: Vec<(PathBuf, SystemTime)>,
 }
 
 enum CurrentEntry {
@@ -43,6 +45,7 @@ impl ExtractDirSink {
             current: None,
             bytes_written: 0,
             crc_mismatch: Vec::new(),
+            dir_times: Vec::new(),
         }
     }
 
@@ -64,6 +67,9 @@ impl ExtractSink for ExtractDirSink {
 
         if entry.kind.is_dir() {
             ensure_safe_dir(&path)?;
+            if let Some(time) = entry.mtime {
+                self.dir_times.push((path, time));
+            }
             self.current = Some(CurrentEntry::Dir);
             return Ok(());
         }
@@ -123,6 +129,16 @@ impl ExtractSink for ExtractDirSink {
 
     fn take_crc_mismatch(&mut self) -> Vec<EntryId> {
         std::mem::take(&mut self.crc_mismatch)
+    }
+
+    fn finish(&mut self) -> Result<(), SinkError> {
+        // 子项写入会不断刷新父目录 mtime；全部结束后按深度倒序恢复。
+        self.dir_times
+            .sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+        for (path, time) in self.dir_times.drain(..) {
+            let _ = set_mtime(&path, time);
+        }
+        Ok(())
     }
 
     fn on_entry_end(&mut self, id: EntryId, ok: bool) -> Result<(), SinkError> {

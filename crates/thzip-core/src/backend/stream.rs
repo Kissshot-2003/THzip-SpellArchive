@@ -188,6 +188,7 @@ impl ArchiveReader for StreamReader {
             Err(err) => report.failed.push((entry.id, err.reason())),
         }
 
+        let _ = sink.finish();
         report.bytes_written = sink.bytes_written();
         report.crc_mismatch = sink.take_crc_mismatch();
         report.elapsed = start.elapsed();

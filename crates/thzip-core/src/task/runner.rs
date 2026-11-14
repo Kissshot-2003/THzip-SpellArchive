@@ -781,4 +781,8 @@ impl<S: ExtractSink> ExtractSink for ProgressSink<S> {
     fn take_crc_mismatch(&mut self) -> Vec<EntryId> {
         self.inner.take_crc_mismatch()
     }
+
+    fn finish(&mut self) -> Result<(), crate::error::SinkError> {
+        self.inner.finish()
+    }
 }

@@ -274,6 +274,7 @@ impl ArchiveReader for TarReader {
             record_entry(sink, ours.id, ok, &mut report);
         }
 
+        let _ = sink.finish();
         report.bytes_written = sink.bytes_written();
         report.crc_mismatch = sink.take_crc_mismatch();
         report.elapsed = start.elapsed();

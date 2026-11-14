@@ -332,6 +332,7 @@ impl ArchiveReader for ZipReader {
             finish_entry(sink, item.id, entry_ok, &mut report)?;
         }
 
+        let _ = sink.finish();
         report.bytes_written = sink.bytes_written();
         report.crc_mismatch = sink.take_crc_mismatch();
         report.elapsed = start.elapsed();

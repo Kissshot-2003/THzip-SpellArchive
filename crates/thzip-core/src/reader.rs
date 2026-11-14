@@ -41,6 +41,11 @@ pub trait ExtractSink {
     fn take_crc_mismatch(&mut self) -> Vec<EntryId> {
         Vec::new()
     }
+
+    /// 所有条目处理结束后的收尾（例如恢复目录 mtime）。默认无操作。
+    fn finish(&mut self) -> Result<(), SinkError> {
+        Ok(())
+    }
 }
 
 pub trait ArchiveReader: Send {

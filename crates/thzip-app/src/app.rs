@@ -14,7 +14,7 @@ use thzip_core::secret::SecretString;
 use thzip_core::task::{
     CancelToken, SharedReader, TaskEvent, TaskId, TaskOp, TaskPhase, TaskRunner,
 };
-use thzip_core::types::{ArchiveEntry, ArchiveKind, Method};
+use thzip_core::types::{ArchiveEntry, ArchiveKind, EntryId, Method};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
@@ -78,6 +78,18 @@ pub struct ArchiveTab {
 pub struct DirItem {
     pub name: String,
     pub is_dir: bool,
+}
+
+pub struct PreviewView {
+    pub id: EntryId,
+    pub name: String,
+    pub data: Arc<[u8]>,
+    pub truncated: bool,
+    pub failed: Option<thzip_core::error::FailReason>,
+    pub loading: bool,
+    pub text: Option<String>,
+    pub image: Option<([usize; 2], Vec<u8>)>,
+    pub texture: Option<egui::TextureHandle>,
 }
 
 pub struct TaskView {
@@ -249,6 +261,7 @@ pub struct ThzipApp {
     pub reader: Option<SharedReader>,
     pub entries: Vec<ArchiveEntry>,
     pub comment: Option<String>,
+    pub preview: Option<PreviewView>,
     pub search: String,
     pub focus_search: bool,
     pub selected: std::collections::BTreeSet<usize>,
@@ -328,6 +341,7 @@ impl ThzipApp {
             reader: None,
             entries: Vec::new(),
             comment: None,
+            preview: None,
             search: String::new(),
             focus_search: false,
             selected: std::collections::BTreeSet::new(),
@@ -854,6 +868,37 @@ impl ThzipApp {
         let task_name = self.tr.tf(TextKey::TaskExportTheme, &[("name", &name)]);
         self.push_task(handle, task_name);
         self.status = self.tr.t(TextKey::ExportingTheme);
+    }
+
+    /// 双击条目时读取该条目到内存，弹窗预览文本或 PNG。
+    pub fn preview_entry(&mut self, index: usize) {
+        let Some(reader) = self.reader.clone() else {
+            return;
+        };
+        let Some(entry) = self.entries.get(index).cloned() else {
+            return;
+        };
+        if entry.kind.is_dir() {
+            return;
+        }
+        let id = entry.id;
+        self.runner.submit(TaskOp::Preview {
+            reader,
+            id,
+            limits: self.limits,
+            max_bytes: 512 * 1024,
+        });
+        self.preview = Some(PreviewView {
+            id,
+            name: entry.display.to_string(),
+            data: Arc::<[u8]>::from(Vec::new()),
+            truncated: false,
+            failed: None,
+            loading: true,
+            text: None,
+            image: None,
+            texture: None,
+        });
     }
 
     pub fn open_path(&mut self, path: PathBuf, password: Option<SecretString>) {
@@ -1483,6 +1528,43 @@ impl ThzipApp {
                     TextKey::SummaryLine,
                     &[("label", &label), ("summary", &summary)],
                 );
+            }
+            TaskEvent::PreviewReady {
+                id,
+                data,
+                truncated,
+                failed,
+                ..
+            } => {
+                let Some(preview) = self.preview.as_mut() else {
+                    return;
+                };
+                if preview.id != id {
+                    return;
+                }
+                preview.loading = false;
+                preview.truncated = truncated;
+                preview.failed = failed;
+                preview.data = data;
+                let lower = preview.name.to_ascii_lowercase();
+                if lower.ends_with(".png") {
+                    if let Ok(image) = image::load_from_memory(&preview.data) {
+                        let rgba = image.to_rgba8();
+                        preview.image = Some((
+                            [rgba.width() as usize, rgba.height() as usize],
+                            rgba.into_raw(),
+                        ));
+                    }
+                } else {
+                    let limit = 64 * 1024;
+                    let slice = &preview.data[..preview.data.len().min(limit)];
+                    if let Ok(text) = std::str::from_utf8(slice) {
+                        if preview.data.len() > limit {
+                            preview.truncated = true;
+                        }
+                        preview.text = Some(text.to_owned());
+                    }
+                }
             }
             TaskEvent::Rewritten { task, path, report } => {
                 let summary = self.tr.tf(

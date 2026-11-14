@@ -100,6 +100,14 @@ pub enum TaskEvent {
         report: Arc<FinishReport>,
         append: bool,
     },
+    /// 单条目预览数据已读入内存。
+    PreviewReady {
+        task: TaskId,
+        id: EntryId,
+        data: Arc<[u8]>,
+        truncated: bool,
+        failed: Option<FailReason>,
+    },
     /// 归档重写完成（删除条目）。
     Rewritten {
         task: TaskId,

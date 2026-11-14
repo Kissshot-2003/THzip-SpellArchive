@@ -44,7 +44,7 @@
 THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
 当前 **zip / 7z / tar 家族可读写，RAR 可读，单文件流可读**；GUI 覆盖打开、后台预检、解压、测试、取消、
 冲突跳过/覆盖/改名/自动编号、创建/追加、zip 多压缩方法与注释、7z 级别/字典、密码、后台主题包导入/导出、主题懒加载、
-多标签页、主题粒子、多选与表头排序（持久化）、删除选中条目、重命名/移动/批量改名模板/正则改名（目录自动带上子项）、设置持久化（含便携模式）、拖拽打开与悬停提示、单实例转交、
+多标签页、主题粒子、多选与表头排序（持久化）、删除选中条目、重命名/移动/批量改名模板/正则改名（目录自动带上子项）、设置持久化（含便携模式）、双击预览、拖拽打开与悬停提示、单实例转交、
 关闭到托盘、本地化托盘菜单、中英文全量界面（对话框/状态栏/任务/右键菜单）、内嵌 CJK 字体、右键菜单自检、主题热重载、日志/崩溃落盘。
 
 ### 1.2 能力矩阵
@@ -87,7 +87,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 135 个测试
+cargo test --workspace                 # 136 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 135 通过；clippy 无告警。
+12. `cargo test --workspace` 136 通过；clippy 无告警。
 
 ---
 
@@ -776,7 +776,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **135** 个测试。
+当前共 **136** 个测试。
 
 ### 9.2 测试分布
 
@@ -788,7 +788,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/zip_backend.rs` | 13 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime、压缩比预检 |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 10 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建、注释往返 |
-| `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
+| `tests/task_runner.rs` | 10 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件、预览截断 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
 | `tests/tar_write.rs` | 6 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消、目录 mtime 保留、解压恢复目录 mtime |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
@@ -925,7 +925,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（135 通过）
+- [ ] `cargo test --workspace`（136 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

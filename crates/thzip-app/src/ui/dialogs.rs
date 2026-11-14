@@ -14,6 +14,79 @@ pub fn show(app: &mut ThzipApp, ctx: &egui::Context) {
     precheck(app, ctx);
     pack_dialog(app, ctx);
     relocate_dialog(app, ctx);
+    preview_window(app, ctx);
+}
+
+fn preview_window(app: &mut ThzipApp, ctx: &egui::Context) {
+    if app.preview.is_none() {
+        return;
+    }
+    let palette = app.themes.current().palette;
+    let title_prefix = app.tr.t(TextKey::Preview);
+    let loading = app.tr.t(TextKey::PreviewLoading);
+    let binary = app.tr.t(TextKey::PreviewBinary);
+    let truncated_note = app.tr.t(TextKey::PreviewTruncated);
+    let name = app
+        .preview
+        .as_ref()
+        .map(|preview| preview.name.clone())
+        .unwrap_or_default();
+    let mut open = true;
+    egui::Window::new(format!("{title_prefix} - {name}"))
+        .open(&mut open)
+        .resizable(true)
+        .default_size([640.0, 480.0])
+        .show(ctx, |ui| {
+            let Some(preview) = app.preview.as_mut() else {
+                return;
+            };
+            if preview.loading {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(loading.clone());
+                });
+                return;
+            }
+            if let Some(reason) = &preview.failed {
+                ui.label(egui::RichText::new(reason.to_string()).color(palette.error));
+            }
+            if preview.texture.is_none()
+                && let Some((size, rgba)) = &preview.image
+            {
+                let image = egui::ColorImage::from_rgba_unmultiplied(*size, rgba);
+                preview.texture = Some(ui.ctx().load_texture(
+                    "preview-image",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+            if let Some(texture) = &preview.texture {
+                let texture_size = texture.size_vec2();
+                let available = ui.available_size();
+                let scale = (available.x / texture_size.x)
+                    .min(available.y / texture_size.y)
+                    .min(1.0);
+                ui.image((texture.id(), texture_size * scale));
+            } else if let Some(text) = &preview.text {
+                egui::ScrollArea::both()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(text).monospace())
+                                .selectable(true),
+                        );
+                    });
+            } else {
+                ui.label(binary.clone());
+                ui.label(format_bytes(preview.data.len() as u64));
+            }
+            if preview.truncated {
+                ui.label(egui::RichText::new(truncated_note.clone()).color(palette.warning));
+            }
+        });
+    if !open {
+        app.preview = None;
+    }
 }
 
 fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {

@@ -10,7 +10,7 @@ use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
 use crate::reader::{ArchiveReader, ExtractSink};
-use crate::safety::{ExtractDirSink, VerifySink};
+use crate::safety::{ExtractDirSink, MemorySink, VerifySink};
 use crate::secret::SecretString;
 use crate::task::event::{CancelToken, TaskEvent, TaskId, TaskPhase};
 use crate::task::worker;
@@ -41,6 +41,13 @@ pub enum TaskOp {
     Test {
         reader: SharedReader,
         limits: Limits,
+    },
+    /// 读取单个条目到内存用于预览；超过 `max_bytes` 只保留前缀。
+    Preview {
+        reader: SharedReader,
+        id: EntryId,
+        limits: Limits,
+        max_bytes: u64,
     },
     Pack {
         output: PathBuf,
@@ -340,6 +347,102 @@ fn run_task(
                     );
                 }
             }
+        }
+        TaskOp::Preview {
+            reader,
+            id,
+            limits,
+            max_bytes,
+        } => {
+            send(
+                tx,
+                TaskEvent::PhaseChanged {
+                    task,
+                    phase: TaskPhase::Running,
+                },
+            );
+            let mut guard = lock_reader(&reader);
+            let Some(entry) = guard.entries().get(id as usize).cloned() else {
+                send(
+                    tx,
+                    TaskEvent::Failed {
+                        task,
+                        error: FailReason::EntryMissing { id },
+                    },
+                );
+                return Ok(());
+            };
+            if entry.kind.is_dir() {
+                send(
+                    tx,
+                    TaskEvent::PreviewReady {
+                        task,
+                        id,
+                        data: Arc::<[u8]>::from(Vec::new()),
+                        truncated: false,
+                        failed: None,
+                    },
+                );
+                return Ok(());
+            }
+
+            let target = std::env::temp_dir();
+            let plan = match guard.plan(&[id], &target, &limits) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.reason(),
+                        },
+                    );
+                    return Ok(());
+                }
+            };
+            let decisions = DecisionTable {
+                default: OverwritePolicy::Skip,
+                ..Default::default()
+            };
+            let mut sink = MemorySink::new(max_bytes);
+            let report = match guard.extract(&plan, &decisions, cancel, &mut sink) {
+                Ok(report) => report,
+                Err(err) => {
+                    send(
+                        tx,
+                        TaskEvent::Failed {
+                            task,
+                            error: err.reason(),
+                        },
+                    );
+                    return Ok(());
+                }
+            };
+            let (data, truncated, ok) = sink.into_parts();
+            let failed = if ok {
+                report.failed.first().map(|(_, reason)| reason.clone())
+            } else {
+                Some(FailReason::ChecksumFailed {
+                    format: "archive".to_owned(),
+                })
+            };
+            send(
+                tx,
+                TaskEvent::PreviewReady {
+                    task,
+                    id,
+                    data: Arc::<[u8]>::from(data),
+                    truncated,
+                    failed,
+                },
+            );
+            send(
+                tx,
+                TaskEvent::PhaseChanged {
+                    task,
+                    phase: TaskPhase::Done,
+                },
+            );
         }
         TaskOp::Pack {
             output,

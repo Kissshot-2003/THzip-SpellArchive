@@ -455,3 +455,54 @@ fn missing_password_reports_need_password() {
         TaskEvent::Failed { error, .. } if !error.to_string().is_empty()
     )));
 }
+
+#[test]
+fn preview_reads_prefix_and_truncates() {
+    let dir = TempDir::new("preview");
+    let archive = dir.path().join("preview.zip");
+    write_zip(&archive, &[("a.txt", b"hello world")]);
+
+    let mut runner = TaskRunner::new(1);
+    let open = runner.submit(TaskOp::Open {
+        path: archive,
+        password: None,
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::Opened { task, .. } | TaskEvent::Failed { task, .. } if *task == open.id
+        )
+    });
+    let reader = events
+        .iter()
+        .find_map(|event| match event {
+            TaskEvent::Opened { reader, .. } => Some(reader.clone()),
+            _ => None,
+        })
+        .expect("archive should open");
+
+    let preview = runner.submit(TaskOp::Preview {
+        reader,
+        id: 0,
+        limits: thzip_core::Limits::default(),
+        max_bytes: 4,
+    });
+    let events = pump_until(&runner, Instant::now() + Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            TaskEvent::PreviewReady { task, .. } | TaskEvent::Failed { task, .. }
+                if *task == preview.id
+        )
+    });
+    let (data, truncated) = events
+        .iter()
+        .find_map(|event| match event {
+            TaskEvent::PreviewReady {
+                data, truncated, ..
+            } => Some((data.clone(), *truncated)),
+            _ => None,
+        })
+        .expect("preview should finish");
+    assert_eq!(&data[..], b"hell");
+    assert!(truncated);
+}

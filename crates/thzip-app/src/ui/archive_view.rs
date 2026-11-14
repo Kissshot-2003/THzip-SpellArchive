@@ -247,6 +247,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 .texture(ResKey::IconArchiveEncrypted)
                 .map(|tex| tex.id());
             let mut clicked = None;
+            let mut preview_index = None;
             let mut header_click = None;
             let modifiers = ui.input(|input| input.modifiers);
             let additive = modifiers.command || modifiers.ctrl;
@@ -392,6 +393,9 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                             if response.clicked() {
                                 row_clicked = true;
                             }
+                            if response.double_clicked() {
+                                preview_index = Some(index);
+                            }
                         });
                         if row_clicked {
                             clicked = Some((index, row.index()));
@@ -468,6 +472,10 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                     app.selected.insert(index);
                 }
                 app.last_selected = Some(index);
+            }
+
+            if let Some(index) = preview_index {
+                app.preview_entry(index);
             }
 
             if delete_selected {

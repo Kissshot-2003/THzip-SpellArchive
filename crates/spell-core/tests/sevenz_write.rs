@@ -7,7 +7,7 @@ use spell_core::plan::{DecisionTable, OverwritePolicy};
 use spell_core::safety::ExtractDirSink;
 use spell_core::task::CancelToken;
 use spell_core::types::{ArchiveKind, EntryId, Method};
-use spell_core::writer::{scan_inputs, write_entries};
+use spell_core::writer::{SevenZOptions, scan_inputs, write_entries};
 
 struct TempDir(PathBuf);
 
@@ -111,6 +111,44 @@ fn sevenz_writes_and_extracts() {
         vec![1u8, 2, 3]
     );
     assert!(target.join("素材/空目录").is_dir());
+}
+
+#[test]
+fn sevenz_custom_level_and_dictionary_roundtrip() {
+    let dir = TempDir::new("options");
+    let src = build_source(dir.path());
+    let archive = dir.path().join("options.7z");
+    let limits = Limits::default();
+    let entries = scan_inputs(&[src], &limits).unwrap();
+    let options = SevenZOptions {
+        level: 9,
+        dict_size: 16 * 1024 * 1024,
+    };
+    let mut writer = backend::create_writer_with_options(
+        &archive,
+        ArchiveKind::SevenZ,
+        Method::Deflate,
+        None,
+        options,
+    )
+    .unwrap();
+    write_entries(
+        writer.as_mut(),
+        &entries,
+        Some(Method::Deflate),
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target, None);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("素材/说明.txt")).unwrap(),
+        "灵梦 7z 写入".as_bytes()
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -15,7 +15,7 @@ use crate::secret::SecretString;
 use crate::task::event::{CancelToken, TaskEvent, TaskId, TaskPhase};
 use crate::task::worker;
 use crate::types::{ArchiveEntry, ArchiveKind, EntryId, Method};
-use crate::writer::{scan_inputs, write_entries};
+use crate::writer::{SevenZOptions, scan_inputs, write_entries};
 
 /// 打开后的归档由 UI 与 worker 共享；worker 执行解压 / 测试时短暂持锁。
 pub type SharedReader = Arc<Mutex<Box<dyn ArchiveReader>>>;
@@ -49,12 +49,14 @@ pub enum TaskOp {
         method: Method,
         append: bool,
         password: Option<SecretString>,
+        sevenz: SevenZOptions,
     },
-    /// 删除归档内指定条目（重写并原子替换）。
+    /// 重写归档：删除 `remove` 中的条目，并把 `rename` 中的条目改成新名字。
     Rewrite {
         path: PathBuf,
         kind: ArchiveKind,
         remove: Vec<EntryId>,
+        rename: Vec<(EntryId, String)>,
         limits: Limits,
     },
     /// 把主题包解压到目标 themes 目录；冲突默认跳过。
@@ -344,6 +346,7 @@ fn run_task(
             method,
             append,
             password,
+            sevenz,
         } => {
             if append && password.is_some() {
                 send(
@@ -389,7 +392,13 @@ fn run_task(
             let created = if append {
                 backend::create_writer_append(&output, kind, method)
             } else {
-                backend::create_writer_with(&output, kind, method, password.as_ref())
+                backend::create_writer_with_options(
+                    &output,
+                    kind,
+                    method,
+                    password.as_ref(),
+                    sevenz,
+                )
             };
             let mut writer = match created {
                 Ok(writer) => writer,
@@ -467,6 +476,7 @@ fn run_task(
             path,
             kind,
             remove,
+            rename,
             limits,
         } => {
             send(
@@ -477,6 +487,7 @@ fn run_task(
                 },
             );
             let remove: HashSet<EntryId> = remove.into_iter().collect();
+            let rename: HashMap<EntryId, String> = rename.into_iter().collect();
             let progress_state = std::cell::RefCell::new((Instant::now(), 0u64));
             let progress_tx = tx.clone();
             let progress = |done: u64| {
@@ -494,8 +505,8 @@ fn run_task(
                     });
                 }
             };
-            match crate::backend::rewrite::rewrite_without(
-                &path, kind, &remove, limits, cancel, &progress,
+            match crate::backend::rewrite::rewrite_with_names(
+                &path, kind, &remove, &rename, limits, cancel, &progress,
             ) {
                 Ok(report) => {
                     send(

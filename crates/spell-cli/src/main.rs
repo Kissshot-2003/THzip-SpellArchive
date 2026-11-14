@@ -9,7 +9,7 @@ use spell_core::safety::{ExtractDirSink, VerifySink};
 use spell_core::secret::SecretString;
 use spell_core::task::CancelToken;
 use spell_core::types::{ArchiveKind, EntryId, Method};
-use spell_core::writer::{scan_inputs, write_entries};
+use spell_core::writer::{SevenZOptions, scan_inputs, write_entries};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -68,8 +68,9 @@ fn usage() {
   spell extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>]
                                           安全解压；默认跳过已有文件
   spell pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
+                [--7z-level <0-9>] [--7z-dict <MiB>]
                 [--force] [--append] [--password <pw>]
-                                          创建 zip / tar 家族；--password 仅用于 zip AES-256
+                                          创建 zip / 7z / tar 家族；--password 用于 zip / 7z 加密
   spell --version
 
 说明:
@@ -78,6 +79,7 @@ fn usage() {
     都不加则跳过冲突条目。
   - 支持 zip / 7z / tar 家族读写；7z 与 zip 可加密。
   - --method 只影响 zip：deflate（默认）/ bzip2 / zstd；--store 优先。
+  - --7z-level / --7z-dict 只影响 7z：级别 0–9（默认 6），字典 MiB（0 = 自动）。
   - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
   - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
@@ -321,6 +323,32 @@ fn pack(args: &[String]) -> ExitCode {
         .and_then(|index| args.get(index + 1))
         .map(|value| value.to_ascii_lowercase());
     let password = password_from(args);
+    let mut sevenz_level = 6u32;
+    if let Some(index) = args.iter().position(|arg| arg == "--7z-level") {
+        match args
+            .get(index + 1)
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            Some(level) if level <= 9 => sevenz_level = level,
+            _ => {
+                eprintln!("--7z-level 需要 0–9 的整数");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let mut sevenz_dict_mib = 0u32;
+    if let Some(index) = args.iter().position(|arg| arg == "--7z-dict") {
+        match args
+            .get(index + 1)
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            Some(mib) if mib <= 1024 => sevenz_dict_mib = mib,
+            _ => {
+                eprintln!("--7z-dict 需要 0–1024 的整数（MiB，0 = 自动）");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     let mut inputs = Vec::new();
     let mut skip_value = false;
     for arg in args.iter().skip(2) {
@@ -328,7 +356,13 @@ fn pack(args: &[String]) -> ExitCode {
             skip_value = false;
             continue;
         }
-        if arg == "--password" || arg == "-p" || arg == "--method" || arg == "-m" {
+        if arg == "--password"
+            || arg == "-p"
+            || arg == "--method"
+            || arg == "-m"
+            || arg == "--7z-level"
+            || arg == "--7z-dict"
+        {
             skip_value = true;
             continue;
         }
@@ -406,6 +440,10 @@ fn pack(args: &[String]) -> ExitCode {
         Method::Deflate
     };
 
+    let sevenz = SevenZOptions {
+        level: sevenz_level,
+        dict_size: sevenz_dict_mib.saturating_mul(1024 * 1024),
+    };
     let detail = match kind {
         ArchiveKind::Zip => {
             let mut detail = format!("zip · {}", method.label());
@@ -416,6 +454,12 @@ fn pack(args: &[String]) -> ExitCode {
         }
         ArchiveKind::SevenZ => {
             let mut detail = format!("7z · {}", if store { "COPY" } else { "LZMA2" });
+            if !store {
+                detail.push_str(&format!(" · L{sevenz_level}"));
+                if sevenz_dict_mib > 0 {
+                    detail.push_str(&format!(" · 字典 {sevenz_dict_mib} MiB"));
+                }
+            }
             if password.is_some() {
                 detail.push_str(" + AES-256");
             }
@@ -435,7 +479,7 @@ fn pack(args: &[String]) -> ExitCode {
     let created = if append {
         backend::create_writer_append(output, kind, method)
     } else {
-        backend::create_writer_with(output, kind, method, password.as_ref())
+        backend::create_writer_with_options(output, kind, method, password.as_ref(), sevenz)
     };
     let mut writer = match created {
         Ok(writer) => writer,

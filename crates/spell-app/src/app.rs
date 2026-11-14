@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -7,6 +8,7 @@ use crate::startup::{StartupIntent, StartupRequest, add_output, extract_target};
 use crate::theme::ThemeStore;
 use crate::tray::{Tray, TrayAction};
 use eframe::egui;
+use spell_core::SevenZOptions;
 use spell_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy};
 use spell_core::secret::SecretString;
 use spell_core::task::{
@@ -147,17 +149,59 @@ impl ZipPackMethod {
     }
 }
 
-#[derive(Default)]
 pub struct PackState {
     pub sources: Vec<PathBuf>,
     pub output: String,
     pub store: bool,
     pub zip_method: ZipPackMethod,
+    pub sevenz_level: u32,
+    pub sevenz_dict_mib: u32,
     pub append: bool,
     pub encrypt: bool,
     pub password: String,
     pub error: Option<String>,
     pub confirm_overwrite: bool,
+}
+
+impl Default for PackState {
+    fn default() -> Self {
+        Self {
+            sources: Vec::new(),
+            output: String::new(),
+            store: false,
+            zip_method: ZipPackMethod::default(),
+            sevenz_level: 6,
+            sevenz_dict_mib: 0,
+            append: false,
+            encrypt: false,
+            password: String::new(),
+            error: None,
+            confirm_overwrite: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelocateMode {
+    Rename,
+    Move,
+    BatchRename,
+}
+
+pub struct RelocateDialog {
+    pub mode: RelocateMode,
+    pub input: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) enum RelocateError {
+    NoSelection,
+    OneOnly,
+    Invalid,
+    Duplicate(String),
+    Nested,
+    NoChange,
 }
 
 pub struct SpellApp {
@@ -196,6 +240,7 @@ pub struct SpellApp {
     pub tasks: Vec<TaskView>,
     pub pending_password: Option<PendingPassword>,
     pub pending_extract: Option<PendingExtract>,
+    pub relocate: Option<RelocateDialog>,
     pub show_pack: bool,
     pub pack_state: PackState,
 
@@ -235,6 +280,7 @@ impl SpellApp {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
         let theme_signature = crate::theme::loader::signature();
         let tray = Tray::new(&tr);
+        let status_ready = tr.t(TextKey::StatusReady);
 
         let mut app = Self {
             tr,
@@ -273,9 +319,10 @@ impl SpellApp {
             tasks: Vec::new(),
             pending_password: None,
             pending_extract: None,
+            relocate: None,
             show_pack: false,
             pack_state: PackState::default(),
-            status: "就绪".to_owned(),
+            status: status_ready,
             limits: spell_core::Limits::default(),
             settings_dirty: false,
             last_settings_save: Instant::now(),
@@ -289,7 +336,7 @@ impl SpellApp {
         app.themes.apply(&cc.egui_ctx);
         app.refresh_dir();
         // exe 移动或升级后，右键菜单里的旧路径自动修正。
-        if let Err(err) = crate::shell_menu::refresh_if_installed() {
+        if let Err(err) = crate::shell_menu::refresh_if_installed(locale) {
             crate::logging::warn("shell_menu", &format!("refresh failed: {err}"));
         }
         app.apply_startup(startup);
@@ -340,7 +387,10 @@ impl SpellApp {
             self.themes.ensure_loaded(ctx);
             self.tr.set_theme(self.themes.current());
             self.themes.apply(ctx);
-            self.status = format!("已切换到主题：{}", self.themes.current().name);
+            self.status = self.tr.tf(
+                TextKey::ThemeSwitched,
+                &[("name", &self.themes.current().name)],
+            );
             self.touch_settings();
         }
     }
@@ -350,6 +400,22 @@ impl SpellApp {
         if let Some(tray) = Tray::new(&self.tr) {
             self.tray = Some(tray);
         }
+    }
+
+    /// 同步界面语言：翻译器、状态栏、托盘菜单与已安装的右键菜单。
+    pub fn sync_locale(&mut self) {
+        if self.locale == self.tr.locale {
+            return;
+        }
+        self.tr.locale = self.locale;
+        self.status = self.tr.t(TextKey::StatusReady);
+        self.rebuild_tray();
+        if crate::shell_menu::is_installed() {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = crate::shell_menu::install(&exe, self.locale);
+            }
+        }
+        self.touch_settings();
     }
 
     pub fn touch_settings(&mut self) {
@@ -413,7 +479,8 @@ impl SpellApp {
         self.tabs[self.active_tab] = current;
         self.active_tab = index;
         self.restore_active_tab(target);
-        self.status = format!("切换到：{}", self.tab_title(index));
+        let name = self.tab_title(index);
+        self.status = self.tr.tf(TextKey::TabSwitched, &[("name", &name)]);
     }
 
     pub fn close_tab(&mut self, index: usize) {
@@ -455,7 +522,8 @@ impl SpellApp {
                 self.active_tab -= 1;
             }
         }
-        self.status = format!("已关闭标签页，剩余 {} 个", self.tabs.len());
+        let remaining = self.tabs.len().to_string();
+        self.status = self.tr.tf(TextKey::TabClosed, &[("count", &remaining)]);
     }
 
     /// 打开归档成功时决定是替换当前标签还是新开一个。
@@ -550,7 +618,7 @@ impl SpellApp {
         self.themes = themes;
         self.tr.set_theme(self.themes.current());
         self.themes.apply(ctx);
-        self.status = "主题文件已重新加载".to_owned();
+        self.status = self.tr.t(TextKey::ThemeReloaded);
     }
 
     fn maybe_save_settings(&mut self) {
@@ -615,7 +683,8 @@ impl SpellApp {
     pub fn navigate(&mut self, path: PathBuf) {
         self.dir = path;
         self.refresh_dir();
-        self.status = format!("目录：{}", self.dir.display());
+        let dir = self.dir.display().to_string();
+        self.status = self.tr.tf(TextKey::DirectoryStatus, &[("path", &dir)]);
         self.touch_settings();
     }
 
@@ -667,13 +736,15 @@ impl SpellApp {
             .and_then(|path| path.parent())
             .map(PathBuf::from)
             .unwrap_or_else(|| self.dir.clone());
+        let archives_filter = self.tr.t(TextKey::FilterArchives);
+        let all_filter = self.tr.t(TextKey::FilterAll);
         let picked = rfd::FileDialog::new()
             .set_directory(start)
             .add_filter(
-                "归档",
+                archives_filter,
                 &["zip", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "lz4"],
             )
-            .add_filter("全部文件", &["*"])
+            .add_filter(all_filter, &["*"])
             .pick_file();
         if let Some(path) = picked {
             self.open_path(path, None);
@@ -682,15 +753,16 @@ impl SpellApp {
 
     /// 导入 zip 主题包：要求包内是一级目录 + theme.toml（以及 png/）。
     pub fn import_theme_dialog(&mut self) {
+        let filter = self.tr.t(TextKey::FilterThemePack);
         let Some(path) = rfd::FileDialog::new()
             .set_directory(&self.dir)
-            .add_filter("主题包", &["zip"])
+            .add_filter(filter, &["zip"])
             .pick_file()
         else {
             return;
         };
         let Some(themes_root) = crate::theme::loader::themes_root() else {
-            self.status = "找不到 themes 目录".to_owned();
+            self.status = self.tr.t(TextKey::ThemeDirMissing);
             return;
         };
 
@@ -700,15 +772,17 @@ impl SpellApp {
             target: themes_root,
             limits: self.limits,
         });
-        self.push_task(handle, format!("导入主题：{name}"));
-        self.status = "正在后台导入主题包…".to_owned();
+        let task_name = self.tr.tf(TextKey::TaskImportTheme, &[("name", &name)]);
+        self.push_task(handle, task_name);
+        self.status = self.tr.t(TextKey::ImportingTheme);
     }
 
     pub fn open_path(&mut self, path: PathBuf, password: Option<SecretString>) {
         let name = file_name(&path);
-        self.status = format!("正在打开：{name}");
+        self.status = self.tr.tf(TextKey::OpeningFile, &[("name", &name)]);
         let handle = self.runner.submit(TaskOp::Open { path, password });
-        self.push_task(handle, format!("打开：{name}"));
+        let task_name = self.tr.tf(TextKey::TaskOpen, &[("name", &name)]);
+        self.push_task(handle, task_name);
     }
 
     /// 解压前预检：选目标目录、生成计划，交给确认弹窗。
@@ -744,8 +818,9 @@ impl SpellApp {
             target,
             limits: self.limits,
         });
-        self.push_task(handle, format!("预检：{name}"));
-        self.status = "正在后台预检…".to_owned();
+        let task_name = self.tr.tf(TextKey::TaskPrecheck, &[("name", &name)]);
+        self.push_task(handle, task_name);
+        self.status = self.tr.t(TextKey::Prechecking);
     }
 
     /// 删除归档内选中的条目：确认后关闭当前 reader，后台重写并重新打开。
@@ -758,15 +833,17 @@ impl SpellApp {
             return;
         };
         if self.selected.is_empty() {
-            self.status = "请先选择要删除的条目".to_owned();
+            self.status = self.tr.t(TextKey::SelectBeforeDelete);
             return;
         }
         let count = self.selected.len();
+        let title = self.tr.t(TextKey::DeleteTitle);
+        let text = self
+            .tr
+            .tf(TextKey::DeleteConfirm, &[("count", &count.to_string())]);
         let result = rfd::MessageDialog::new()
-            .set_title("删除归档条目")
-            .set_description(format!(
-                "确定从归档中删除 {count} 个条目？\n归档会被重写，原文件在成功前保持不变。"
-            ))
+            .set_title(title)
+            .set_description(text)
             .set_level(rfd::MessageLevel::Warning)
             .set_buttons(rfd::MessageButtons::YesNo)
             .show();
@@ -782,11 +859,99 @@ impl SpellApp {
             path: path.clone(),
             kind,
             remove,
+            rename: Vec::new(),
             limits: self.limits,
         });
         self.pending_rewrite = Some((handle.id, path));
-        self.push_task(handle, format!("删除条目：{name}"));
-        self.status = format!("正在重写归档，删除 {count} 个条目…");
+        let task_name = self.tr.tf(TextKey::TaskDelete, &[("name", &name)]);
+        self.push_task(handle, task_name);
+        let count_text = count.to_string();
+        self.status = self.tr.tf(TextKey::Rewriting, &[("count", &count_text)]);
+    }
+
+    /// 打开重命名 / 移动对话框；真正写盘在后台重写任务里完成。
+    pub fn begin_relocate(&mut self, mode: RelocateMode) {
+        if self.selected.is_empty() {
+            self.status = self.tr.t(TextKey::RelocateNoSelection);
+            return;
+        }
+        if mode == RelocateMode::Rename && self.selected.len() != 1 {
+            self.status = self.tr.t(TextKey::RelocateOneOnly);
+            return;
+        }
+        let input = match mode {
+            RelocateMode::Rename => self
+                .selected
+                .iter()
+                .next()
+                .and_then(|&index| self.entries.get(index))
+                .map(|entry| entry.display.to_string())
+                .unwrap_or_default(),
+            RelocateMode::Move => String::new(),
+            RelocateMode::BatchRename => "{name}_{n}".to_owned(),
+        };
+        self.relocate = Some(RelocateDialog {
+            mode,
+            input,
+            error: None,
+        });
+    }
+
+    pub fn apply_relocate(&mut self) {
+        let Some(dialog) = self.relocate.as_ref() else {
+            return;
+        };
+        let mode = dialog.mode;
+        let input = dialog.input.clone();
+        let Some(path) = self.archive_path.clone() else {
+            self.relocate = None;
+            self.status = self.tr.t(TextKey::EmptyArchive);
+            return;
+        };
+        let Some(kind) = self.archive_kind else {
+            return;
+        };
+
+        match build_relocate(&self.entries, &self.selected, mode, &input) {
+            Ok(rename) => {
+                let count = rename.len();
+                let name = self.archive_name.clone();
+                // 释放文件句柄，Windows 才能在任务最后由 ReplaceFileW 原子替换。
+                self.reader = None;
+                let handle = self.runner.submit(TaskOp::Rewrite {
+                    path: path.clone(),
+                    kind,
+                    remove: Vec::new(),
+                    rename,
+                    limits: self.limits,
+                });
+                self.pending_rewrite = Some((handle.id, path));
+                self.relocate = None;
+                let task_name = self.tr.tf(TextKey::TaskRelocate, &[("name", &name)]);
+                self.push_task(handle, task_name);
+                let count_text = count.to_string();
+                self.status = self.tr.tf(TextKey::Relocating, &[("count", &count_text)]);
+            }
+            Err(err) => {
+                let text = self.relocate_error_text(&err);
+                if let Some(dialog) = self.relocate.as_mut() {
+                    dialog.error = Some(text);
+                }
+            }
+        }
+    }
+
+    fn relocate_error_text(&self, err: &RelocateError) -> String {
+        match err {
+            RelocateError::NoSelection => self.tr.t(TextKey::RelocateNoSelection),
+            RelocateError::OneOnly => self.tr.t(TextKey::RelocateOneOnly),
+            RelocateError::Invalid => self.tr.t(TextKey::RelocateInvalid),
+            RelocateError::Duplicate(name) => {
+                self.tr.tf(TextKey::RelocateDuplicate, &[("name", name)])
+            }
+            RelocateError::Nested => self.tr.t(TextKey::RelocateNested),
+            RelocateError::NoChange => self.tr.t(TextKey::RelocateNoChange),
+        }
     }
 
     pub fn start_extract(&mut self) {
@@ -806,8 +971,12 @@ impl SpellApp {
             decisions,
             limits: self.limits,
         });
-        self.push_task(handle, format!("解压：{name}"));
-        self.status = format!("开始解压到：{}", target.display());
+        let task_name = self.tr.tf(TextKey::TaskExtract, &[("name", &name)]);
+        self.push_task(handle, task_name);
+        let target_text = target.display().to_string();
+        self.status = self
+            .tr
+            .tf(TextKey::ExtractStarted, &[("path", &target_text)]);
     }
 
     pub fn open_pack_dialog(&mut self) {
@@ -824,18 +993,19 @@ impl SpellApp {
         };
         self.show_pack = true;
         if !self.pack_state.sources.is_empty() {
-            self.status = format!(
-                "准备打包 {} 个输入到 {}",
-                self.pack_state.sources.len(),
-                self.pack_state.output
+            let count = self.pack_state.sources.len().to_string();
+            self.status = self.tr.tf(
+                TextKey::PackReady,
+                &[("count", &count), ("path", &self.pack_state.output)],
             );
         }
     }
 
     pub fn pack_add_files(&mut self) {
+        let title = self.tr.t(TextKey::ChoosePackFiles);
         let Some(files) = rfd::FileDialog::new()
             .set_directory(&self.dir)
-            .set_title("选择要打包的文件")
+            .set_title(title)
             .pick_files()
         else {
             return;
@@ -849,9 +1019,10 @@ impl SpellApp {
     }
 
     pub fn pack_add_folder(&mut self) {
+        let title = self.tr.t(TextKey::ChoosePackFolder);
         let Some(folder) = rfd::FileDialog::new()
             .set_directory(&self.dir)
-            .set_title("选择要打包的文件夹")
+            .set_title(title)
             .pick_folder()
         else {
             return;
@@ -891,13 +1062,15 @@ impl SpellApp {
 
     pub fn pack_start(&mut self) {
         if self.pack_state.sources.is_empty() {
-            self.pack_state.error = Some("请先添加文件或文件夹".to_owned());
+            let message = self.tr.t(TextKey::PackErrNoSources);
+            self.pack_state.error = Some(message);
             return;
         }
 
         let text = self.pack_state.output.trim();
         if text.is_empty() {
-            self.pack_state.error = Some("请填写输出文件路径".to_owned());
+            let message = self.tr.t(TextKey::PackErrNoOutput);
+            self.pack_state.error = Some(message);
             return;
         }
         let mut output = PathBuf::from(text);
@@ -905,46 +1078,51 @@ impl SpellApp {
             output.set_extension("zip");
         }
         let Some(kind) = kind_for_output(&output) else {
-            self.pack_state.error = Some(
-                "不支持的输出格式；可用 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4"
-                    .to_owned(),
-            );
+            let message = self.tr.t(TextKey::PackErrUnsupported);
+            self.pack_state.error = Some(message);
             return;
         };
 
         if output.is_dir() {
-            self.pack_state.error = Some("输出路径是一个文件夹，请指定文件名".to_owned());
+            let message = self.tr.t(TextKey::PackErrOutputIsDir);
+            self.pack_state.error = Some(message);
             return;
         }
 
         let append = self.pack_state.append;
         if append && kind != ArchiveKind::Zip {
-            self.pack_state.error = Some("追加模式只支持 zip".to_owned());
+            let message = self.tr.t(TextKey::PackErrAppendZipOnly);
+            self.pack_state.error = Some(message);
             return;
         }
 
         if append {
             if !output.is_file() {
-                self.pack_state.error = Some("追加模式要求目标 zip 已存在".to_owned());
+                let message = self.tr.t(TextKey::PackErrAppendMissing);
+                self.pack_state.error = Some(message);
                 return;
             }
         } else if output.exists() && !self.pack_state.confirm_overwrite {
             self.pack_state.confirm_overwrite = true;
-            self.pack_state.error = Some("目标已存在；再次点击「开始打包」将覆盖它".to_owned());
+            let message = self.tr.t(TextKey::PackErrConfirmOverwrite);
+            self.pack_state.error = Some(message);
             return;
         }
 
         let encrypt = self.pack_state.encrypt;
         if encrypt && !matches!(kind, ArchiveKind::Zip | ArchiveKind::SevenZ) {
-            self.pack_state.error = Some("只有 zip / 7z 支持加密写入".to_owned());
+            let message = self.tr.t(TextKey::PackErrEncryptUnsupported);
+            self.pack_state.error = Some(message);
             return;
         }
         if append && encrypt {
-            self.pack_state.error = Some("追加模式暂不支持设置新密码".to_owned());
+            let message = self.tr.t(TextKey::PackErrAppendPassword);
+            self.pack_state.error = Some(message);
             return;
         }
         if encrypt && self.pack_state.password.is_empty() {
-            self.pack_state.error = Some("启用加密时必须填写密码".to_owned());
+            let message = self.tr.t(TextKey::PackErrPasswordRequired);
+            self.pack_state.error = Some(message);
             return;
         }
 
@@ -961,10 +1139,15 @@ impl SpellApp {
             None
         };
         let name = file_name(&output);
+        let output_text = output.display().to_string();
         self.status = if append {
-            format!("追加到：{}", output.display())
+            self.tr.tf(TextKey::AppendingTo, &[("path", &output_text)])
         } else {
-            format!("打包到：{}", output.display())
+            self.tr.tf(TextKey::PackingTo, &[("path", &output_text)])
+        };
+        let sevenz = SevenZOptions {
+            level: self.pack_state.sevenz_level.min(9),
+            dict_size: self.pack_state.sevenz_dict_mib.saturating_mul(1024 * 1024),
         };
         let handle = self.runner.submit(TaskOp::Pack {
             output,
@@ -973,11 +1156,15 @@ impl SpellApp {
             method,
             append,
             password,
+            sevenz,
         });
-        self.push_task(
-            handle,
-            format!("{}：{name}", if append { "追加" } else { "打包" }),
-        );
+        let task_key = if append {
+            TextKey::TaskAppend
+        } else {
+            TextKey::TaskPack
+        };
+        let task_name = self.tr.tf(task_key, &[("name", &name)]);
+        self.push_task(handle, task_name);
         self.show_pack = false;
         self.pack_state.password.clear();
         self.pack_state.error = None;
@@ -993,8 +1180,9 @@ impl SpellApp {
             reader,
             limits: self.limits,
         });
-        self.push_task(handle, format!("测试：{name}"));
-        self.status = format!("开始完整性测试：{name}");
+        let task_name = self.tr.tf(TextKey::TaskTest, &[("name", &name)]);
+        self.push_task(handle, task_name);
+        self.status = self.tr.tf(TextKey::TestStarted, &[("name", &name)]);
     }
 
     fn push_task(&mut self, handle: spell_core::task::TaskHandle, name: String) {
@@ -1043,14 +1231,16 @@ impl SpellApp {
                 self.search.clear();
                 self.selected.clear();
                 self.last_selected = None;
-                self.status = format!(
-                    "已打开 {}：{} 个条目",
-                    self.archive_name,
-                    self.entries.len()
-                );
                 let count = self.entries.len();
+                let count_text = count.to_string();
+                let name = self.archive_name.clone();
+                self.status = self.tr.tf(
+                    TextKey::ArchiveOpened,
+                    &[("name", &name), ("count", &count_text)],
+                );
+                let detail = self.tr.tf(TextKey::EntryCount, &[("count", &count_text)]);
                 if let Some(task) = self.task_mut(task) {
-                    task.detail = Some(format!("{count} 个条目"));
+                    task.detail = Some(detail);
                 }
 
                 if let Some(request) = self.startup.take() {
@@ -1067,10 +1257,11 @@ impl SpellApp {
             }
             TaskEvent::NeedPassword { task, path } => {
                 let name = file_name(&path);
-                self.status = format!("{name} 需要密码");
+                self.status = self.tr.tf(TextKey::PasswordNeededFor, &[("name", &name)]);
+                let detail = self.tr.t(TextKey::PasswordNeeded);
                 if let Some(task) = self.task_mut(task) {
                     task.phase = TaskPhase::Failed;
-                    task.detail = Some("需要密码".to_owned());
+                    task.detail = Some(detail);
                 }
                 self.pending_password = Some(PendingPassword {
                     path,
@@ -1091,12 +1282,18 @@ impl SpellApp {
                 total_bytes,
                 total_entries,
             } => {
+                let detail = (total_entries > 0).then(|| {
+                    self.tr.tf(
+                        TextKey::EntryCount,
+                        &[("count", &total_entries.to_string())],
+                    )
+                });
                 if let Some(view) = self.task_mut(task) {
                     view.total = total_bytes;
                     view.written = 0;
                     view.phase = TaskPhase::Running;
-                    if total_entries > 0 && view.detail.is_none() {
-                        view.detail = Some(format!("{total_entries} 个条目"));
+                    if view.detail.is_none() {
+                        view.detail = detail;
                     }
                 }
             }
@@ -1126,12 +1323,14 @@ impl SpellApp {
                 }
             }
             TaskEvent::Finished { task, report } => {
-                let summary = format!(
-                    "成功 {} · 跳过 {} · 失败 {} · CRC {}",
-                    report.succeeded.len(),
-                    report.skipped.len(),
-                    report.failed.len(),
-                    report.crc_mismatch.len()
+                let summary = self.tr.tf(
+                    TextKey::ExtractSummary,
+                    &[
+                        ("ok", &report.succeeded.len().to_string()),
+                        ("skipped", &report.skipped.len().to_string()),
+                        ("failed", &report.failed.len().to_string()),
+                        ("crc", &report.crc_mismatch.len().to_string()),
+                    ],
                 );
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Done;
@@ -1142,37 +1341,43 @@ impl SpellApp {
                         view.written = report.bytes_written;
                     }
                 }
-                self.status = format!("任务完成：{summary}");
+                self.status = self.tr.tf(TextKey::TaskFinished, &[("summary", &summary)]);
             }
             TaskEvent::PackFinished {
                 task,
                 report,
                 append,
             } => {
-                let summary = format!(
-                    "{} 个条目 · {} → {}",
-                    report.entries,
-                    crate::ui::format_bytes(report.bytes_in),
-                    crate::ui::format_bytes(report.bytes_out)
+                let summary = self.tr.tf(
+                    TextKey::PackSummary,
+                    &[
+                        ("entries", &report.entries.to_string()),
+                        ("bytes_in", &crate::ui::format_bytes(report.bytes_in)),
+                        ("bytes_out", &crate::ui::format_bytes(report.bytes_out)),
+                    ],
                 );
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Done;
                     view.progress = 1.0;
                     view.detail = Some(summary.clone());
                 }
-                self.status = format!(
-                    "{}：{summary}",
-                    if append {
-                        "追加完成"
-                    } else {
-                        "打包完成"
-                    }
+                let label = if append {
+                    self.tr.t(TextKey::AppendDone)
+                } else {
+                    self.tr.t(TextKey::PackDone)
+                };
+                self.status = self.tr.tf(
+                    TextKey::SummaryLine,
+                    &[("label", &label), ("summary", &summary)],
                 );
             }
             TaskEvent::Rewritten { task, path, report } => {
-                let summary = format!(
-                    "重写完成：{} 个条目 · {} 字节",
-                    report.entries, report.bytes_out
+                let summary = self.tr.tf(
+                    TextKey::RewriteSummary,
+                    &[
+                        ("entries", &report.entries.to_string()),
+                        ("bytes", &report.bytes_out.to_string()),
+                    ],
                 );
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Done;
@@ -1196,13 +1401,17 @@ impl SpellApp {
                 target,
                 reader,
             } => {
-                self.status = format!(
-                    "预检完成：{} 个条目，解压后 {}",
-                    plan.items.len(),
-                    crate::ui::format_bytes(plan.total_bytes)
+                let count = plan.items.len();
+                let size = crate::ui::format_bytes(plan.total_bytes);
+                self.status = self.tr.tf(
+                    TextKey::PrecheckSummary,
+                    &[("count", &count.to_string()), ("size", &size)],
                 );
+                let detail = self
+                    .tr
+                    .tf(TextKey::EntryCount, &[("count", &count.to_string())]);
                 if let Some(view) = self.task_mut(task) {
-                    view.detail = Some(format!("{} 个条目", plan.items.len()));
+                    view.detail = Some(detail);
                 }
                 self.pending_extract = Some(PendingExtract {
                     plan: (*plan).clone(),
@@ -1216,11 +1425,13 @@ impl SpellApp {
                 report,
                 source,
             } => {
-                let summary = format!(
-                    "主题包：成功 {} · 跳过 {} · 失败 {}",
-                    report.succeeded.len(),
-                    report.skipped.len(),
-                    report.failed.len()
+                let summary = self.tr.tf(
+                    TextKey::ThemePackSummary,
+                    &[
+                        ("ok", &report.succeeded.len().to_string()),
+                        ("skipped", &report.skipped.len().to_string()),
+                        ("failed", &report.failed.len().to_string()),
+                    ],
                 );
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Done;
@@ -1231,7 +1442,8 @@ impl SpellApp {
                 self.status = if report.failed.is_empty() {
                     summary
                 } else {
-                    format!("{summary}（部分条目失败）")
+                    self.tr
+                        .tf(TextKey::PartialFailure, &[("summary", &summary)])
                 };
                 // 让下一次主题热重载轮询立即生效。
                 self.next_theme_check = Instant::now();
@@ -1260,7 +1472,7 @@ impl SpellApp {
                     self.pending_rewrite = None;
                     self.open_path(path, None);
                 }
-                self.status = format!("任务失败：{error}");
+                self.status = self.tr.tf(TextKey::TaskFailed, &[("error", &error)]);
             }
         }
     }
@@ -1322,7 +1534,9 @@ impl eframe::App for SpellApp {
             self.open_path((*file).clone(), None);
         }
         if files.len() > 1 {
-            self.status = format!("正在打开 {} 个归档（各占一个标签页）", files.len());
+            self.status = self
+                .tr
+                .tf(TextKey::OpeningMany, &[("count", &files.len().to_string())]);
         }
 
         self.poll_tray(&ctx);
@@ -1415,6 +1629,162 @@ fn file_name(path: &std::path::Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// 拆分文件名与扩展名；隐藏文件（`.gitignore`）不把点当扩展名分隔符。
+fn split_name(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(position) if position > 0 => (&name[..position], &name[position + 1..]),
+        _ => (name, ""),
+    }
+}
+
+/// 展开批量改名模板：`{name}` 原名、`{n}` 序号、`{ext}` 扩展名。
+///
+/// 文件默认保留原扩展名；模板里写了 `{ext}` 则由模板决定扩展名。
+fn expand_batch_name(
+    pattern: &str,
+    root: &str,
+    is_dir: bool,
+    number: usize,
+) -> Result<String, RelocateError> {
+    if pattern.trim().is_empty() {
+        return Err(RelocateError::Invalid);
+    }
+    let name = root.rsplit('/').next().unwrap_or(root);
+    let (stem, ext) = if is_dir { (name, "") } else { split_name(name) };
+    let mut result = pattern
+        .replace("{name}", stem)
+        .replace("{n}", &number.to_string())
+        .replace("{ext}", ext);
+    if !is_dir && !ext.is_empty() && !pattern.contains("{ext}") {
+        result.push('.');
+        result.push_str(ext);
+    }
+    if result.trim().is_empty() {
+        return Err(RelocateError::Invalid);
+    }
+    Ok(result)
+}
+
+/// 根据选中条目生成改名映射：目录会自动带上全部子条目。
+///
+/// `Rename` 只处理一个条目，输入是完整新路径；
+/// `Move` 把全部选中条目移动到输入的归档内文件夹，空输入表示根目录。
+pub(crate) fn build_relocate(
+    entries: &[ArchiveEntry],
+    selected: &BTreeSet<usize>,
+    mode: RelocateMode,
+    input: &str,
+) -> Result<Vec<(u32, String)>, RelocateError> {
+    if selected.is_empty() {
+        return Err(RelocateError::NoSelection);
+    }
+    if mode == RelocateMode::Rename && selected.len() != 1 {
+        return Err(RelocateError::OneOnly);
+    }
+
+    let mut roots: Vec<(usize, String, bool)> = selected
+        .iter()
+        .filter_map(|&index| {
+            entries.get(index).map(|entry| {
+                (
+                    index,
+                    entry.display.trim_end_matches('/').to_owned(),
+                    entry.kind.is_dir(),
+                )
+            })
+        })
+        .collect();
+    if roots.is_empty() {
+        return Err(RelocateError::NoSelection);
+    }
+    // 浅层目录优先，避免选中目录后其子条目被重复处理。
+    roots.sort_by_key(|(_, path, _)| path.matches('/').count());
+    let mut chosen: Vec<(usize, String, bool)> = Vec::new();
+    for (index, path, is_dir) in roots {
+        let nested = chosen
+            .iter()
+            .any(|(_, root, _)| path == *root || path.starts_with(&format!("{root}/")));
+        if !nested {
+            chosen.push((index, path, is_dir));
+        }
+    }
+
+    let raw_input = input.trim();
+    let mut rename: HashMap<usize, String> = HashMap::new();
+    for (order, (_, root, is_dir)) in chosen.iter().enumerate() {
+        let final_root = match mode {
+            RelocateMode::Rename => {
+                spell_core::normalize_entry_name(raw_input).map_err(|_| RelocateError::Invalid)?
+            }
+            RelocateMode::Move => {
+                let dst = if raw_input.is_empty() || raw_input == "/" || raw_input == "." {
+                    String::new()
+                } else {
+                    spell_core::normalize_entry_name(raw_input)
+                        .map_err(|_| RelocateError::Invalid)?
+                };
+                let base = root.rsplit('/').next().unwrap_or(root);
+                if dst.is_empty() {
+                    base.to_owned()
+                } else {
+                    format!("{dst}/{base}")
+                }
+            }
+            RelocateMode::BatchRename => {
+                let base = expand_batch_name(raw_input, root, *is_dir, order + 1)?;
+                match root.rsplit_once('/') {
+                    Some((parent, _)) => format!("{parent}/{base}"),
+                    None => base,
+                }
+            }
+        };
+        let final_root =
+            spell_core::normalize_entry_name(&final_root).map_err(|_| RelocateError::Invalid)?;
+
+        if *is_dir && final_root.starts_with(&format!("{root}/")) {
+            return Err(RelocateError::Nested);
+        }
+
+        let prefix = format!("{root}/");
+        for (index, entry) in entries.iter().enumerate() {
+            let path = entry.display.trim_end_matches('/');
+            if path != root && !path.starts_with(&prefix) {
+                continue;
+            }
+            let suffix = &path[root.len()..];
+            let final_name = spell_core::normalize_entry_name(&format!("{final_root}{suffix}"))
+                .map_err(|_| RelocateError::Invalid)?;
+            if final_name != path {
+                rename.insert(index, final_name);
+            }
+        }
+    }
+
+    if rename.is_empty() {
+        return Err(RelocateError::NoChange);
+    }
+
+    let mut seen: HashMap<String, usize> = HashMap::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let final_name = rename
+            .get(&index)
+            .cloned()
+            .unwrap_or_else(|| entry.display.trim_end_matches('/').to_owned());
+        if let Some(previous) = seen.insert(final_name.to_lowercase(), index) {
+            if rename.contains_key(&index) || rename.contains_key(&previous) {
+                return Err(RelocateError::Duplicate(final_name));
+            }
+        }
+    }
+
+    let mut result: Vec<(u32, String)> = rename
+        .into_iter()
+        .map(|(index, name)| (index as u32, name))
+        .collect();
+    result.sort_by_key(|(id, _)| *id);
+    Ok(result)
+}
+
 pub(crate) fn kind_for_output(path: &std::path::Path) -> Option<ArchiveKind> {
     let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
     for (suffix, kind) in [
@@ -1471,20 +1841,37 @@ fn cjk_font_bytes() -> Option<Vec<u8>> {
     None
 }
 
+const EMBEDDED_CJK: &[u8] = include_bytes!("../assets/NotoSansSC-subset.ttf");
+
 fn install_cjk_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
-    // 先试 Windows 系统字体；找不到再用 fontdb 查常见 CJK 字体（Linux 构建兜底）。
-    if let Some(bytes) = cjk_font_bytes() {
+    // 先挂内嵌子集，保证没有中文字体的系统也能正常显示；
+    // 子集未覆盖的生僻字再回退到系统字体。
+    fonts.font_data.insert(
+        "cjk-embedded".to_owned(),
+        egui::FontData::from_static(EMBEDDED_CJK).into(),
+    );
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
         fonts
-            .font_data
-            .insert("cjk".to_owned(), egui::FontData::from_owned(bytes).into());
+            .families
+            .entry(family)
+            .or_default()
+            .push("cjk-embedded".to_owned());
+    }
+
+    // 系统字体兜底：先试 Windows 字体，再用 fontdb 查常见 CJK 字体（Linux 构建兜底）。
+    if let Some(bytes) = cjk_font_bytes() {
+        fonts.font_data.insert(
+            "cjk-system".to_owned(),
+            egui::FontData::from_owned(bytes).into(),
+        );
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             fonts
                 .families
                 .entry(family)
                 .or_default()
-                .push("cjk".to_owned());
+                .push("cjk-system".to_owned());
         }
     }
 
@@ -1559,8 +1946,12 @@ pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{natural_cmp, search_matches, wildcard_match};
+    use super::{
+        RelocateError, RelocateMode, build_relocate, natural_cmp, search_matches, wildcard_match,
+    };
+    use spell_core::types::{ArchiveEntry, EntryKind, Method};
     use std::cmp::Ordering;
+    use std::collections::BTreeSet;
 
     #[test]
     fn natural_sort_orders_numbers() {
@@ -1589,5 +1980,142 @@ mod tests {
         // 非法正则退回子串匹配。
         assert!(search_matches("re:[", "["));
         assert!(search_matches("", "anything"));
+    }
+
+    fn entry(id: u32, name: &str, is_dir: bool) -> ArchiveEntry {
+        ArchiveEntry {
+            id,
+            raw_name: name.as_bytes().to_vec().into(),
+            display: name.into(),
+            kind: if is_dir {
+                EntryKind::Dir
+            } else {
+                EntryKind::File
+            },
+            size: 0,
+            packed: None,
+            crc32: None,
+            mtime: None,
+            encrypted: false,
+            method: Method::Store,
+        }
+    }
+
+    #[test]
+    fn relocate_moves_selected_directory_tree() {
+        let entries = [
+            entry(0, "a.txt", false),
+            entry(1, "c", true),
+            entry(2, "c/d.txt", false),
+        ];
+        let selected = BTreeSet::from([1, 2]);
+        let map = build_relocate(&entries, &selected, RelocateMode::Move, "moved").unwrap();
+        assert_eq!(
+            map,
+            vec![(1, "moved/c".to_owned()), (2, "moved/c/d.txt".to_owned())]
+        );
+
+        let map =
+            build_relocate(&entries, &BTreeSet::from([0]), RelocateMode::Move, "").unwrap_err();
+        assert!(matches!(map, RelocateError::NoChange));
+    }
+
+    #[test]
+    fn relocate_renames_single_entry() {
+        let entries = [entry(0, "a.txt", false)];
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0]),
+            RelocateMode::Rename,
+            "docs/a2.txt",
+        )
+        .unwrap();
+        assert_eq!(map, vec![(0, "docs/a2.txt".to_owned())]);
+    }
+
+    #[test]
+    fn relocate_batch_rename_expands_template() {
+        let entries = [
+            entry(0, "photo.jpg", false),
+            entry(1, "notes.txt", false),
+            entry(2, "dir", true),
+            entry(3, "dir/a.txt", false),
+            entry(4, "other.txt", false),
+        ];
+
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0, 1]),
+            RelocateMode::BatchRename,
+            "{name}_{n}",
+        )
+        .unwrap();
+        assert_eq!(
+            map,
+            vec![(0, "photo_1.jpg".to_owned()), (1, "notes_2.txt".to_owned())]
+        );
+
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0, 1]),
+            RelocateMode::BatchRename,
+            "{n}.{ext}",
+        )
+        .unwrap();
+        assert_eq!(map, vec![(0, "1.jpg".to_owned()), (1, "2.txt".to_owned())]);
+
+        // 选中目录时，子条目跟着目录一起换前缀。
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([2]),
+            RelocateMode::BatchRename,
+            "folder_{n}",
+        )
+        .unwrap();
+        assert_eq!(
+            map,
+            vec![(2, "folder_1".to_owned()), (3, "folder_1/a.txt".to_owned())]
+        );
+
+        let err = build_relocate(
+            &entries,
+            &BTreeSet::from([1, 4]),
+            RelocateMode::BatchRename,
+            "same",
+        )
+        .unwrap_err();
+        assert!(matches!(err, RelocateError::Duplicate(_)));
+    }
+
+    #[test]
+    fn relocate_rejects_duplicates_and_self_nesting() {
+        let entries = [entry(0, "a.txt", false), entry(1, "b.txt", false)];
+        let err = build_relocate(
+            &entries,
+            &BTreeSet::from([0]),
+            RelocateMode::Rename,
+            "b.txt",
+        )
+        .unwrap_err();
+        assert!(matches!(err, RelocateError::Duplicate(_)));
+
+        let entries = [entry(0, "a.txt", false), entry(1, "x/a.txt", false)];
+        let err =
+            build_relocate(&entries, &BTreeSet::from([1]), RelocateMode::Move, "").unwrap_err();
+        assert!(matches!(err, RelocateError::Duplicate(_)));
+
+        let entries = [entry(0, "dir", true), entry(1, "dir/x.txt", false)];
+        let err = build_relocate(
+            &entries,
+            &BTreeSet::from([0]),
+            RelocateMode::Rename,
+            "dir/sub",
+        )
+        .unwrap_err();
+        assert!(matches!(err, RelocateError::Nested));
+
+        let err = build_relocate(&entries, &BTreeSet::from([0, 1]), RelocateMode::Rename, "x")
+            .unwrap_err();
+        assert!(matches!(err, RelocateError::OneOnly));
     }
 }

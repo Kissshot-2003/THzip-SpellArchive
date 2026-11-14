@@ -16,7 +16,12 @@ MIT（见 LICENSE，若尚未添加则以仓库声明为准）。
 
 ## 字体
 
-程序运行时加载系统字体（simhei / Deng），不随二进制分发字体文件。
+程序内嵌 **Noto Sans SC** 子集（`crates/spell-app/assets/NotoSansSC-subset.ttf`，Regular 400，
+覆盖 GB2312 + 拉丁字符 + 常用标点），独立于系统字体；子集未覆盖的生僻字仍回退系统 CJK 字体。
+
+- 版权：Copyright 2014-2021 Adobe (http://www.adobe.com/)，Reserved Font Name 'Source'。
+- 许可：SIL Open Font License 1.1，全文见 `third_party/noto-sans-sc-OFL.txt`。
+- 子集由 `NotoSansSC-VF.ttf` 经 `fonttools varLib.instancer`（wght=400）与 `pyftsubset` 生成。
 
 ## 第三方依赖
 

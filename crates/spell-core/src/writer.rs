@@ -18,6 +18,24 @@ pub struct FinishReport {
     pub elapsed: Duration,
 }
 
+/// 7z LZMA2 写入参数；`dict_size = 0` 表示沿用压缩级别的默认字典。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SevenZOptions {
+    /// 压缩级别 0–9。
+    pub level: u32,
+    /// 字典大小（字节）；0 = 自动。
+    pub dict_size: u32,
+}
+
+impl Default for SevenZOptions {
+    fn default() -> Self {
+        Self {
+            level: 6,
+            dict_size: 0,
+        }
+    }
+}
+
 /// 把用户输入 / 磁盘文件名规范成归档内名字。
 ///
 /// 统一用 `/`，折叠空段与 `.`，拒绝绝对路径、`..`、盘符、NTFS ADS 与 NUL。

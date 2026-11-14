@@ -20,7 +20,7 @@ use crate::error::ArchiveError;
 use crate::reader::ArchiveReader;
 use crate::secret::SecretString;
 use crate::types::{ArchiveKind, Method};
-use crate::writer::ArchiveWriter;
+use crate::writer::{ArchiveWriter, SevenZOptions};
 
 const SNIFF_LEN: usize = 600;
 
@@ -186,6 +186,17 @@ pub fn create_writer_with(
     method: Method,
     password: Option<&SecretString>,
 ) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
+    create_writer_with_options(path, kind, method, password, SevenZOptions::default())
+}
+
+/// 创建归档；可额外指定 7z 的压缩级别与字典大小。
+pub fn create_writer_with_options(
+    path: &Path,
+    kind: ArchiveKind,
+    method: Method,
+    password: Option<&SecretString>,
+    sevenz: SevenZOptions,
+) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
     match kind {
         ArchiveKind::Zip => Ok(Box::new(zip_write::ZipArchiveWriter::create_with(
             path,
@@ -196,6 +207,7 @@ pub fn create_writer_with(
             path,
             method,
             password.cloned(),
+            sevenz,
         )?)),
         ArchiveKind::Tar
         | ArchiveKind::TarGz

@@ -265,6 +265,7 @@ fn packs_through_worker() {
         method: spell_core::Method::Deflate,
         append: false,
         password: None,
+        sevenz: spell_core::SevenZOptions::default(),
     });
 
     let events = pump_until(

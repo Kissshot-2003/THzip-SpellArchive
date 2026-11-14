@@ -153,6 +153,18 @@ impl Palette {
         palette.progress_bg = Color32::from_rgb(0x1B, 0x1E, 0x33);
         palette
     }
+
+    /// 金色等浅色主题使用深色文字，避免主按钮对比度不足。
+    pub fn on_accent(&self) -> Color32 {
+        let luminance = 0.2126 * self.accent.r() as f32 / 255.0
+            + 0.7152 * self.accent.g() as f32 / 255.0
+            + 0.0722 * self.accent.b() as f32 / 255.0;
+        if luminance > 0.58 {
+            Color32::from_rgb(0x17, 0x18, 0x24)
+        } else {
+            self.text_normal
+        }
+    }
 }
 
 fn rgb(value: u32) -> Color32 {
@@ -301,18 +313,45 @@ impl ThemeStore {
             style.visuals = egui::Visuals::dark();
             style.visuals.panel_fill = palette.bg_panel;
             style.visuals.window_fill = palette.bg_window;
-            style.visuals.faint_bg_color = palette.bg_hover;
-            style.visuals.extreme_bg_color = palette.bg_window;
+            style.visuals.faint_bg_color = palette.bg_hover.gamma_multiply(0.55);
+            style.visuals.extreme_bg_color = palette.bg_window.gamma_multiply(0.82);
             style.visuals.override_text_color = Some(palette.text_normal);
-            style.visuals.selection.bg_fill = palette.accent;
+            style.visuals.weak_text_color = Some(palette.text_sub);
+            style.visuals.hyperlink_color = palette.accent;
+            style.visuals.warn_fg_color = palette.warning;
+            style.visuals.error_fg_color = palette.error;
+            style.visuals.selection.bg_fill = palette.accent_soft;
             style.visuals.selection.stroke = egui::Stroke::new(1.0, palette.text_normal);
-            style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, palette.border);
+            style.visuals.window_corner_radius = egui::CornerRadius::same(10);
+            style.visuals.window_stroke = egui::Stroke::new(1.0, palette.border);
+            style.visuals.menu_corner_radius = egui::CornerRadius::same(7);
+
+            let subtle_border = egui::Stroke::new(1.0, palette.border.gamma_multiply(0.75));
+            style.visuals.widgets.noninteractive.bg_stroke = subtle_border;
+            style.visuals.widgets.noninteractive.fg_stroke =
+                egui::Stroke::new(1.0, palette.text_normal);
             style.visuals.widgets.inactive.bg_fill = palette.bg_hover;
             style.visuals.widgets.inactive.weak_bg_fill = palette.bg_hover;
+            style.visuals.widgets.inactive.bg_stroke = subtle_border;
             style.visuals.widgets.hovered.bg_fill = palette.accent_soft;
             style.visuals.widgets.hovered.weak_bg_fill = palette.accent_soft;
-            style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-            style.spacing.button_padding = egui::vec2(10.0, 5.0);
+            style.visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.0, palette.accent.gamma_multiply(0.8));
+            style.visuals.widgets.active.bg_fill = palette.accent_soft;
+            style.visuals.widgets.active.weak_bg_fill = palette.accent_soft;
+            for visuals in [
+                &mut style.visuals.widgets.noninteractive,
+                &mut style.visuals.widgets.inactive,
+                &mut style.visuals.widgets.hovered,
+                &mut style.visuals.widgets.active,
+                &mut style.visuals.widgets.open,
+            ] {
+                visuals.corner_radius = egui::CornerRadius::same(6);
+            }
+            style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+            style.spacing.button_padding = egui::vec2(12.0, 7.0);
+            style.spacing.interact_size.y = 28.0;
+            style.spacing.scroll.bar_width = 8.0;
         });
     }
 }

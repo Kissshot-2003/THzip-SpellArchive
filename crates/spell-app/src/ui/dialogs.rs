@@ -5,7 +5,7 @@ use spell_core::plan::OverwritePolicy;
 use spell_core::secret::SecretString;
 use spell_core::types::ArchiveKind;
 
-use crate::app::{SpellApp, ZipPackMethod};
+use crate::app::{RelocateMode, SpellApp, ZipPackMethod};
 use crate::i18n::TextKey;
 use crate::ui::format_bytes;
 
@@ -13,6 +13,7 @@ pub fn show(app: &mut SpellApp, ctx: &egui::Context) {
     password_prompt(app, ctx);
     precheck(app, ctx);
     pack_dialog(app, ctx);
+    relocate_dialog(app, ctx);
 }
 
 fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
@@ -21,6 +22,29 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
     }
 
     let palette = app.themes.current().palette;
+    let title = app.tr.t(TextKey::PackTitle);
+    let add_files = app.tr.t(TextKey::AddFiles);
+    let add_folder = app.tr.t(TextKey::AddFolder);
+    let pack_empty = app.tr.t(TextKey::PackEmpty);
+    let output_label = app.tr.t(TextKey::Output);
+    let browse_label = app.tr.t(TextKey::Browse);
+    let store_only = app.tr.t(TextKey::StoreOnly);
+    let zip_method_label = app.tr.t(TextKey::ZipMethod);
+    let sevenz_options_label = app.tr.t(TextKey::SevenZOptionsLabel);
+    let sevenz_level_label = app.tr.t(TextKey::SevenZLevel);
+    let sevenz_dict_label = app.tr.t(TextKey::SevenZDict);
+    let sevenz_auto = app.tr.t(TextKey::SevenZAuto);
+    let append_mode = app.tr.t(TextKey::AppendMode);
+    let aes_encrypt = app.tr.t(TextKey::AesEncrypt);
+    let password_hint = app.tr.t(TextKey::Password);
+    let formats_hint = app.tr.t(TextKey::PackFormatsHint);
+    let append_hint = app.tr.t(TextKey::PackAppendHint);
+    let overwrite_hint = app.tr.t(TextKey::PackOverwriteHint);
+    let append_missing = app.tr.t(TextKey::PackAppendMissing);
+    let start_append = app.tr.t(TextKey::StartAppend);
+    let overwrite_and_pack = app.tr.t(TextKey::OverwriteAndPack);
+    let start_pack = app.tr.t(TextKey::StartPack);
+    let cancel_label = app.tr.t(TextKey::Cancel);
     let mut open = true;
     let mut pick_files = false;
     let mut pick_folder = false;
@@ -28,18 +52,19 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
     let mut start = false;
     let mut cancel = false;
 
-    egui::Window::new("创建 zip")
+    egui::Window::new(title)
         .open(&mut open)
-        .resizable(false)
+        .resizable(true)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-        .default_width(560.0)
+        .default_size([580.0, 620.0])
+        .scroll([false, true])
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("添加文件…").clicked() {
+                if ui.button(add_files).clicked() {
                     pick_files = true;
                 }
-                if ui.button("添加文件夹…").clicked() {
+                if ui.button(add_folder).clicked() {
                     pick_folder = true;
                 }
             });
@@ -52,7 +77,7 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
                 .show(ui, |ui| {
                     if app.pack_state.sources.is_empty() {
                         ui.label(
-                            egui::RichText::new("尚未添加任何文件或文件夹")
+                            egui::RichText::new(&pack_empty)
                                 .size(12.0)
                                 .color(palette.text_sub),
                         );
@@ -81,21 +106,23 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
 
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label("输出");
+                ui.label(output_label);
                 let response = ui.add(
-                    egui::TextEdit::singleline(&mut app.pack_state.output).desired_width(380.0),
+                    egui::TextEdit::singleline(&mut app.pack_state.output)
+                        .desired_width((ui.available_width() - 90.0).max(180.0)),
                 );
                 if response.changed() {
                     app.pack_state.confirm_overwrite = false;
                 }
                 response.on_hover_text(app.pack_state.output.clone());
-                if ui.button("浏览…").clicked() {
+                if ui.button(browse_label).clicked() {
                     browse = true;
                 }
             });
             let output_path = PathBuf::from(app.pack_state.output.trim());
             let output_kind = crate::app::kind_for_output(&output_path);
             let is_zip = matches!(output_kind, Some(ArchiveKind::Zip));
+            let is_7z = matches!(output_kind, Some(ArchiveKind::SevenZ));
             let supports_encrypt =
                 matches!(output_kind, Some(ArchiveKind::Zip | ArchiveKind::SevenZ));
             if !is_zip && app.pack_state.append {
@@ -109,11 +136,11 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
             }
 
             ui.add_enabled_ui(supports_encrypt, |ui| {
-                ui.checkbox(&mut app.pack_state.store, "仅存储（不压缩）");
+                ui.checkbox(&mut app.pack_state.store, store_only);
             });
-            ui.add_enabled_ui(is_zip && !app.pack_state.store, |ui| {
+            if is_zip && !app.pack_state.store {
                 ui.horizontal(|ui| {
-                    ui.label("zip 压缩方法");
+                    ui.label(&zip_method_label);
                     egui::ComboBox::from_id_salt("pack_zip_method")
                         .selected_text(app.pack_state.zip_method.label())
                         .show_ui(ui, |ui| {
@@ -130,10 +157,49 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
                             }
                         });
                 });
-            });
+            }
+            if is_7z && !app.pack_state.store {
+                ui.horizontal(|ui| {
+                    ui.label(&sevenz_options_label);
+                    ui.label(&sevenz_level_label);
+                    egui::ComboBox::from_id_salt("pack_7z_level")
+                        .selected_text(app.pack_state.sevenz_level.min(9).to_string())
+                        .show_ui(ui, |ui| {
+                            for level in 0..=9 {
+                                ui.selectable_value(
+                                    &mut app.pack_state.sevenz_level,
+                                    level,
+                                    level.to_string(),
+                                );
+                            }
+                        });
+                    ui.label(&sevenz_dict_label);
+                    let dict_text = if app.pack_state.sevenz_dict_mib == 0 {
+                        sevenz_auto.clone()
+                    } else {
+                        format!("{} MiB", app.pack_state.sevenz_dict_mib)
+                    };
+                    egui::ComboBox::from_id_salt("pack_7z_dict")
+                        .selected_text(dict_text)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut app.pack_state.sevenz_dict_mib,
+                                0,
+                                &sevenz_auto,
+                            );
+                            for mib in [1u32, 4, 16, 64, 256] {
+                                ui.selectable_value(
+                                    &mut app.pack_state.sevenz_dict_mib,
+                                    mib,
+                                    format!("{mib} MiB"),
+                                );
+                            }
+                        });
+                });
+            }
             ui.add_enabled_ui(is_zip, |ui| {
                 if ui
-                    .checkbox(&mut app.pack_state.append, "追加到现有 zip（保留原有条目）")
+                    .checkbox(&mut app.pack_state.append, append_mode)
                     .changed()
                 {
                     app.pack_state.confirm_overwrite = false;
@@ -146,35 +212,33 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
             });
 
             ui.add_enabled_ui(supports_encrypt && !app.pack_state.append, |ui| {
-                ui.checkbox(&mut app.pack_state.encrypt, "AES-256 加密");
+                ui.checkbox(&mut app.pack_state.encrypt, aes_encrypt);
             });
             if supports_encrypt && app.pack_state.encrypt && !app.pack_state.append {
                 ui.add(
                     egui::TextEdit::singleline(&mut app.pack_state.password)
                         .password(true)
-                        .hint_text("密码")
+                        .hint_text(password_hint)
                         .desired_width(240.0),
                 );
             }
 
             ui.label(
-                egui::RichText::new(
-                    "支持 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4",
-                )
-                .size(11.0)
-                .color(palette.text_sub),
+                egui::RichText::new(&formats_hint)
+                    .size(11.0)
+                    .color(palette.text_sub),
             );
 
             if output_path.is_file() {
                 let text = if app.pack_state.append {
-                    "将追加到现有 zip；完成后原子替换原文件。"
+                    &append_hint
                 } else {
-                    "目标文件已存在：确认后会原子替换。"
+                    &overwrite_hint
                 };
                 ui.label(egui::RichText::new(text).size(12.0).color(palette.warning));
             } else if app.pack_state.append {
                 ui.label(
-                    egui::RichText::new("追加模式需要目标 zip 已存在。")
+                    egui::RichText::new(&append_missing)
                         .size(12.0)
                         .color(palette.error),
                 );
@@ -183,24 +247,26 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(error).size(12.0).color(palette.error));
             }
 
-            ui.add_space(6.0);
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
                 let label = if app.pack_state.append {
-                    "开始追加"
+                    start_append
                 } else if !app.pack_state.sources.is_empty()
                     && output_path.is_file()
                     && app.pack_state.confirm_overwrite
                 {
-                    "覆盖并打包"
+                    overwrite_and_pack
                 } else {
-                    "开始打包"
+                    start_pack
                 };
-                if ui.button(label).clicked() {
+                if crate::ui::primary_button(ui, &palette, label).clicked() {
                     start = true;
                 }
-                if ui.button("取消").clicked() {
-                    cancel = true;
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(cancel_label).clicked() {
+                        cancel = true;
+                    }
+                });
             });
         });
 
@@ -218,6 +284,68 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
     }
 }
 
+fn relocate_dialog(app: &mut SpellApp, ctx: &egui::Context) {
+    let palette = app.themes.current().palette;
+    let Some(dialog) = app.relocate.as_mut() else {
+        return;
+    };
+
+    let (title, label) = match dialog.mode {
+        RelocateMode::Rename => (
+            app.tr.t(TextKey::RelocateRenameTitle),
+            app.tr.t(TextKey::RelocatePathLabel),
+        ),
+        RelocateMode::Move => (
+            app.tr.t(TextKey::RelocateMoveTitle),
+            app.tr.t(TextKey::RelocateFolderLabel),
+        ),
+        RelocateMode::BatchRename => (
+            app.tr.t(TextKey::RelocateBatchTitle),
+            app.tr.t(TextKey::RelocateBatchLabel),
+        ),
+    };
+    let apply_label = app.tr.t(TextKey::RelocateApply);
+    let cancel_label = app.tr.t(TextKey::Cancel);
+    let mut confirmed = false;
+    let mut cancelled = false;
+    let mut open = true;
+
+    egui::Window::new(title)
+        .open(&mut open)
+        .resizable(true)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .default_size([440.0, 260.0])
+        .show(ctx, |ui| {
+            ui.label(label);
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut dialog.input).desired_width(ui.available_width()),
+            );
+            response.request_focus();
+            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                confirmed = true;
+            }
+            if let Some(error) = &dialog.error {
+                ui.label(egui::RichText::new(error).color(palette.error));
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if crate::ui::primary_button(ui, &palette, apply_label).clicked() {
+                    confirmed = true;
+                }
+                if ui.button(cancel_label).clicked() {
+                    cancelled = true;
+                }
+            });
+        });
+
+    if confirmed {
+        app.apply_relocate();
+    } else if cancelled || !open {
+        app.relocate = None;
+    }
+}
+
 fn password_prompt(app: &mut SpellApp, ctx: &egui::Context) {
     let Some(prompt) = app.pending_password.as_mut() else {
         return;
@@ -226,27 +354,26 @@ fn password_prompt(app: &mut SpellApp, ctx: &egui::Context) {
     let title = app.tr.t(TextKey::PasswordPrompt);
     let cancel_label = app.tr.t(TextKey::Cancel);
     let open_label = app.tr.t(TextKey::Open);
+    let password_hint = app.tr.t(TextKey::Password);
     let path = prompt.path.display().to_string();
     let mut confirmed = false;
     let mut cancelled = false;
     let mut open = true;
 
+    let palette = app.themes.current().palette;
     egui::Window::new(title)
         .open(&mut open)
-        .resizable(false)
+        .resizable(true)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .default_size([440.0, 250.0])
         .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new(path)
-                    .size(12.0)
-                    .color(app.themes.current().palette.text_sub),
-            );
+            ui.label(egui::RichText::new(path).size(12.0).color(palette.text_sub));
             ui.add_space(4.0);
             let response = ui.add(
                 egui::TextEdit::singleline(&mut prompt.input)
                     .password(true)
-                    .hint_text("密码")
+                    .hint_text(&password_hint)
                     .desired_width(240.0),
             );
             response.request_focus();
@@ -254,11 +381,11 @@ fn password_prompt(app: &mut SpellApp, ctx: &egui::Context) {
                 confirmed = true;
             }
             if let Some(error) = &prompt.error {
-                ui.label(egui::RichText::new(error).color(app.themes.current().palette.error));
+                ui.label(egui::RichText::new(error).color(palette.error));
             }
-            ui.add_space(6.0);
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button(open_label).clicked() {
+                if crate::ui::primary_button(ui, &palette, open_label).clicked() {
                     confirmed = true;
                 }
                 if ui.button(cancel_label).clicked() {
@@ -305,6 +432,13 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
     let warnings = plan.warnings.len();
     let needs_password = plan.needs_password;
     let target = pending.target.display().to_string();
+    let entry_count = app
+        .tr
+        .tf(TextKey::EntryCount, &[("count", &entries.to_string())]);
+    let unknown_label = app.tr.t(TextKey::Unknown);
+    let encrypted_notice = app.tr.t(TextKey::PrecheckEncrypted);
+    let low_space_notice = app.tr.t(TextKey::PrecheckLowSpace);
+    let conflict_policy = app.tr.t(TextKey::ConflictPolicy);
 
     let mut start = false;
     let mut cancel = false;
@@ -312,33 +446,38 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
 
     egui::Window::new(title)
         .open(&mut open)
-        .resizable(false)
+        .resizable(true)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-        .default_width(480.0)
+        .default_size([500.0, 560.0])
+        .scroll([false, true])
         .show(ctx, |ui| {
-            ui.label(egui::RichText::new(format!("{entries} 个条目")).strong());
+            ui.label(egui::RichText::new(&entry_count).size(17.0).strong());
+            ui.add_space(6.0);
             egui::Grid::new("precheck_grid")
                 .num_columns(2)
-                .spacing([16.0, 4.0])
+                .spacing([18.0, 6.0])
                 .show(ui, |ui| {
-                    ui.label(target_label);
+                    ui.label(egui::RichText::new(target_label).color(palette.text_sub));
                     ui.label(&target);
                     ui.end_row();
 
-                    ui.label(total_label);
+                    ui.label(egui::RichText::new(total_label).color(palette.text_sub));
                     ui.label(format_bytes(total));
                     ui.end_row();
 
-                    ui.label(largest_label);
+                    ui.label(egui::RichText::new(largest_label).color(palette.text_sub));
                     ui.label(format_bytes(largest));
                     ui.end_row();
 
-                    ui.label(free_label);
-                    ui.label(free.map(format_bytes).unwrap_or_else(|| "未知".to_owned()));
+                    ui.label(egui::RichText::new(free_label).color(palette.text_sub));
+                    ui.label(
+                        free.map(format_bytes)
+                            .unwrap_or_else(|| unknown_label.clone()),
+                    );
                     ui.end_row();
 
-                    ui.label(conflicts_label);
+                    ui.label(egui::RichText::new(conflicts_label).color(palette.text_sub));
                     let color = if conflicts > 0 {
                         palette.warning
                     } else {
@@ -347,30 +486,29 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
                     ui.label(egui::RichText::new(conflicts.to_string()).color(color));
                     ui.end_row();
 
-                    ui.label(warnings_label);
+                    ui.label(egui::RichText::new(warnings_label).color(palette.text_sub));
                     ui.label(warnings.to_string());
                     ui.end_row();
                 });
 
             if needs_password {
                 ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new("包含加密条目；若尚未提供密码，解压会中止。")
-                        .color(palette.warning),
-                );
+                ui.label(egui::RichText::new(&encrypted_notice).color(palette.warning));
             }
             if let Some(free) = free {
                 if total > free {
                     ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new("预计写出的数据超过目标盘剩余空间。")
-                            .color(palette.error),
-                    );
+                    ui.label(egui::RichText::new(&low_space_notice).color(palette.error));
                 }
             }
 
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("冲突处理").strong());
+            ui.add_space(10.0);
+            ui.label(
+                egui::RichText::new(&conflict_policy)
+                    .size(14.0)
+                    .strong()
+                    .color(palette.accent),
+            );
             ui.radio_value(&mut pending.policy, OverwritePolicy::Skip, skip_label);
             ui.radio_value(
                 &mut pending.policy,
@@ -384,14 +522,16 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
                 autono_label,
             );
 
-            ui.add_space(8.0);
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button(start_label).clicked() {
+                if crate::ui::primary_button(ui, &palette, start_label).clicked() {
                     start = true;
                 }
-                if ui.button(cancel_label).clicked() {
-                    cancel = true;
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(cancel_label).clicked() {
+                        cancel = true;
+                    }
+                });
             });
         });
 

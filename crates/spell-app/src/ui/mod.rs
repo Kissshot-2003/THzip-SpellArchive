@@ -11,7 +11,41 @@ use eframe::egui;
 
 use crate::app::SpellApp;
 use crate::i18n::TextKey;
-use crate::theme::ResKey;
+use crate::theme::{Palette, ResKey};
+
+pub fn card_frame(palette: &Palette) -> egui::Frame {
+    egui::Frame::default()
+        .fill(palette.bg_panel)
+        .stroke(egui::Stroke::new(1.0, palette.border.gamma_multiply(0.72)))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(12))
+}
+
+pub fn primary_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    text: impl Into<egui::WidgetText>,
+) -> egui::Response {
+    ui.add(
+        egui::Button::new(text.into().color(palette.on_accent()))
+            .fill(palette.accent)
+            .stroke(egui::Stroke::new(1.0, palette.accent))
+            .corner_radius(egui::CornerRadius::same(6)),
+    )
+}
+
+pub fn danger_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    text: impl Into<egui::WidgetText>,
+) -> egui::Response {
+    ui.add(
+        egui::Button::new(text)
+            .fill(palette.error.gamma_multiply(0.2))
+            .stroke(egui::Stroke::new(1.0, palette.error.gamma_multiply(0.75)))
+            .corner_radius(egui::CornerRadius::same(6)),
+    )
+}
 
 /// 带图标的按钮；主题没有该资源时退回纯文字。
 pub fn action_button(
@@ -20,16 +54,48 @@ pub fn action_button(
     key: ResKey,
     text: impl Into<egui::WidgetText>,
 ) -> egui::Response {
-    let text = text.into();
-    if let Some(texture) = app.themes.texture(key) {
+    styled_action_button(ui, app, key, text, false)
+}
+
+pub fn primary_action_button(
+    ui: &mut egui::Ui,
+    app: &SpellApp,
+    key: ResKey,
+    text: impl Into<egui::WidgetText>,
+) -> egui::Response {
+    styled_action_button(ui, app, key, text, true)
+}
+
+fn styled_action_button(
+    ui: &mut egui::Ui,
+    app: &SpellApp,
+    key: ResKey,
+    text: impl Into<egui::WidgetText>,
+    primary: bool,
+) -> egui::Response {
+    let palette = app.themes.current().palette;
+    let mut text = text.into();
+    if primary {
+        text = text.color(palette.on_accent());
+    }
+    let button = if let Some(texture) = app.themes.texture(key) {
         let image = egui::Image::new(egui::load::SizedTexture::new(
             texture.id(),
             egui::vec2(16.0, 16.0),
         ));
-        ui.add(egui::Button::image_and_text(image, text))
+        egui::Button::image_and_text(image, text)
     } else {
-        ui.add(egui::Button::new(text))
-    }
+        egui::Button::new(text)
+    };
+    let button = if primary {
+        button
+            .fill(palette.accent)
+            .stroke(egui::Stroke::new(1.0, palette.accent))
+            .corner_radius(egui::CornerRadius::same(6))
+    } else {
+        button
+    };
+    ui.add(button)
 }
 
 pub fn hint_banner(app: &mut SpellApp, root: &mut egui::Ui) {
@@ -40,15 +106,29 @@ pub fn hint_banner(app: &mut SpellApp, root: &mut egui::Ui) {
     let dismiss = app.tr.t(TextKey::Dismiss);
     let palette = app.themes.current().palette;
 
-    egui::Panel::top("first_run_hint").show(root, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(text).color(palette.text_sub));
-            if ui.small_button(dismiss).clicked() {
-                app.show_first_run_hint = false;
-                app.touch_settings();
-            }
+    egui::Panel::top("first_run_hint")
+        .frame(
+            egui::Frame::default()
+                .fill(palette.bg_window)
+                .inner_margin(egui::Margin::symmetric(14, 0)),
+        )
+        .show(root, |ui| {
+            egui::Frame::default()
+                .fill(palette.accent_soft.gamma_multiply(0.7))
+                .stroke(egui::Stroke::new(1.0, palette.accent.gamma_multiply(0.55)))
+                .corner_radius(egui::CornerRadius::same(7))
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new("!").strong().color(palette.accent));
+                        ui.label(egui::RichText::new(text).color(palette.text_sub));
+                        if ui.small_button(dismiss).clicked() {
+                            app.show_first_run_hint = false;
+                            app.touch_settings();
+                        }
+                    });
+                });
         });
-    });
 }
 
 pub fn tab_bar(app: &mut SpellApp, root: &mut egui::Ui) {
@@ -58,6 +138,7 @@ pub fn tab_bar(app: &mut SpellApp, root: &mut egui::Ui) {
 
     let mut switch = None;
     let mut close = None;
+    let close_tab = app.tr.t(TextKey::CloseTab);
     egui::Panel::top("tab_bar").show(root, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.add_space(2.0);
@@ -67,7 +148,7 @@ pub fn tab_bar(app: &mut SpellApp, root: &mut egui::Ui) {
                 if ui.selectable_label(active, title).clicked() {
                     switch = Some(index);
                 }
-                if ui.small_button("×").on_hover_text("关闭标签页").clicked() {
+                if ui.small_button("×").on_hover_text(&close_tab).clicked() {
                     close = Some(index);
                 }
                 ui.separator();
@@ -85,80 +166,142 @@ pub fn tab_bar(app: &mut SpellApp, root: &mut egui::Ui) {
 
 pub fn top_bar(app: &mut SpellApp, root: &mut egui::Ui) {
     let palette = app.themes.current().palette;
-    let ctx = root.ctx().clone();
 
-    egui::Panel::top("toolbar").show(root, |ui| {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
+    egui::Panel::top("toolbar")
+        .frame(
+            egui::Frame::default()
+                .fill(palette.bg_window)
+                .stroke(egui::Stroke::new(1.0, palette.border.gamma_multiply(0.55)))
+                .inner_margin(egui::Margin::symmetric(14, 10)),
+        )
+        .show(root, |ui| {
+            let compact = ui.available_width() < 1060.0;
+            if compact {
+                ui.horizontal(|ui| {
+                    brand(ui, app);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        window_actions(ui, app);
+                    });
+                });
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    archive_actions(ui, app);
+                    theme_picker(ui, app);
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    brand(ui, app);
+                    ui.separator();
+                    archive_actions(ui, app);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        window_actions(ui, app);
+                        theme_picker(ui, app);
+                    });
+                });
+            }
+        });
+}
+
+fn brand(ui: &mut egui::Ui, app: &SpellApp) {
+    let palette = app.themes.current().palette;
+    egui::Frame::default()
+        .fill(palette.bg_panel)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::same(5))
+        .show(ui, |ui| {
             if let Some(texture) = app.themes.texture(ResKey::AvatarMain) {
                 ui.add(
                     egui::Image::new(egui::load::SizedTexture::new(
                         texture.id(),
-                        egui::vec2(22.0, 22.0),
+                        egui::vec2(24.0, 24.0),
                     ))
-                    .fit_to_exact_size(egui::vec2(22.0, 22.0)),
+                    .fit_to_exact_size(egui::vec2(24.0, 24.0)),
                 );
             } else {
                 let (logo, _) =
-                    ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                    ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
                 ui.painter()
                     .rect_filled(logo, egui::CornerRadius::same(4), palette.accent);
+                ui.painter().text(
+                    logo.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "S",
+                    egui::FontId::proportional(15.0),
+                    palette.on_accent(),
+                );
             }
-            ui.label(egui::RichText::new("SpellArchive").size(16.0).strong());
-            ui.separator();
-
-            let open = app.tr.t(TextKey::Open);
-            if action_button(ui, app, ResKey::IconArchive7z, open).clicked() {
-                app.open_archive_dialog();
-            }
-
-            let extract = app.tr.t(TextKey::Extract);
-            let extract_standard = app.tr.standard(TextKey::Extract);
-            if action_button(ui, app, ResKey::BtnExtract, extract)
-                .on_hover_text(extract_standard)
-                .clicked()
-            {
-                app.begin_extract_dialog();
-            }
-
-            let pack = app.tr.t(TextKey::Pack);
-            if action_button(ui, app, ResKey::BtnPack, pack).clicked() {
-                app.open_pack_dialog();
-            }
-
-            let test = app.tr.t(TextKey::TestArchive);
-            if action_button(ui, app, ResKey::StateOk, test).clicked() {
-                app.start_test();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let settings = app.tr.t(TextKey::Settings);
-                if action_button(ui, app, ResKey::BtnSettings, settings).clicked() {
-                    app.show_settings = true;
-                }
-
-                let language = app.locale.label();
-                if ui.button(language).clicked() {
-                    app.locale = app.locale.toggled();
-                    app.tr.locale = app.locale;
-                    app.touch_settings();
-                }
-
-                let names = app.themes.names();
-                let mut selected = app.themes.current_index();
-                egui::ComboBox::from_id_salt("theme_combo")
-                    .selected_text(app.themes.current().name.clone())
-                    .show_ui(ui, |ui| {
-                        for (index, name) in names.iter().enumerate() {
-                            ui.selectable_value(&mut selected, index, name);
-                        }
-                    });
-                if selected != app.themes.current_index() {
-                    app.set_theme(selected, &ctx);
-                }
-            });
         });
-        ui.add_space(4.0);
+    ui.vertical(|ui| {
+        ui.add_space(1.0);
+        ui.label(egui::RichText::new("SpellArchive").size(17.0).strong());
+        ui.label(
+            egui::RichText::new("ARCHIVE WORKSPACE")
+                .size(9.0)
+                .color(palette.text_sub),
+        );
     });
+}
+
+fn archive_actions(ui: &mut egui::Ui, app: &mut SpellApp) {
+    let open = app.tr.t(TextKey::Open);
+    if primary_action_button(ui, app, ResKey::IconArchive7z, open).clicked() {
+        app.open_archive_dialog();
+    }
+
+    let has_archive = app.reader.is_some();
+    ui.add_enabled_ui(has_archive, |ui| {
+        let extract = app.tr.t(TextKey::Extract);
+        let extract_standard = app.tr.standard(TextKey::Extract);
+        if action_button(ui, app, ResKey::BtnExtract, extract)
+            .on_hover_text(extract_standard)
+            .clicked()
+        {
+            app.begin_extract_dialog();
+        }
+    });
+
+    let pack = app.tr.t(TextKey::Pack);
+    if action_button(ui, app, ResKey::BtnPack, pack).clicked() {
+        app.open_pack_dialog();
+    }
+
+    ui.add_enabled_ui(has_archive, |ui| {
+        let test = app.tr.t(TextKey::TestArchive);
+        if action_button(ui, app, ResKey::StateOk, test).clicked() {
+            app.start_test();
+        }
+    });
+}
+
+fn theme_picker(ui: &mut egui::Ui, app: &mut SpellApp) {
+    let ctx = ui.ctx().clone();
+    let names = app.themes.names();
+    let mut selected = app.themes.current_index();
+    egui::ComboBox::from_id_salt("theme_combo")
+        .selected_text(app.themes.current().name.clone())
+        .width(170.0)
+        .show_ui(ui, |ui| {
+            for (index, name) in names.iter().enumerate() {
+                ui.selectable_value(&mut selected, index, name);
+            }
+        });
+    if selected != app.themes.current_index() {
+        app.set_theme(selected, &ctx);
+    }
+}
+
+fn window_actions(ui: &mut egui::Ui, app: &mut SpellApp) {
+    let settings = app.tr.t(TextKey::Settings);
+    if action_button(ui, app, ResKey::BtnSettings, settings).clicked() {
+        app.show_settings = true;
+    }
+
+    let language = app.locale.label();
+    if ui.button(language).clicked() {
+        app.locale = app.locale.toggled();
+        app.sync_locale();
+    }
 }
 
 pub fn status_bar(app: &mut SpellApp, root: &mut egui::Ui) {
@@ -174,31 +317,60 @@ pub fn status_bar(app: &mut SpellApp, root: &mut egui::Ui) {
             .iter()
             .next()
             .and_then(|&index| app.entries.get(index))
-            .map(|entry| format!("已选：{}", entry.display))
+            .map(|entry| {
+                app.tr
+                    .tf(TextKey::SelectedOne, &[("name", entry.display.as_ref())])
+            })
             .unwrap_or_default(),
-        count => format!("已选 {count} 条"),
+        count => app
+            .tr
+            .tf(TextKey::SelectedMany, &[("count", &count.to_string())]),
     };
+    let suffix = app.tr.tf(
+        TextKey::StatusSuffix,
+        &[
+            ("theme", &theme_name),
+            ("locale", locale),
+            ("total", &total.to_string()),
+        ],
+    );
 
     egui::Panel::bottom("status_bar")
-        .exact_size(26.0)
+        .exact_size(30.0)
+        .frame(
+            egui::Frame::default()
+                .fill(palette.bg_window)
+                .inner_margin(egui::Margin::symmetric(14, 0)),
+        )
         .show(root, |ui| {
             ui.horizontal_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(status)
-                        .size(12.0)
-                        .color(palette.text_sub),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{theme_name} · {locale} · {total} 条"))
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(7.0, 7.0), egui::Sense::hover());
+                ui.painter()
+                    .circle_filled(dot.center(), 3.5, palette.success.gamma_multiply(0.85));
+                let status_width = (ui.available_width() - 380.0).max(120.0);
+                ui.add_sized(
+                    [status_width, 20.0],
+                    egui::Label::new(
+                        egui::RichText::new(&status)
                             .size(12.0)
                             .color(palette.text_sub),
-                    );
+                    )
+                    .truncate(),
+                )
+                .on_hover_text(&status);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.available_width() > 260.0 {
+                        ui.label(
+                            egui::RichText::new(suffix.clone())
+                                .size(11.0)
+                                .color(palette.text_sub.gamma_multiply(0.8)),
+                        );
+                    }
                     if !selected.is_empty() {
                         ui.label(
                             egui::RichText::new(selected)
-                                .size(12.0)
-                                .color(palette.text_sub),
+                                .size(11.0)
+                                .color(palette.accent),
                         );
                     }
                 });
@@ -278,17 +450,18 @@ pub fn drag_overlay(app: &SpellApp, ctx: &egui::Context) {
 
     let first_is_dir = hovered.iter().any(|path| path.is_dir());
     let title = if first_is_dir {
-        "松开以浏览文件夹".to_owned()
+        app.tr.t(TextKey::DropBrowseFolder)
     } else {
-        "松开以打开归档".to_owned()
+        app.tr.t(TextKey::DropOpenArchive)
     };
     let subtitle = if hovered.len() == 1 {
         hovered[0]
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "1 个文件".to_owned())
+            .unwrap_or_else(|| app.tr.t(TextKey::OneFile))
     } else {
-        format!("{} 个项目", hovered.len())
+        app.tr
+            .tf(TextKey::ItemCount, &[("count", &hovered.len().to_string())])
     };
 
     painter.text(

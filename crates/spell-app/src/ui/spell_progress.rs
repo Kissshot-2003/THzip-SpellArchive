@@ -12,7 +12,7 @@ pub fn show(
     failed: bool,
     theme: &Theme,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
     // 贴图坐标吸附到物理像素，避免像素素材被半像素拉伸。
     let ppp = ui.ctx().pixels_per_point();
     let snap = |value: f32| (value * ppp).round() / ppp;

@@ -8,7 +8,7 @@ use crate::safety::atomic_fs::AtomicFile;
 use crate::secret::SecretString;
 use crate::task::CancelToken;
 use crate::types::Method;
-use crate::writer::{ArchiveWriter, FinishReport, normalize_entry_name};
+use crate::writer::{ArchiveWriter, FinishReport, SevenZOptions, normalize_entry_name};
 
 pub struct SevenZArchiveWriter {
     inner: Option<sevenz_rust2::ArchiveWriter<AtomicFile>>,
@@ -22,6 +22,7 @@ impl SevenZArchiveWriter {
         path: &Path,
         method: Method,
         password: Option<SecretString>,
+        options: SevenZOptions,
     ) -> Result<Self, ArchiveError> {
         let atomic = AtomicFile::create(path)?;
         let mut writer = sevenz_rust2::ArchiveWriter::new(atomic).map_err(map_sz_error)?;
@@ -35,14 +36,17 @@ impl SevenZArchiveWriter {
                 .into(),
             );
         }
-        methods.push(
-            if method == Method::Store {
-                sevenz_rust2::EncoderMethod::COPY
-            } else {
-                sevenz_rust2::EncoderMethod::LZMA2
+        methods.push(if method == Method::Store {
+            sevenz_rust2::EncoderMethod::COPY.into()
+        } else {
+            let mut lzma2 =
+                sevenz_rust2::encoder_options::Lzma2Options::from_level(options.level.min(9));
+            if options.dict_size > 0 {
+                lzma2.set_dictionary_size(options.dict_size);
             }
-            .into(),
-        );
+            sevenz_rust2::EncoderConfiguration::new(sevenz_rust2::EncoderMethod::LZMA2)
+                .with_options(lzma2.into())
+        });
         writer.set_content_methods(methods);
         writer.set_encrypt_header(password.is_some());
 

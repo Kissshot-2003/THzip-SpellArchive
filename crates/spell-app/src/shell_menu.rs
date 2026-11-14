@@ -1,34 +1,36 @@
 use std::io;
 use std::path::Path;
 
-/// 文件右键菜单：key、显示名、命令行开关（空表示直接打开）。
-const FILE_MENUS: [(&str, &str, &str); 4] = [
+use crate::i18n::{Locale, TextKey, builtin};
+
+/// 文件右键菜单：key、显示名文案、命令行开关（空表示直接打开）。
+const FILE_MENUS: [(&str, TextKey, &str); 4] = [
     (
         r"Software\Classes\*\shell\SpellArchive",
-        "用 SpellArchive 打开",
+        TextKey::ShellOpen,
         "",
     ),
     (
         r"Software\Classes\*\shell\SpellArchive.ExtractHere",
-        "解压到当前文件夹",
+        TextKey::ShellExtractHere,
         "--extract-here",
     ),
     (
         r"Software\Classes\*\shell\SpellArchive.ExtractTo",
-        "解压到单独文件夹",
+        TextKey::ShellExtractTo,
         "--extract-to",
     ),
     (
         r"Software\Classes\*\shell\SpellArchive.AddToZip",
-        "添加到 zip 压缩包",
+        TextKey::ShellAddToZip,
         "--add",
     ),
 ];
 
 /// 目录右键菜单：只提供“添加到压缩包”。
-const DIR_MENUS: [(&str, &str, &str); 1] = [(
+const DIR_MENUS: [(&str, TextKey, &str); 1] = [(
     r"Software\Classes\Directory\shell\SpellArchive.AddToZip",
-    "添加到 zip 压缩包",
+    TextKey::ShellAddToZip,
     "--add",
 )];
 
@@ -44,26 +46,26 @@ pub fn is_installed() -> bool {
         .any(|(base, _, _)| hkcu.open_subkey(base).is_ok())
 }
 
-/// 已安装右键菜单时，把注册表里的 exe 路径刷新成当前进程路径。
+/// 已安装右键菜单时，把注册表里的 exe 路径刷新成当前进程路径，并按当前语言更新文案。
 #[cfg(windows)]
-pub fn refresh_if_installed() -> io::Result<()> {
+pub fn refresh_if_installed(locale: Locale) -> io::Result<()> {
     if !is_installed() {
         return Ok(());
     }
     let exe = std::env::current_exe()?;
-    install(&exe)
+    install(&exe, locale)
 }
 
 #[cfg(windows)]
-pub fn install(exe: &Path) -> io::Result<()> {
+pub fn install(exe: &Path, locale: Locale) -> io::Result<()> {
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let icon = format!("\"{}\"", exe.display());
-    for (base, label, flag) in FILE_MENUS.iter().chain(DIR_MENUS.iter()) {
+    for (base, text_key, flag) in FILE_MENUS.iter().chain(DIR_MENUS.iter()) {
         let (key, _) = hkcu.create_subkey(base)?;
-        key.set_value("", &label.to_string())?;
+        key.set_value("", &builtin(locale, *text_key).to_string())?;
         key.set_value("Icon", &icon)?;
         let command = if flag.is_empty() {
             format!("\"{}\" \"%1\"", exe.display())
@@ -98,12 +100,12 @@ pub fn is_installed() -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn refresh_if_installed() -> io::Result<()> {
+pub fn refresh_if_installed(_locale: Locale) -> io::Result<()> {
     Ok(())
 }
 
 #[cfg(not(windows))]
-pub fn install(_exe: &Path) -> io::Result<()> {
+pub fn install(_exe: &Path, _locale: Locale) -> io::Result<()> {
     Ok(())
 }
 

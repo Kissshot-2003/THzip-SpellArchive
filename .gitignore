@@ -2,5 +2,5 @@
 /dist
 *.pdb
 *.tmp
-.spellarchive.*
+.thzip-spellarchive.*
 config/

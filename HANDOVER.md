@@ -1,9 +1,9 @@
-# SpellArchive 交接文档
+# THzip-SpellArchive 交接文档
 
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（7z/tar 追加、快捷键、窗口大小持久化、失败条目详情、预检详情、结构化日志字段、结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
+> 最后更新：2026-11（审查修复：压缩比/字典限额生效、7z 重名映射、追加取消与限额、独占临时目录；项目改名 THzip-SpellArchive 并迁移旧配置、7z/tar 追加、快捷键、窗口大小持久化、失败条目详情、预检详情、结构化日志字段、结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
 
 ---
 
@@ -26,9 +26,9 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（119）；`cargo clippy --workspace --all-targets -- -D warnings`；
-  `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
-- **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
+- **怎么跑**：`cargo test --workspace`（127）；`cargo clippy --workspace --all-targets -- -D warnings`；
+  `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
+- **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：工作区干净，无远端；最新提交见 `git log -1`。
 - **下一步建议**：代码签名或 RAR 大条目优化。
@@ -39,7 +39,7 @@
 
 ### 1.1 一句话
 
-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
+THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
 当前 **zip / 7z / tar 家族可读写，RAR 可读，单文件流可读**；GUI 覆盖打开、后台预检、解压、测试、取消、
 冲突跳过/覆盖/改名/自动编号、创建/追加、zip 多压缩方法、7z 级别/字典、密码、后台主题包导入、主题懒加载、
 多标签页、主题粒子、多选与表头排序（持久化）、删除选中条目、重命名/移动/批量改名模板/正则改名（目录自动带上子项）、设置持久化、拖拽打开与悬停提示、单实例转交、
@@ -66,7 +66,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 - Rust 约 19000 行（含测试）。
 - 最新提交：以 `git log -1` 为准（本文件不再记录哈希，避免文档漂移）。
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
-- 工作区干净；近期已提交：结构化错误码、正则改名、结构化日志、预检/失败详情、快捷键、窗口大小持久化、7z/tar 家族追加。
+- 工作区干净；近期已提交：项目改名并迁移旧配置、结构化错误码、正则改名、结构化日志、预检/失败详情、快捷键、窗口大小持久化、7z/tar 家族追加。
 - 接手第一件事：`git status` → 跑测试 → 按路线图选下一项。
 
 ---
@@ -85,17 +85,17 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 119 个测试
+cargo test --workspace                 # 127 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
-cargo run -p spell-app                 # GUI
-cargo run -p spell-app -- <归档>        # 启动并直接打开
+cargo run -p thzip-app                 # GUI
+cargo run -p thzip-app -- <归档>        # 启动并直接打开
 
-cargo run -p spell-cli -- sniff <文件>
-cargo run -p spell-cli -- list <归档>
-cargo run -p spell-cli -- test <归档>
-cargo run -p spell-cli -- extract <归档> <目标目录> [--force|--rename|--number] [--password <pw>]
-cargo run -p spell-cli -- pack <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>] [--7z-level <0-9>] [--7z-dict <MiB>] [--force] [--append] [--password <pw>]
+cargo run -p thzip-cli -- sniff <文件>
+cargo run -p thzip-cli -- list <归档>
+cargo run -p thzip-cli -- test <归档>
+cargo run -p thzip-cli -- extract <归档> <目标目录> [--force|--rename|--number] [--password <pw>]
+cargo run -p thzip-cli -- pack <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>] [--7z-level <0-9>] [--7z-dict <MiB>] [--force] [--append] [--password <pw>]
 ```
 
 `--method` 只影响 zip；`--7z-level` / `--7z-dict` 只影响 7z；`--store` 优先。
@@ -120,16 +120,16 @@ tar 家族忽略。
 2. 主题下拉有 5 项：灵梦 / 魔理沙 / 早苗 / 琪露诺 / 素体。
 3. 打开 zip、7z、tar.gz、单文件 `.gz`，条目真实显示。
 4. 解压：选目录 → 预检弹窗 → 开始 → 进度/速度正确；运行中可取消。
-5. 创建：添加文件夹 → 输出 `.zip` / `.7z` / `.tar.gz`，任务完成后用 `spell list` 读回。
+5. 创建：添加文件夹 → 输出 `.zip` / `.7z` / `.tar.gz`，任务完成后用 `thzip list` 读回。
     zip 再分别选 Deflate / BZip2 / Zstd 各建一次。
 6. 加密：zip / 7z 勾选 AES-256 创建；无密码打开 7z 包头会提示密码。
-7. 设置：切主题/语言后退出重开，设置应保持（`%APPDATA%\SpellArchive\prefs.toml`）；
+7. 设置：切主题/语言后退出重开，设置应保持（`%APPDATA%\THzip-SpellArchive\prefs.toml`）；
    点表头换排序后重启，排序方向保持。
 8. 拖拽：把归档拖进窗口应直接打开；拖目录应切换左侧浏览目录；多文件拖入有忽略提示。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 119 通过；clippy 无告警。
+12. `cargo test --workspace` 127 通过；clippy 无告警。
 
 ---
 
@@ -149,16 +149,16 @@ spell_archive/
 │   ├── theme.toml
 │   └── png/
 ├── crates/
-│   ├── spell-core/            # 零 UI 依赖
-│   ├── spell-app/             # egui + eframe
-│   └── spell-cli/             # 复用 core
+│   ├── thzip-core/            # 零 UI 依赖
+│   ├── thzip-app/             # egui + eframe
+│   └── thzip-cli/             # 复用 core
 └── target/
 ```
 
 ### 3.2 分层规则（不要破坏）
 
-1. `spell-core` 不得出现 `egui` / `eframe` / UI 概念。
-   验证：`cargo tree -p spell-core | Select-String egui` 必须为空。
+1. `thzip-core` 不得出现 `egui` / `eframe` / UI 概念。
+   验证：`cargo tree -p thzip-core | Select-String egui` 必须为空。
 2. UI 不直接调用具体压缩库，只通过 `ArchiveReader` / `ArchiveWriter`。
 3. 所有写盘必须经过 `safety` 层：解压用 `ExtractDirSink`，归档创建用 `ArchiveWriter`
    （内部 `AtomicFile`），禁止直接 `File::create` 目标。
@@ -184,7 +184,7 @@ spell_archive/
 | `backend/name_codec.rs` | zip 名字 UTF-8 → GBK / Shift-JIS 择优 |
 | `backend/volume.rs` | `.7z.001` 识别、收集（缺卷列出卷号）与 `MultiVolumeReader` 拼接 |
 
-### 3.4 `spell-app` 模块
+### 3.4 `thzip-app` 模块
 
 | 文件 | 职责 |
 |---|---|
@@ -204,12 +204,12 @@ spell_archive/
 
 ```text
 main
- ├─ SingleInstance::new("SpellArchive.v1")
+ ├─ SingleInstance::new("THzip-SpellArchive.v1")
  │   └─ 非首实例：把启动参数写入 handoff.txt → 激活已有窗口 → 退出
  └─ run_native（首实例）
-     └─ SpellApp::new
+     └─ ThzipApp::new
          ├─ install_cjk_fonts          # simhei.ttf → Deng.ttf
-         ├─ Prefs::load()              # %APPDATA%\SpellArchive\prefs.toml（schema 4）
+         ├─ Prefs::load()              # %APPDATA%\THzip-SpellArchive\prefs.toml（schema 4）
          ├─ ThemeStore::load()         # 扫描主题 + 解析纹理路径（不解码）
          ├─ 按 prefs.theme 选中主题
          ├─ themes.ensure_loaded(ctx)  # 只解码当前主题的 PNG
@@ -342,7 +342,7 @@ UI 选目标目录
 - `SevenZOptions { level, dict_size }` 控制 LZMA2 压缩级别（0–9，默认 6）与字典
   （0 = 自动）；GUI 打包对话框和 CLI `--7z-level` / `--7z-dict` 均可用。
 - 有密码时 `AesEncoderOptions` + `set_encrypt_header(true)`。
-- 追加：`create_writer_append` 解出全部条目到临时目录后重建 7z 并原子替换；加密包直接拒绝（`EncryptedRewrite`），新条目保持未加密。
+- 追加：`create_writer_append` 解出全部条目到临时目录后重建 7z 并原子替换；加密包直接拒绝（`EncryptedRewrite`），新条目保持未加密。使用调用方的 cancel 与 Limits，并沿用 GUI/CLI 的 7z 级别/字典参数。
 - 固实块仍未暴露（sevenz-rust2 0.20 的逐条写入 API 只能非固实）。
 
 ### 4.3 tar 家族与单文件流
@@ -359,7 +359,7 @@ UI 选目标目录
 
 - tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4。
 - 文件权限按只读属性映射 444/644，目录 555/755；文件与目录 mtime 取源 metadata。
-- 追加：`create_writer_append` 先把现有条目解到临时目录，再重建容器并写回，最后由
+- 追加：`create_writer_append` 先把现有条目解到临时目录，再重建容器并写回，使用调用方的 cancel 与 Limits；最后由
   `AtomicFile` 原子替换；包含符号链接等无法保留的条目时拒绝追加（`AppendUnsupportedEntries`）。
 - 不支持加密。
 
@@ -470,17 +470,20 @@ pub enum TaskOp {
   尾随点/空格、超深/超长路径；`resolve_under` 保证最终路径在目标目录内。
 - `safety::display_guard`：把 U+202E 等 bidi/零宽字符替换为可见标记，UI 标记“伪装”。
 - 解压落盘前检测 junction/symlink（重解析点），拒绝顺着链接写出去。
+- 重写 / 追加 / RAR 大条目暂存目录走 `safety::TempDir`：`create_dir` 独占创建，重名则换随机后缀重试，
+  `Drop` 自动递归清理；避免复用可预测路径的本地竞态。
 
 ### 6.2 限额
 
 `Limits` 三档预设（严格/默认/宽松），默认值：
 
 - 总量 20 GiB、单条 8 GiB、条目 200,000
-- 流式压缩比上限 200
+- 压缩比上限 200：预检阶段用 `packed` 计算，压缩后 ≥ 1 MiB 且超过阈值时标记
+  `PlanWarning::BombSuspected` 并拒绝该条目（固实包无 packed，跳过）。
 - 路径深度 64、长度 32767
-- 字典 512 MiB、嵌套 2
+- 字典 512 MiB：写入 `ExtractPlan.limits`，zip 的 LZMA/XZ 解码器按此上限校验
 
-`Budget` 在 `ExtractDirSink` 内执行，触发即 `SinkError::Limit`。
+`Budget` 在 `ExtractDirSink` 内执行总量/单条/条目数限制，触发即 `SinkError::Limit`。
 
 ### 6.3 原子写
 
@@ -576,7 +579,9 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 ### 7.7 设置持久化
 
-- 路径：`%APPDATA%\SpellArchive\prefs.toml`（没有 APPDATA 时退回当前目录）。
+- 路径：`%APPDATA%\THzip-SpellArchive\prefs.toml`（没有 APPDATA 时退回当前目录）。
+- 改名迁移：新路径不存在时读取旧 `%APPDATA%\SpellArchive\prefs.toml`，解析后立即写入新路径；
+  旧文件保留不删除，便于回退。
 - 当前 schema 4；字段：`theme`、`locale`、`prefer_standard`、`show_hint`、`close_to_tray`、
   `last_dir`、`sort_key`、`sort_asc`、`window_size`。
 - schema 1/2/3 读取时自动升级到 4（缺失字段由 serde default 补齐）。
@@ -592,11 +597,13 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 - 文件动词：打开、解压到当前文件夹（`--extract-here`）、解压到单独文件夹（`--extract-to`）、
   添加到 zip（`--add`）；目录动词：添加到 zip。
 - 第二实例通过 `handoff.txt` 转交“意图 + 路径”，第一实例执行同样动作。
-- 注册在 `Software\Classes\*\shell\SpellArchive*` 与
-  `Software\Classes\Directory\shell\SpellArchive.AddToZip`；命令形如 `"<exe>" --extract-here "%1"`。
+- 注册在 `Software\Classes\*\shell\THzip-SpellArchive*` 与
+  `Software\Classes\Directory\shell\THzip-SpellArchive.AddToZip`；命令形如 `"<exe>" --extract-here "%1"`。
 - 设置页复选框实时读取注册表状态；勾选安装、取消卸载。
 - 启动时 `refresh_if_installed` 会把已安装菜单的 exe 路径改成当前进程路径，并按当前语言刷新菜单文案；
   exe 移动/升级后不会指向旧位置。
+- 改名迁移：若新键不存在但检测到旧 `SpellArchive*` 键，先按新名安装，再删除旧键；
+  旧键列表在 `shell_menu.rs` 的 `LEGACY_*` 常量里。
 - 菜单文案来自 `i18n::builtin(locale, TextKey::Shell*)`，切换语言时自动重装。
 - Win11 默认收进“显示更多选项”。
 
@@ -612,7 +619,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 ### 7.10 Windows 资源
 
-- `crates/spell-app/build.rs` 使用 `winresource`：嵌入 `icon.ico`、`app.manifest` 和版本字符串。
+- `crates/thzip-app/build.rs` 使用 `winresource`：嵌入 `icon.ico`、`app.manifest` 和版本字符串。
 - `icon.ico` 由 `themes/reimu/png/avatar.png` 经 ImageMagick 生成（16~256 多尺寸）。
 - `app.manifest` 声明 PerMonitorV2 DPI、longPathAware、Win10/11 supportedOS。
 - `main.rs` 用 `cfg_attr(not(debug_assertions), windows_subsystem = "windows")`：
@@ -629,7 +636,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 7.12 字体
 
 `install_cjk_fonts` 先挂内嵌的 Noto Sans SC 子集：
-`crates/spell-app/assets/NotoSansSC-subset.ttf`（Regular 400，GB2312 + 拉丁 + 常用标点，约 2.3 MiB），
+`crates/thzip-app/assets/NotoSansSC-subset.ttf`（Regular 400，GB2312 + 拉丁 + 常用标点，约 2.3 MiB），
 `include_bytes!` 编进 exe，系统没有中文字体也不会出现豆腐块。
 子集未覆盖的生僻字再回退系统字体：`C:/Windows/Fonts/simhei.ttf` → `Deng.ttf` → fontdb 常见 CJK 字体。
 字体为 SIL OFL 1.1，版权与全文见 `NOTICE.md` / `third_party/noto-sans-sc-OFL.txt`；
@@ -644,7 +651,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 ### 7.14 日志与自然排序
 
-- `logging.rs` 写 `%APPDATA%\SpellArchive\spellarchive.log`（级别/模块前缀）；启动、任务失败、设置保存失败、
+- `logging.rs` 写 `%APPDATA%\THzip-SpellArchive\thzip-spellarchive.log`（级别/模块前缀）；启动、任务失败、设置保存失败、
   主题导入、panic 都会落盘；超过 5 MiB 下次启动截断。
 - 结构化事件用 `log_fields` / `*_fields`：消息后追加 `key=value`，值含空白/引号/等号时自动加引号转义；
   任务失败记录 `task` / `error`，归档重写记录 `path` / `entries` / `bytes_out`，主题导入记录计数。
@@ -655,9 +662,9 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 ### 7.15 打包
 
-- `scripts/package.ps1`：release 构建 → `dist/SpellArchive/`（exe + themes + 文档 + `third_party/` 许可证）。
-- `packaging/SpellArchive.iss`：Inno Setup，安装到 `%LOCALAPPDATA%\Programs\SpellArchive`，
-  无需管理员；有 `iscc` 时生成 `dist/SpellArchive-<version>-setup.exe`。
+- `scripts/package.ps1`：release 构建 → `dist/THzip-SpellArchive/`（exe + themes + 文档 + `third_party/` 许可证）。
+- `packaging/THzip-SpellArchive.iss`：Inno Setup，安装到 `%LOCALAPPDATA%\Programs\THzip-SpellArchive`，
+  无需管理员；有 `iscc` 时生成 `dist/THzip-SpellArchive-<version>-setup.exe`。
 - 未做代码签名（技术债 #15）。
 
 ### 7.16 全量 i18n
@@ -668,8 +675,8 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
   zh-CN 与 en-US 必须使用同一组占位符，由单元测试强制校验。
 - `TextKey::ALL` 覆盖全部 Key；测试校验 Key 唯一、两种语言均非空、占位符一致。
 - 主题 `[text_map]` 仍可覆盖任意 Key；未覆盖时回退内置语言包。
-- 任务失败详情不再夹中文：`spell-core` 用 `FailReason` 输出结构化原因，
-  `spell-app/src/i18n/errors.rs` 负责中文/英文翻译；`ArchiveError` 的 `Display`
+- 任务失败详情不再夹中文：`thzip-core` 用 `FailReason` 输出结构化原因，
+  `thzip-app/src/i18n/errors.rs` 负责中文/英文翻译；`ArchiveError` 的 `Display`
   仍保留中文，供 CLI 与日志使用。
 
 ### 7.17 快捷键
@@ -722,7 +729,7 @@ PanelBg / 失败态进度图尚未提供；粒子贴图已从 assets/particles �
 四处必须同时改：
 
 1. `docs/theme_spec.md`（唯一真源）
-2. `spell-app/src/theme/mod.rs`：`ResKey` + `ALL` + `name()`
+2. `thzip-app/src/theme/mod.rs`：`ResKey` + `ALL` + `name()`
 3. 各主题 `theme.toml` 的 `[resource]`
 4. 使用处
 
@@ -751,30 +758,30 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **119** 个测试。
+当前共 **127** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
-| `spell-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `spell-app` 单元测试 | 32 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小 3、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
-| `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
+| `thzip-core` 单元测试 | 46 | path_sanitize、display_guard、bomb、atomic_fs、TempDir、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
+| `thzip-app` 单元测试 | 34 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
+| `tests/zip_backend.rs` | 13 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime、压缩比预检 |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
-| `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
+| `tests/zip_write.rs` | 9 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
-| `tests/tar_write.rs` | 3 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败 |
+| `tests/tar_write.rs` | 4 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败、追加取消 |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
-| `tests/sevenz_write.rs` | 5 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝 |
+| `tests/sevenz_write.rs` | 7 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝、重名条目、追加取消 |
 
 ### 9.3 手工验收（每次改格式/任务层都跑）
 
-1. `cargo run -p spell-app -- <zip>`：条目、时间、图标正确。
+1. `cargo run -p thzip-app -- <zip>`：条目、时间、图标正确。
 2. 解压 3 个条目到空目录，完成后核对内容。
 3. 解压到已有文件：分别试“跳过”和“覆盖”。
 4. 大包解压中点取消，UI 不卡，任务显示“已取消”。
-5. 创建 zip / 7z / tar.gz，用 `spell list` 与 `spell test` 验证。
+5. 创建 zip / 7z / tar.gz，用 `thzip list` 与 `thzip test` 验证。
 6. 创建加密 zip / 7z，无密码打开应提示，输入密码后可解压。
 7. 追加到 zip，确认原条目保留；追加同名应失败且原包不变。
 8. 切主题/语言，退出重开，设置保持。
@@ -816,7 +823,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
 | 29 | 已修复 | 托盘菜单走 i18n，语言切换后 `rebuild_tray` |
 | 30 | 已修复 | 启动时 `refresh_if_installed` 自动改写为当前 exe 路径 |
-| 31 | 已修复 | `ArchiveError` / `SinkError` 改用 `FailReason` 结构化原因；UI 按当前语言翻译 | `spell-app/src/i18n/errors.rs` |
+| 31 | 已修复 | `ArchiveError` / `SinkError` 改用 `FailReason` 结构化原因；UI 按当前语言翻译 | `thzip-app/src/i18n/errors.rs` |
 
 ---
 
@@ -852,7 +859,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 2. **不要开 `panic = "abort"`**：release profile 固定 unwind，否则 worker 兜底失效。
 3. **不要用文件名定位条目**：zip 允许重名，一律 `EntryId`。
 4. **不要绕过 `path_sanitize` / `write_atomic`**；创建归档只能走 `ArchiveWriter`。
-5. **不要给 `spell-core` 加 UI 依赖**。
+5. **不要给 `thzip-core` 加 UI 依赖**。
 6. **压缩/解压不要进 rayon 全局池**；嵌套并行 + 内存峰值失控。
 7. **时间语义**：zip 是本地墙钟（无时区），7z/tar 是 UTC；混用会漂移。
 8. **空目录**：zip/tar 需要显式目录条目，否则解压丢结构。
@@ -883,11 +890,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 文案 | i18n 与主题解耦 | 换素体主题不能丢中文 |
 | 表格 | egui_extras TableBuilder | 手工拼列必然错位 |
 | 工程结构 | workspace，core 零 UI 依赖 | 用 Cargo 强制分层 |
-| 设置 | `%APPDATA%\SpellArchive\prefs.toml` | 不污染安装目录，符合 Windows 习惯 |
+| 设置 | `%APPDATA%\THzip-SpellArchive\prefs.toml` | 不污染安装目录，符合 Windows 习惯 |
 | 单实例 | mutex + handoff 文件 + SetForegroundWindow | 不引入 IPC 依赖；跨进程转交简单 |
 | 托盘 | tray-icon + muda，关闭隐藏 | 桌面工具习惯；托盘菜单可恢复/退出 |
 | 右键菜单 | winreg 写 HKCU，多动词 | 免管理员；Win11 收进“显示更多选项”；支持解压/添加 |
 | 平台 | Windows 10+ / x64 | Win7 需要旧工具链，不值得 |
+| 项目名 | THzip-SpellArchive（v0.2.0 起） | 旧名 SpellArchive 保留为迁移常量；AppData、注册表、单实例键同步更新 |
 
 ---
 
@@ -898,15 +906,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
 - [ ] `cargo test --workspace`（107 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo run -p spell-app` 能开，5 个主题可切换
+- [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示
 - [ ] 解压 / 取消 / 覆盖策略 / 密码重试各试一次；RAR 加密包输入密码可解压
 - [ ] 解压到已有文件：分别试“跳过 / 覆盖 / 改名 / 自动编号”
-- [ ] 创建 zip / 7z / tar.gz，并 `spell list` 读回
-- [ ] zip 打包分别选 Deflate / BZip2 / Zstd，`spell list` 显示对应方法
-- [ ] 输出 `.7z` 时出现“7z 参数”；选级别 9 + 字典 16 MiB 创建，`spell list` 可读回
+- [ ] 创建 zip / 7z / tar.gz，并 `thzip list` 读回
+- [ ] zip 打包分别选 Deflate / BZip2 / Zstd，`thzip list` 显示对应方法
+- [ ] 输出 `.7z` 时出现“7z 参数”；选级别 9 + 字典 16 MiB 创建，`thzip list` 可读回
 - [ ] 追加 zip / 7z / tar.gz：原条目保留，重名失败，原包在失败时不变；加密 7z 拒绝追加
-- [ ] 确认 `%APPDATA%\SpellArchive\prefs.toml` 保存主题/语言/目录/排序键
+- [ ] 确认 `%APPDATA%\THzip-SpellArchive\prefs.toml` 保存主题/语言/目录/排序键
 - [ ] 调整窗口大小后重启，主窗口保持上次尺寸（不恢复位置）
 - [ ] 快捷键：Ctrl+O 打开、Ctrl+E 解压、Ctrl+F 搜索、Ctrl+A 全选、Delete 删除、F2 重命名、F5 刷新
 - [ ] 点表头改排序后重启，排序方向保持
@@ -916,9 +924,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 切换语言后托盘菜单文案同步变化，状态栏重置为本地化“就绪”
 - [ ] 切换到 English 后：打包/预检/密码对话框、设置页、任务状态、文件选择器标题均为英文；再切回中文无残留
 - [ ] 已安装右键菜单时切换语言，`reg query` 中菜单显示名同步更新
-- [ ] 设置页勾选/取消右键菜单，`reg query HKCU\Software\Classes\*\shell\SpellArchive` 有/无
+- [ ] 设置页勾选/取消右键菜单，`reg query HKCU\Software\Classes\*\shell\THzip-SpellArchive` 有/无
 - [ ] 右键 zip 分别试“打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip”
-- [ ] 命令行 `spell_archive.exe --extract-here <zip>` 能直接弹预检
+- [ ] 命令行 `thzip-spellarchive.exe --extract-here <zip>` 能直接弹预检
 - [ ] 复制一份 exe 改名后启动，右键菜单命令路径自动更新为当前 exe
 - [ ] 运行中 touch `themes/*/theme.toml`，2 秒内出现“主题文件已重新加载”
 - [ ] 从资源管理器拖文件到窗口，出现“松开以打开归档”覆盖层
@@ -932,10 +940,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 选中多个条目点“批量改名…”，用 `{name}_{n}` 生成新名；文件扩展名保留，重名时提示错误
 - [ ] 选中多个条目点“正则改名…”，`ep(\d+)` → `第$1话` 生效；非法正则在对话框内提示
 - [ ] 解压后文件修改时间等于归档内记录时间
-- [ ] `%APPDATA%\SpellArchive\spellarchive.log` 有启动记录；panic 会落盘
-- [ ] `scripts/package.ps1` 能产出 `dist/SpellArchive/`
-- [ ] `(Get-Item target/debug/spell_archive.exe).VersionInfo` 有 FileDescription/FileVersion
-- [ ] 确认 `spell-core` 依赖树无 egui
+- [ ] `%APPDATA%\THzip-SpellArchive\thzip-spellarchive.log` 有启动记录；panic 会落盘
+- [ ] `scripts/package.ps1` 能产出 `dist/THzip-SpellArchive/`
+- [ ] `(Get-Item target/debug/thzip-spellarchive.exe).VersionInfo` 有 FileDescription/FileVersion
+- [ ] 确认 `thzip-core` 依赖树无 egui
 - [ ] 检查 `git status`，决定是否提交当前批次
 - [ ] 确认素材许可证边界（代码 MIT / 素材 CC BY-NC-SA 4.0）
 

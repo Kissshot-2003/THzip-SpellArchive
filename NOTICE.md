@@ -6,7 +6,7 @@ MIT（见 LICENSE，若尚未添加则以仓库声明为准）。
 
 ## 美术素材
 
-`themes/*/png/` 内的图标、头像、进度条贴图来自 `../assets/`（SpellArchive 同人自制像素素材），
+`themes/*/png/` 内的图标、头像、进度条贴图来自 `../assets/`（THzip-SpellArchive 同人自制像素素材），
 以 **CC BY-NC-SA 4.0** 授权：署名、非商用、相同方式共享。
 
 因此：
@@ -16,7 +16,7 @@ MIT（见 LICENSE，若尚未添加则以仓库声明为准）。
 
 ## 字体
 
-程序内嵌 **Noto Sans SC** 子集（`crates/spell-app/assets/NotoSansSC-subset.ttf`，Regular 400，
+程序内嵌 **Noto Sans SC** 子集（`crates/thzip-app/assets/NotoSansSC-subset.ttf`，Regular 400，
 覆盖 GB2312 + 拉丁字符 + 常用标点），独立于系统字体；子集未覆盖的生僻字仍回退系统 CJK 字体。
 
 - 版权：Copyright 2014-2021 Adobe (http://www.adobe.com/)，Reserved Font Name 'Source'。
@@ -36,5 +36,5 @@ RAR 读取通过 `unrar-ng` / `unrar-ng-sys` 使用 UnRAR 源码：
 
 ## 同人声明
 
-SpellArchive 是东方 Project 二次同人作品，与上海爱丽丝幻乐团、ZUN 无关联，
+THzip-SpellArchive 是东方 Project 二次同人作品，与上海爱丽丝幻乐团、ZUN 无关联，
 遵循「東方Project 二次創作ガイドライン」，禁止商用。

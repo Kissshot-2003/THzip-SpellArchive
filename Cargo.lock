@@ -4274,58 +4274,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spell-app"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_extras",
- "fontdb",
- "image",
- "regex",
- "resvg",
- "rfd",
- "serde",
- "single-instance",
- "spell-core",
- "toml 1.1.8+spec-1.1.0",
- "tray-icon",
- "windows-sys 0.61.2",
- "winreg",
- "winresource",
-]
-
-[[package]]
-name = "spell-cli"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "spell-core",
-]
-
-[[package]]
-name = "spell-core"
-version = "0.1.0"
-dependencies = [
- "bzip2",
- "crc32fast",
- "crossbeam-channel",
- "encoding_rs",
- "flate2",
- "liblzma",
- "lz4_flex",
- "lzma-rust2",
- "sevenz-rust2",
- "tar",
- "thiserror 2.0.21",
- "unrar-ng",
- "windows-sys 0.61.2",
- "zeroize",
- "zip",
- "zstd",
-]
-
-[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4513,6 +4461,58 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "thzip-app"
+version = "0.2.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_extras",
+ "fontdb",
+ "image",
+ "regex",
+ "resvg",
+ "rfd",
+ "serde",
+ "single-instance",
+ "thzip-core",
+ "toml 1.1.8+spec-1.1.0",
+ "tray-icon",
+ "windows-sys 0.61.2",
+ "winreg",
+ "winresource",
+]
+
+[[package]]
+name = "thzip-cli"
+version = "0.2.0"
+dependencies = [
+ "crc32fast",
+ "thzip-core",
+]
+
+[[package]]
+name = "thzip-core"
+version = "0.2.0"
+dependencies = [
+ "bzip2",
+ "crc32fast",
+ "crossbeam-channel",
+ "encoding_rs",
+ "flate2",
+ "liblzma",
+ "lz4_flex",
+ "lzma-rust2",
+ "sevenz-rust2",
+ "tar",
+ "thiserror 2.0.21",
+ "unrar-ng",
+ "windows-sys 0.61.2",
+ "zeroize",
+ "zip",
+ "zstd",
 ]
 
 [[package]]

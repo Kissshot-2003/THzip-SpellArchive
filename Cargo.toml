@@ -1,17 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["crates/spell-core", "crates/spell-app", "crates/spell-cli"]
-default-members = ["crates/spell-app"]
+members = ["crates/thzip-core", "crates/thzip-app", "crates/thzip-cli"]
+default-members = ["crates/thzip-app"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-authors = ["SpellArchive contributors"]
+authors = ["THzip-SpellArchive contributors"]
 
 [workspace.dependencies]
-spell-core = { path = "crates/spell-core" }
+thzip-core = { path = "crates/thzip-core" }
 thiserror = "2"
 zeroize = "1"
 encoding_rs = "0.8"

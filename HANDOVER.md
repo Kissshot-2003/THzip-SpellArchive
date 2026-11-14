@@ -3,7 +3,7 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（快捷键、窗口大小持久化、失败条目详情、预检详情、结构化日志字段、结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
+> 最后更新：2026-11（tar 家族追加、快捷键、窗口大小持久化、失败条目详情、预检详情、结构化日志字段、结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
 
 ---
 
@@ -26,11 +26,11 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（117）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（118）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
-- **工作区状态**：最新提交 `c2e5a6e`，工作区干净，无远端。
+- **工作区状态**：工作区干净，无远端；最新提交见 `git log -1`。
 - **下一步建议**：代码签名或 RAR 大条目优化。
 
 ---
@@ -51,22 +51,22 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 |---|---|---|---|---|---|
 | zip | 是 | 是 | 是 | AES-256 | 写入 Store/Deflate/BZip2/Zstd；读取 Store/Deflate/Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；zip64；同名 `~1` |
 | 7z | 是 | 是 | 否 | AES-256 头加密 | 固实包；LZMA2（级别/字典可调）/COPY 写入 |
-| tar | 是 | 是 | 否 | 否 | PAX / GNU longname 由 tar crate 处理 |
-| tar.gz / tgz | 是 | 是 | 否 | 否 | 无 `.tar` 扩展名时探测内层 ustar |
-| tar.bz2 / tbz2 / tbz | 是 | 是 | 否 | 否 | 同上 |
-| tar.xz / txz | 是 | 是 | 否 | 否 | 同上 |
-| tar.zst / tzst | 是 | 是 | 否 | 否 | 同上 |
-| tar.lz4 / tlz4 | 是 | 是 | 否 | 否 | 同上 |
+| tar | 是 | 是 | 是 | 否 | PAX / GNU longname 由 tar crate 处理；追加为解包重建 |
+| tar.gz / tgz | 是 | 是 | 是 | 否 | 无 `.tar` 扩展名时探测内层 ustar |
+| tar.bz2 / tbz2 / tbz | 是 | 是 | 是 | 否 | 同上 |
+| tar.xz / txz | 是 | 是 | 是 | 否 | 同上 |
+| tar.zst / tzst | 是 | 是 | 是 | 否 | 同上 |
+| tar.lz4 / tlz4 | 是 | 是 | 是 | 否 | 同上 |
 | gz / bz2 / xz / zst / lz4 | 是 | 否 | 否 | 否 | 单文件流，打开时先读一遍求大小 |
 | rar | 是 | 否 | 否 | 支持 | 基于 unrar-ng（UnRAR 许可）；支持多卷（从任意卷打开）；大条目走临时文件中转 |
 | 分卷 `.7z.001` | 是 | 否 | 否 | 同主包 | 读取时按字节拼接成逻辑流；从任意卷号打开都可 |
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 16969 行（含测试）。
-- 最新提交：`c2e5a6e feat: batch rename, 7z tuning, embedded CJK font and full i18n`
+- Rust 约 19000 行（含测试）。
+- 最新提交：以 `git log -1` 为准（本文件不再记录哈希，避免文档漂移）。
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
-- 工作区干净（本轮：批量改名模板、内嵌 CJK 字体、7z 写入参数、重命名/移动、全量 i18n 文案、右键菜单本地化、i18n 完整性测试，已在 `c2e5a6e` 提交）。
+- 工作区干净；近期已提交：结构化错误码、正则改名、结构化日志、预检/失败详情、快捷键、窗口大小持久化、tar 家族追加。
 - 接手第一件事：`git status` → 跑测试 → 按路线图选下一项。
 
 ---
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 117 个测试
+cargo test --workspace                 # 118 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -111,7 +111,7 @@ cargo run -p spell-cli -- pack <输出> <输入...> [--store] [--method <deflate
 - `.tar.zst` / `.tzst`
 - `.tar.lz4` / `.tlz4`
 
-`--append` 只支持 zip；`--password` 只支持 zip / 7z；`--store` 对 zip 是 Store、对 7z 是 COPY，
+`--append` 支持 zip 与 tar 家族；`--password` 只支持 zip / 7z；`--store` 对 zip 是 Store、对 7z 是 COPY，
 tar 家族忽略。
 
 ### 2.3 环境验收
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 117 通过；clippy 无告警。
+12. `cargo test --workspace` 118 通过；clippy 无告警。
 
 ---
 
@@ -358,7 +358,9 @@ UI 选目标目录
 
 - tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4。
 - 文件权限按只读属性映射 444/644，目录 555/755；文件与目录 mtime 取源 metadata。
-- 不支持加密与追加。
+- 追加：`create_writer_append` 先把现有条目解到临时目录，再重建容器并写回，最后由
+  `AtomicFile` 原子替换；包含符号链接等无法保留的条目时拒绝追加（`AppendUnsupportedEntries`）。
+- 不支持加密。
 
 ### 4.4 RAR
 
@@ -748,7 +750,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **117** 个测试。
+当前共 **118** 个测试。
 
 ### 9.2 测试分布
 
@@ -761,7 +763,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
 | `tests/task_runner.rs` | 9 | Open→Plan→Extract、取消、Pack、主题导入/拒绝/可执行文件/条目上限、失败事件 |
 | `tests/tar_backend.rs` | 1 | 6 种 tar 容器读取/解压/测试 |
-| `tests/tar_write.rs` | 2 | 6 种 tar 容器创建往返、密码拒绝 |
+| `tests/tar_write.rs` | 3 | 6 种 tar 容器创建往返、密码拒绝、追加成功/重名失败 |
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
 | `tests/sevenz_write.rs` | 4 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返 |
 
@@ -808,7 +810,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 23 | 已修复 | 缺卷时错误信息列出缺失卷号 |
 | 24 | 单文件流打开时先解压一遍求大小 | 大文件打开/解压读两遍 | 列表尺寸懒加载或显示“未知” |
 | 25 | 部分修复 | 解压统一恢复 mtime；tar 写入按只读属性生成 444/644、目录 555/755，并保留目录 mtime |
-| 26 | tar 家族不支持追加与加密 | 只能新建 | 追加需重写整包 |
+| 26 | 部分修复 | tar 家族支持追加（解包重建 + 原子替换），仍不支持加密 | 加密不在 tar 规范内，保持不支持 |
 | 27 | 已修复 | 多卷自动定位第一卷；大条目临时文件中转，无 512 MiB 硬上限 |
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
 | 29 | 已修复 | 托盘菜单走 i18n，语言切换后 `rebuild_tray` |
@@ -836,7 +838,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 - zip：加密 LZMA/XZ；写端可选更多压缩方法。
 - 7z：固实包压缩字节进度；固实写入；可选追加（需重写）。
-- tar：可选追加/加密（写入已保留只读属性、文件/目录 mtime）。
+- tar：可选加密（不在 tar 规范内，暂不做）；追加已完成。
 - RAR：超大条目的性能优化；注意 UnRAR 许可证。
 
 ---
@@ -902,7 +904,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 创建 zip / 7z / tar.gz，并 `spell list` 读回
 - [ ] zip 打包分别选 Deflate / BZip2 / Zstd，`spell list` 显示对应方法
 - [ ] 输出 `.7z` 时出现“7z 参数”；选级别 9 + 字典 16 MiB 创建，`spell list` 可读回
-- [ ] 追加 zip：原条目保留，重名失败
+- [ ] 追加 zip / tar.gz：原条目保留，重名失败，原包在失败时不变
 - [ ] 确认 `%APPDATA%\SpellArchive\prefs.toml` 保存主题/语言/目录/排序键
 - [ ] 调整窗口大小后重启，主窗口保持上次尺寸（不恢复位置）
 - [ ] 快捷键：Ctrl+O 打开、Ctrl+E 解压、Ctrl+F 搜索、Ctrl+A 全选、Delete 删除、F2 重命名、F5 刷新

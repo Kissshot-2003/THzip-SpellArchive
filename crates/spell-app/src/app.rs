@@ -1162,7 +1162,7 @@ impl SpellApp {
         }
 
         let append = self.pack_state.append;
-        if append && kind != ArchiveKind::Zip {
+        if append && !spell_core::backend::supports_append(kind) {
             let message = self.tr.t(TextKey::PackErrAppendZipOnly);
             self.pack_state.error = Some(message);
             return;

@@ -117,3 +117,59 @@ fn tar_rejects_password() {
     );
     assert!(result.is_err());
 }
+
+#[test]
+fn tar_family_appends_entries() {
+    let dir = TempDir::new("append");
+    let src = build_source(dir.path());
+    let limits = Limits::default();
+    let archive = dir.path().join("append.tar.gz");
+
+    let entries = scan_inputs(std::slice::from_ref(&src), &limits).unwrap();
+    let mut writer = backend::create_writer(&archive, ArchiveKind::TarGz, Method::Store).unwrap();
+    write_entries(writer.as_mut(), &entries, None, &CancelToken::new(), &|_| {}).unwrap();
+    writer.finish().unwrap();
+
+    let extra = dir.path().join("extra.txt");
+    std::fs::write(&extra, b"appended").unwrap();
+    let extra_entries = scan_inputs(std::slice::from_ref(&extra), &limits).unwrap();
+    let mut writer =
+        backend::create_writer_append(&archive, ArchiveKind::TarGz, Method::Store).unwrap();
+    write_entries(
+        writer.as_mut(),
+        &extra_entries,
+        None,
+        &CancelToken::new(),
+        &|_| {},
+    )
+    .unwrap();
+    writer.finish().unwrap();
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("素材/说明.txt")).unwrap(),
+        "灵梦 tar 写入".as_bytes()
+    );
+    assert_eq!(std::fs::read(target.join("extra.txt")).unwrap(), b"appended");
+
+    // 追加同名条目必须失败，且原归档保持不变。
+    let duplicate = scan_inputs(std::slice::from_ref(&src), &limits).unwrap();
+    let mut writer =
+        backend::create_writer_append(&archive, ArchiveKind::TarGz, Method::Store).unwrap();
+    let result = write_entries(
+        writer.as_mut(),
+        &duplicate,
+        None,
+        &CancelToken::new(),
+        &|_| {},
+    );
+    assert!(result.is_err());
+    drop(writer);
+
+    let target = dir.path().join("out-again");
+    let report = extract_all(&archive, &target);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert!(target.join("extra.txt").is_file());
+}

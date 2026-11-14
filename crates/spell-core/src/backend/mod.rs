@@ -234,8 +234,28 @@ pub fn create_writer_append(
 ) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
     match kind {
         ArchiveKind::Zip => Ok(Box::new(zip_write::ZipArchiveWriter::append(path, method)?)),
+        ArchiveKind::Tar
+        | ArchiveKind::TarGz
+        | ArchiveKind::TarBz2
+        | ArchiveKind::TarXz
+        | ArchiveKind::TarZst
+        | ArchiveKind::TarLz4 => Ok(Box::new(tar_write::TarArchiveWriter::append(path, kind)?)),
         other => Err(ArchiveError::Unsupported(FailReason::AppendUnsupported {
             format: other.label().to_owned(),
         })),
     }
+}
+
+/// 该容器是否支持追加（zip 原位追加；tar 家族先解包重建再原子替换）。
+pub fn supports_append(kind: ArchiveKind) -> bool {
+    matches!(
+        kind,
+        ArchiveKind::Zip
+            | ArchiveKind::Tar
+            | ArchiveKind::TarGz
+            | ArchiveKind::TarBz2
+            | ArchiveKind::TarXz
+            | ArchiveKind::TarZst
+            | ArchiveKind::TarLz4
+    )
 }

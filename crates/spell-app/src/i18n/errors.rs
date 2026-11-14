@@ -184,6 +184,9 @@ fn reason_en(reason: &FailReason) -> String {
         FailReason::AppendPasswordUnsupported => {
             "Append mode does not support setting a new password".to_owned()
         }
+        FailReason::AppendUnsupportedEntries { count } => format!(
+            "The archive contains {count} entries that cannot be preserved; append cancelled"
+        ),
         FailReason::ThemeManifestMissing => {
             "Invalid theme pack: expected <theme>/theme.toml".to_owned()
         }

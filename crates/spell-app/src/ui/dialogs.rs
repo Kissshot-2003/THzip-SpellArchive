@@ -123,9 +123,10 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
             let output_kind = crate::app::kind_for_output(&output_path);
             let is_zip = matches!(output_kind, Some(ArchiveKind::Zip));
             let is_7z = matches!(output_kind, Some(ArchiveKind::SevenZ));
+            let supports_append = output_kind.is_some_and(spell_core::backend::supports_append);
             let supports_encrypt =
                 matches!(output_kind, Some(ArchiveKind::Zip | ArchiveKind::SevenZ));
-            if !is_zip && app.pack_state.append {
+            if !supports_append && app.pack_state.append {
                 app.pack_state.append = false;
                 app.pack_state.encrypt = false;
                 app.pack_state.password.clear();
@@ -197,7 +198,7 @@ fn pack_dialog(app: &mut SpellApp, ctx: &egui::Context) {
                         });
                 });
             }
-            ui.add_enabled_ui(is_zip, |ui| {
+            ui.add_enabled_ui(supports_append, |ui| {
                 if ui
                     .checkbox(&mut app.pack_state.append, append_mode)
                     .changed()

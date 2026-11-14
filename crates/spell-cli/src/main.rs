@@ -81,6 +81,7 @@ fn usage() {
   - --method 只影响 zip：deflate（默认）/ bzip2 / zstd；--store 优先。
   - --7z-level / --7z-dict 只影响 7z：级别 0–9（默认 6），字典 MiB（0 = 自动）。
   - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
+  - --append 支持 zip / tar 家族；tar 会先解包重建，完成后原子替换。
   - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
 }
@@ -385,8 +386,8 @@ fn pack(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    if append && kind != ArchiveKind::Zip {
-        eprintln!("追加模式只支持 zip");
+    if append && !backend::supports_append(kind) {
+        eprintln!("追加模式只支持 zip / tar 家族");
         return ExitCode::FAILURE;
     }
     if password.is_some() && !matches!(kind, ArchiveKind::Zip | ArchiveKind::SevenZ) {
@@ -399,7 +400,7 @@ fn pack(args: &[String]) -> ExitCode {
     }
     if append {
         if !output.is_file() {
-            eprintln!("追加模式要求目标 zip 已存在：{}", output.display());
+            eprintln!("追加模式要求目标归档已存在：{}", output.display());
             return ExitCode::FAILURE;
         }
     } else if output.exists() && !force {

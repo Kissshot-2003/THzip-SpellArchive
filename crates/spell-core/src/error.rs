@@ -99,6 +99,7 @@ pub enum FailReason {
     InvalidName(NameIssue),
 
     AppendPasswordUnsupported,
+    AppendUnsupportedEntries { count: usize },
     ThemeManifestMissing,
     ThemeTooManyEntries { count: usize, limit: usize },
     ThemeFileTooLarge { name: String, size: u64 },
@@ -198,6 +199,9 @@ impl FailReason {
             }
             FailReason::InvalidName(issue) => issue.zh().to_owned(),
             FailReason::AppendPasswordUnsupported => "追加模式暂不支持设置新密码".to_owned(),
+            FailReason::AppendUnsupportedEntries { count } => {
+                format!("归档包含 {count} 个无法保留的条目，已取消追加")
+            }
             FailReason::ThemeManifestMissing => {
                 "主题包格式不对，需要 <主题目录>/theme.toml".to_owned()
             }

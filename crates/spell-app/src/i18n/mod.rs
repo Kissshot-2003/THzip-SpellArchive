@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::theme::Theme;
 
 pub mod errors;
+pub mod warnings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {

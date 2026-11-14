@@ -17,7 +17,7 @@ pub fn error(locale: Locale, error: &ArchiveError) -> String {
     reason(locale, &error.reason())
 }
 
-fn limit_en(hit: LimitHit) -> &'static str {
+pub(crate) fn limit_en(hit: LimitHit) -> &'static str {
     match hit {
         LimitHit::TotalBytes => "total extracted size",
         LimitHit::EntryBytes => "single entry size",
@@ -32,7 +32,7 @@ fn limit_en(hit: LimitHit) -> &'static str {
     }
 }
 
-fn issue_en(issue: SanitizeError) -> String {
+pub(crate) fn issue_en(issue: SanitizeError) -> String {
     match issue {
         SanitizeError::Empty => "entry name is empty".to_owned(),
         SanitizeError::Absolute => "absolute paths are rejected".to_owned(),

@@ -470,6 +470,16 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
     let conflicts = plan.conflicts.len();
     let warnings = plan.warnings.len();
     let needs_password = plan.needs_password;
+    let conflict_lines: Vec<String> = plan
+        .conflicts
+        .iter()
+        .map(|item| crate::i18n::warnings::conflict(app.locale, item))
+        .collect();
+    let warning_lines: Vec<String> = plan
+        .warnings
+        .iter()
+        .map(|item| crate::i18n::warnings::warning(app.locale, item))
+        .collect();
     let target = pending.target.display().to_string();
     let entry_count = app
         .tr
@@ -516,7 +526,7 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
                     );
                     ui.end_row();
 
-                    ui.label(egui::RichText::new(conflicts_label).color(palette.text_sub));
+                    ui.label(egui::RichText::new(&conflicts_label).color(palette.text_sub));
                     let color = if conflicts > 0 {
                         palette.warning
                     } else {
@@ -525,10 +535,42 @@ fn precheck(app: &mut SpellApp, ctx: &egui::Context) {
                     ui.label(egui::RichText::new(conflicts.to_string()).color(color));
                     ui.end_row();
 
-                    ui.label(egui::RichText::new(warnings_label).color(palette.text_sub));
+                    ui.label(egui::RichText::new(&warnings_label).color(palette.text_sub));
                     ui.label(warnings.to_string());
                     ui.end_row();
                 });
+
+            if !conflict_lines.is_empty() {
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new(format!("{conflicts_label}: {conflicts}"))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        for line in conflict_lines
+                            .iter()
+                            .take(crate::i18n::warnings::MAX_LINES)
+                        {
+                            ui.label(egui::RichText::new(line).size(12.0));
+                        }
+                        if conflict_lines.len() > crate::i18n::warnings::MAX_LINES {
+                            ui.label("…");
+                        }
+                    });
+            }
+            if !warning_lines.is_empty() {
+                egui::CollapsingHeader::new(format!("{warnings_label}: {warnings}"))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        for line in warning_lines
+                            .iter()
+                            .take(crate::i18n::warnings::MAX_LINES)
+                        {
+                            ui.label(egui::RichText::new(line).size(12.0));
+                        }
+                        if warning_lines.len() > crate::i18n::warnings::MAX_LINES {
+                            ui.label("…");
+                        }
+                    });
+            }
 
             if needs_password {
                 ui.add_space(4.0);

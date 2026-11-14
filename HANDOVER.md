@@ -26,7 +26,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（114）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（116）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 114 个测试
+cargo test --workspace                 # 116 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 114 通过；clippy 无告警。
+12. `cargo test --workspace` 116 通过；clippy 无告警。
 
 ---
 
@@ -194,6 +194,7 @@ spell_archive/
 | `logging.rs` | 文本日志 + panic hook，5 MiB 轮转 |
 | `i18n/mod.rs` | zh-CN / en-US 全量文案 + 主题覆盖 + 标准术语开关 + `{name}` 占位符格式化 + 完整性测试 |
 | `i18n/errors.rs` | `FailReason` 的中文/英文翻译；密码相关标记 |
+| `i18n/warnings.rs` | `PlanWarning` / `Conflict` 的中文/英文翻译；预检列表上限 |
 | `theme/{mod,loader}.rs` | 主题扫描、纹理路径解析、按需解码、九宫格切片、签名轮询、主题目录定位 |
 | `tray.rs` | 托盘图标与本地化菜单 |
 | `shell_menu.rs` | HKCU 右键菜单：打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip；启动自检 exe 路径 |
@@ -553,9 +554,10 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 
 - 预检在后台 `TaskOp::Plan` 执行，完成后 `TaskEvent::PlanReady` 弹窗；不会卡住 UI。
 - 预检内容：条目数、总大小、最大单文件、冲突、警告、剩余空间、加密提示；
+  冲突与警告可展开查看前 12 条详情（条目 ID、路径、原因），文案随语言切换；
   冲突策略：跳过已有 / 覆盖已有 / 保留已有并改名（`a~1.txt`）/ 自动编号（`a (1).txt`）。
   目录条目冲突时不改名，避免子条目仍写旧路径。
-- 密码：打开任务返回 `NeedPassword` 或失败信息含“密码”时弹出。
+- 密码：打开任务返回 `NeedPassword`，或失败原因 `is_password_related()` 为真时弹出。
 - 打包：添加文件/文件夹、输出路径、扩展名决定格式、仅存储、AES、追加；
   zip 显示压缩方法，7z 显示压缩级别与字典大小，其他格式不显示这两组参数；
   非 zip 禁用追加；非 zip/7z 禁用加密；输出已存在需二次确认。
@@ -726,14 +728,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **114** 个测试。
+当前共 **116** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
 | `spell-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `spell-app` 单元测试 | 29 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3 |
+| `spell-app` 单元测试 | 31 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |

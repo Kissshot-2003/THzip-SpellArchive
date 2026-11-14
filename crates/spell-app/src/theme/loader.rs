@@ -337,7 +337,8 @@ fn parse_hex(raw: &str) -> Option<Color32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_texture, parse_hex, resolve};
+    use super::{Manifest, load_texture, parse_hex, resolve};
+    use crate::theme::ResKey;
     use eframe::egui::Color32;
     use std::path::Path;
 
@@ -375,5 +376,51 @@ mod tests {
         let root = Path::new("C:/themes/reimu");
         assert!(resolve(root, "../marisa/png/a.png").is_none());
         assert!(resolve(root, "C:/Windows/System32/x.png").is_none());
+    }
+
+    #[test]
+    fn res_keys_are_unique_and_roundtrip() {
+        let mut seen = std::collections::HashSet::new();
+        for &key in ResKey::ALL {
+            assert!(seen.insert(key.name()), "duplicate key {}", key.name());
+            assert_eq!(ResKey::from_name(key.name()), Some(key));
+        }
+    }
+
+    #[test]
+    fn repository_themes_reference_known_and_existing_resources() {
+        let themes = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&themes).unwrap() {
+            let dir = std::fs::canonicalize(entry.unwrap().path()).unwrap();
+            let manifest = dir.join("theme.toml");
+            if !manifest.is_file() {
+                continue;
+            }
+            let text = std::fs::read_to_string(&manifest).unwrap();
+            let parsed: Manifest =
+                toml::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", manifest.display()));
+            for (key_name, rel_path) in &parsed.resource {
+                assert!(
+                    ResKey::from_name(key_name).is_some(),
+                    "{}: unknown resource key {key_name}",
+                    manifest.display()
+                );
+                assert!(
+                    resolve(&dir, rel_path).is_some(),
+                    "{}: missing resource {rel_path}",
+                    manifest.display()
+                );
+            }
+            for key_name in parsed.resource_nine_patch.keys() {
+                assert!(
+                    ResKey::from_name(key_name).is_some(),
+                    "{}: unknown nine-patch key {key_name}",
+                    manifest.display()
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked > 0, "no theme manifests found under {}", themes.display());
     }
 }

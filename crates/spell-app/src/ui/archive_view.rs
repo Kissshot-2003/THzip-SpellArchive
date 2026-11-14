@@ -89,6 +89,10 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                                 .hint_text(search_hint)
                                 .desired_width(width),
                         );
+                        if app.focus_search {
+                            response.request_focus();
+                            app.focus_search = false;
+                        }
                         if response.changed() {
                             app.search = search;
                         }

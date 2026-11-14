@@ -246,6 +246,7 @@ pub struct SpellApp {
     pub reader: Option<SharedReader>,
     pub entries: Vec<ArchiveEntry>,
     pub search: String,
+    pub focus_search: bool,
     pub selected: std::collections::BTreeSet<usize>,
     pub last_selected: Option<usize>,
     pub sort_key: SortKey,
@@ -323,6 +324,7 @@ impl SpellApp {
             reader: None,
             entries: Vec::new(),
             search: String::new(),
+            focus_search: false,
             selected: std::collections::BTreeSet::new(),
             last_selected: None,
             sort_key: prefs
@@ -1574,6 +1576,63 @@ impl SpellApp {
         }
     }
 
+    /// 全局快捷键。模态框打开时不响应；文本输入框聚焦时跳过无修饰键快捷键。
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.show_settings
+            || self.show_pack
+            || self.pending_password.is_some()
+            || self.pending_extract.is_some()
+            || self.relocate.is_some()
+        {
+            return;
+        }
+        let typing = ctx.egui_wants_keyboard_input();
+        let (mut open, mut extract, mut pack, mut test, mut search) = (false, false, false, false, false);
+        let (mut select_all, mut delete, mut rename, mut refresh) = (false, false, false, false);
+        ctx.input_mut(|input| {
+            open = input.consume_key(egui::Modifiers::COMMAND, egui::Key::O);
+            extract = input.consume_key(egui::Modifiers::COMMAND, egui::Key::E);
+            pack = input.consume_key(egui::Modifiers::COMMAND, egui::Key::P);
+            test = input.consume_key(egui::Modifiers::COMMAND, egui::Key::T);
+            search = input.consume_key(egui::Modifiers::COMMAND, egui::Key::F);
+            if !typing {
+                select_all = input.consume_key(egui::Modifiers::COMMAND, egui::Key::A);
+                delete = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete);
+                rename = input.consume_key(egui::Modifiers::NONE, egui::Key::F2);
+                refresh = input.consume_key(egui::Modifiers::NONE, egui::Key::F5);
+            }
+        });
+
+        if open {
+            self.open_archive_dialog();
+            return;
+        }
+        if extract && self.reader.is_some() {
+            self.begin_extract_dialog();
+        }
+        if pack {
+            self.open_pack_dialog();
+        }
+        if test && self.reader.is_some() {
+            self.start_test();
+        }
+        if search {
+            self.focus_search = true;
+        }
+        if select_all {
+            self.select_all_filtered();
+        }
+        if delete && !self.selected.is_empty() {
+            self.delete_selected_entries();
+        }
+        if rename && self.selected.len() == 1 {
+            self.begin_relocate(RelocateMode::Rename);
+        }
+        if refresh {
+            self.refresh_dir();
+        }
+    }
+
     pub fn tick(&mut self) {
         while let Some(event) = self.runner.try_recv() {
             self.apply_event(event);
@@ -1617,6 +1676,8 @@ impl eframe::App for SpellApp {
                 }
             }
         }
+
+        self.handle_shortcuts(&ctx);
 
         if ctx.input(|input| input.viewport().close_requested())
             && self.close_to_tray

@@ -76,7 +76,7 @@ fn usage() {
                                           安全解压；默认跳过已有文件
   thzip pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
                 [--7z-level <0-9>] [--7z-dict <MiB>] [--volume-size <MiB>]
-                [--force] [--append] [--password <pw>] [--json]
+                [--comment <文本>] [--force] [--append] [--password <pw>] [--json]
                                           创建 zip / 7z / tar 家族；--password 用于 zip / 7z 加密
   thzip --version
 
@@ -91,6 +91,7 @@ fn usage() {
   - --7z-level / --7z-dict 只影响 7z：级别 0–9（默认 6），字典 MiB（0 = 自动）。
   - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
   - --volume-size 只用于新建 .7z：按 MiB 切成 .7z.001 / .002 …；已存在分卷需 --force。
+  - --comment 只用于新建 zip：写入归档注释。
   - --append 支持 zip / 7z / tar 家族；7z 与 tar 会先解包重建，完成后原子替换。
   - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
@@ -360,6 +361,11 @@ fn pack(args: &[String]) -> ExitCode {
         .and_then(|index| args.get(index + 1))
         .map(|value| value.to_ascii_lowercase());
     let password = password_from(args);
+    let comment = args
+        .iter()
+        .position(|arg| arg == "--comment")
+        .and_then(|index| args.get(index + 1))
+        .cloned();
     let mut sevenz_level = 6u32;
     if let Some(index) = args.iter().position(|arg| arg == "--7z-level") {
         match args
@@ -413,6 +419,7 @@ fn pack(args: &[String]) -> ExitCode {
             || arg == "--7z-level"
             || arg == "--7z-dict"
             || arg == "--volume-size"
+            || arg == "--comment"
         {
             skip_value = true;
             continue;
@@ -438,6 +445,10 @@ fn pack(args: &[String]) -> ExitCode {
 
     if volume_mib > 0 && (kind != ArchiveKind::SevenZ || append) {
         eprintln!("--volume-size 只支持新建 .7z");
+        return ExitCode::FAILURE;
+    }
+    if comment.is_some() && (kind != ArchiveKind::Zip || append) {
+        eprintln!("--comment 只支持新建 zip");
         return ExitCode::FAILURE;
     }
     if append && !backend::supports_append(kind) {
@@ -546,6 +557,13 @@ fn pack(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    if let Some(text) = comment.as_deref()
+        && let Err(err) = writer.set_comment(text)
+    {
+        eprintln!("写入注释失败: {err}");
+        return ExitCode::FAILURE;
+    }
 
     let last_report = std::cell::Cell::new(0u64);
     let progress = |done: u64| {
@@ -695,6 +713,13 @@ fn list_json(path: &Path, reader: &dyn thzip_core::ArchiveReader) -> String {
     out.push_str(&json_escape(&path.display().to_string()));
     out.push_str(",\"format\":");
     out.push_str(&json_escape(reader.kind().label()));
+    out.push_str(",\"comment\":");
+    out.push_str(
+        &reader
+            .comment()
+            .map(|comment| json_escape(&comment))
+            .unwrap_or_else(|| "null".to_owned()),
+    );
     out.push_str(",\"entries\":[");
     for (index, entry) in reader.entries().iter().enumerate() {
         if index > 0 {

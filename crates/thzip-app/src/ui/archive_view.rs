@@ -57,6 +57,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
         crate::ui::nine_patch::NinePatch::from_theme(app.themes.current(), ResKey::PanelBg);
 
     let mut delete_selected = false;
+    let mut preview_selected = false;
     let mut relocate_rename = false;
     let mut relocate_move = false;
     let mut relocate_batch = false;
@@ -130,6 +131,10 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                         }
                         if !app.selected.is_empty() {
                             ui.separator();
+                            let preview_label = app.tr.t(TextKey::Preview);
+                            if app.selected.len() == 1 && ui.button(&preview_label).clicked() {
+                                preview_selected = true;
+                            }
                             if app.selected.len() == 1 && ui.button(&rename_selected_text).clicked() {
                                 relocate_rename = true;
                             }
@@ -475,6 +480,11 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
             }
 
             if let Some(index) = preview_index {
+                app.preview_entry(index);
+            }
+            if preview_selected
+                && let Some(index) = app.selected.iter().next().copied()
+            {
                 app.preview_entry(index);
             }
 

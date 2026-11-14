@@ -15,7 +15,8 @@
 - CLI `--json`：`sniff` / `list` / `test` / `extract` / `pack` 输出单行 JSON。
 - zip 归档注释：创建时可填写，打开后在标题旁显示提示。
 - 主题包导出：设置页把当前主题目录打包为 zip。
-- 条目预览：双击读取前 512 KiB，文本与 PNG 弹窗显示，超限截断提示。
+- 条目预览：双击或工具栏按钮读取前 512 KiB，文本与 PNG 弹窗显示，超限截断提示。
+- CLI `--comment`：新建 zip 时写入归档注释；`list --json` 输出 comment 字段。
 - 打包任务模板：保存/应用常用格式与压缩参数（不含密码），settings schema 升到 5。
 - 7z 分卷创建：core 按字节切分，CLI `--volume-size`，GUI 打包对话框可选分卷大小。
 

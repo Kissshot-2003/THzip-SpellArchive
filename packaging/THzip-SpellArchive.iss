@@ -1,5 +1,7 @@
 #define MyAppName "THzip-SpellArchive"
-#define MyAppVersion "0.2.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
 #define MyAppExeName "thzip-spellarchive.exe"
 
 [Setup]

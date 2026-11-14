@@ -13,6 +13,8 @@
 |---|---|
 | `HANDOVER.md`（本文件） | 现状、架构、测试、坑、下一步 |
 | `README.md` | 对外介绍、快速开始、能力表 |
+| `ROADMAP.md` | 阶段路线图、验收标准、明确不做清单 |
+| `CHANGELOG.md` | 版本变更记录 |
 | `../SpellArchive 开发方案（Rust 版）v2.1.md` | 完整产品设计、安全规范、路线图、风险 |
 | `docs/theme_spec.md` | `theme.toml` schema、资源 Key、回退规则 |
 | `NOTICE.md` | 代码/素材/字体/同人授权边界 |
@@ -906,7 +908,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（107 通过）
+- [ ] `cargo test --workspace`（128 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

@@ -56,9 +56,10 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 
 ## 打包
 
-`scripts/package.ps1` 会执行 release 构建，并把 exe、themes、README/LICENSE/NOTICE、third_party 许可证复制到
-`dist/THzip-SpellArchive/`。若 PATH 中有 Inno Setup 的 `iscc`，还会生成
-`dist/THzip-SpellArchive-0.2.0-setup.exe`（`packaging/THzip-SpellArchive.iss`，安装到用户目录，无需管理员）。
+`scripts/package.ps1` 从 `Cargo.toml` 读取版本并执行 release 构建，把 GUI 与 CLI 两个 exe、themes、
+README/CHANGELOG/LICENSE/NOTICE、third_party 许可证复制到 `dist/THzip-SpellArchive/`，同时生成 `SHA256SUMS.txt`。
+版本号不一致会直接失败。若 PATH 中有 Inno Setup 的 `iscc`，还会生成
+`dist/THzip-SpellArchive-<version>-setup.exe`（`packaging/THzip-SpellArchive.iss`，安装到用户目录，无需管理员）。
 
 ## 交接与后续
 
@@ -75,4 +76,6 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 
 ## 设计文档
 
-`../SpellArchive 开发方案（Rust 版）v2.1.md`
+- `../SpellArchive 开发方案（Rust 版）v2.1.md`：产品设计与完整规范
+- `ROADMAP.md`：阶段路线图与验收标准
+- `CHANGELOG.md`：版本变更记录

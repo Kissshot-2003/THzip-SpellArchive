@@ -234,6 +234,11 @@ pub fn create_writer_append(
 ) -> Result<Box<dyn ArchiveWriter>, ArchiveError> {
     match kind {
         ArchiveKind::Zip => Ok(Box::new(zip_write::ZipArchiveWriter::append(path, method)?)),
+        ArchiveKind::SevenZ => Ok(Box::new(sevenz_write::SevenZArchiveWriter::append(
+            path,
+            method,
+            SevenZOptions::default(),
+        )?)),
         ArchiveKind::Tar
         | ArchiveKind::TarGz
         | ArchiveKind::TarBz2
@@ -251,6 +256,7 @@ pub fn supports_append(kind: ArchiveKind) -> bool {
     matches!(
         kind,
         ArchiveKind::Zip
+            | ArchiveKind::SevenZ
             | ArchiveKind::Tar
             | ArchiveKind::TarGz
             | ArchiveKind::TarBz2

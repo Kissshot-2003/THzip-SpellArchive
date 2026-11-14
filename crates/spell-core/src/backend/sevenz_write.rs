@@ -1,13 +1,17 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::path::Path;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::backend;
 use crate::error::{ArchiveError, FailReason, path_text};
+use crate::limits::Limits;
+use crate::plan::{DecisionTable, OverwritePolicy};
+use crate::safety::ExtractDirSink;
 use crate::safety::atomic_fs::AtomicFile;
 use crate::secret::SecretString;
 use crate::task::CancelToken;
-use crate::types::Method;
+use crate::types::{EntryId, Method};
 use crate::writer::{ArchiveWriter, FinishReport, SevenZOptions, normalize_entry_name};
 
 pub struct SevenZArchiveWriter {
@@ -15,6 +19,16 @@ pub struct SevenZArchiveWriter {
     entries: u32,
     bytes_in: u64,
     started: Instant,
+    /// 追加模式下的暂存目录；finish / Drop 时删除。
+    workdir: Option<PathBuf>,
+}
+
+impl Drop for SevenZArchiveWriter {
+    fn drop(&mut self) {
+        if let Some(dir) = self.workdir.take() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 impl SevenZArchiveWriter {
@@ -55,7 +69,71 @@ impl SevenZArchiveWriter {
             entries: 0,
             bytes_in: 0,
             started: Instant::now(),
+            workdir: None,
         })
+    }
+
+    /// 追加：解出全部条目到临时目录，重建 7z 并原子替换，之后可继续 `add`。
+    ///
+    /// 加密归档无法在不知道密码的情况下重建，直接拒绝；新条目保持未加密。
+    pub fn append(
+        path: &Path,
+        method: Method,
+        options: SevenZOptions,
+    ) -> Result<Self, ArchiveError> {
+        let mut reader = match backend::open(path, None) {
+            Ok(reader) => reader,
+            Err(ArchiveError::PasswordRequired) => {
+                return Err(ArchiveError::Unsupported(FailReason::EncryptedRewrite));
+            }
+            Err(err) => return Err(err),
+        };
+        if reader.entries().iter().any(|entry| entry.encrypted) {
+            return Err(ArchiveError::Unsupported(FailReason::EncryptedRewrite));
+        }
+
+        let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
+        let workdir = temp_workdir();
+        let limits = Limits::default();
+        let plan = reader.plan(&ids, &workdir, &limits)?;
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Overwrite,
+            ..Default::default()
+        };
+        let cancel = CancelToken::new();
+        let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
+        let report = match reader.extract(&plan, &decisions, &cancel, &mut sink) {
+            Ok(report) => report,
+            Err(err) => {
+                let _ = std::fs::remove_dir_all(&workdir);
+                return Err(err);
+            }
+        };
+        let unsupported = report.failed.len() + report.skipped.len();
+        if unsupported > 0 {
+            let _ = std::fs::remove_dir_all(&workdir);
+            return Err(ArchiveError::Unsupported(
+                FailReason::AppendUnsupportedEntries { count: unsupported },
+            ));
+        }
+        let entries = reader.entries().to_vec();
+        drop(reader);
+
+        let mut writer = Self::create(path, method, None, options)?;
+        writer.workdir = Some(workdir);
+        for item in &plan.items {
+            let Some(entry) = entries.get(item.id as usize) else {
+                return Err(ArchiveError::Other(FailReason::EntryMissing { id: item.id }));
+            };
+            let name = entry.display.trim_end_matches('/');
+            let result = if entry.kind.is_dir() {
+                writer.add_dir(&item.rel_path, name)
+            } else {
+                writer.add(&item.rel_path, name, None, &cancel, &|_| {})
+            };
+            result?;
+        }
+        Ok(writer)
     }
 
     fn writer(&mut self) -> Result<&mut sevenz_rust2::ArchiveWriter<AtomicFile>, ArchiveError> {
@@ -183,8 +261,21 @@ impl<R: Read> Read for ProgressReader<'_, R> {
     }
 }
 
-fn map_sz_error(err: sevenz_rust2::Error) -> ArchiveError {
-    match err {
+fn temp_workdir() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "spellarchive-7zappend-{}-{nanos}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn map_sz_error(err: sevenz_rust2::Error) -> ArchiveError {    match err {
         sevenz_rust2::Error::PasswordRequired => ArchiveError::PasswordRequired,
         sevenz_rust2::Error::MaybeBadPassword(_) => ArchiveError::BadPassword,
         sevenz_rust2::Error::Io(err, _) => ArchiveError::Io(err),

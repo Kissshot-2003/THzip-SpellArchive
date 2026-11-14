@@ -804,7 +804,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::PackFormatsHint => {
                 "支持 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4"
             }
-            TextKey::PackAppendHint => "将追加到现有 zip / tar；完成后原子替换原文件。",
+            TextKey::PackAppendHint => "将追加到现有 zip / 7z / tar；完成后原子替换原文件。",
             TextKey::PackOverwriteHint => "目标文件已存在：确认后会原子替换。",
             TextKey::PackAppendMissing => "追加模式需要目标 zip 已存在。",
             TextKey::StartAppend => "开始追加",
@@ -863,7 +863,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
                 "不支持的输出格式；可用 .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4"
             }
             TextKey::PackErrOutputIsDir => "输出路径是一个文件夹，请指定文件名",
-            TextKey::PackErrAppendZipOnly => "追加模式支持 zip 与 tar 家族",
+            TextKey::PackErrAppendZipOnly => "追加模式支持 zip / 7z / tar 家族",
             TextKey::PackErrAppendMissing => "追加模式要求目标归档已存在",
             TextKey::PackErrConfirmOverwrite => "目标已存在；再次点击「开始打包」将覆盖它",
             TextKey::PackErrEncryptUnsupported => "只有 zip / 7z 支持加密写入",
@@ -1100,7 +1100,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
                 "Unsupported output format; use .zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4"
             }
             TextKey::PackErrOutputIsDir => "The output path is a folder; specify a file name",
-            TextKey::PackErrAppendZipOnly => "Append mode supports zip and tar",
+            TextKey::PackErrAppendZipOnly => "Append mode supports zip, 7z and tar",
             TextKey::PackErrAppendMissing => "Append mode requires an existing archive",
             TextKey::PackErrConfirmOverwrite => {
                 "Target already exists; click \"Start packing\" again to overwrite it"

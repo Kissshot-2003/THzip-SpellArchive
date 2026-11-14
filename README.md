@@ -19,7 +19,7 @@ cargo run -p spell-cli -- list <归档>            # 列出条目（zip / 7z / t
 cargo run -p spell-cli -- test <归档>            # CRC 完整性测试
 cargo run -p spell-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
 cargo run -p spell-cli -- pack <输出> <输入...>      # 格式由扩展名决定（zip/7z/tar 家族）
-cargo test --workspace                           # 118 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 119 个单元 / 集成 / 归档格式用例
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
 
@@ -32,14 +32,14 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 | zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA / XZ；不支持方法预检提示；同名自动 `~1` 改名 |
 | zip 写 | **可用**：Store / Deflate / BZip2 / Zstd、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
 | 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密、`.7z.001` 分卷拼接 |
-| 7z 写 | **可用**：LZMA2（级别 / 字典可调）/ COPY、AES-256 头加密、原子替换 |
+| 7z 写 | **可用**：LZMA2（级别 / 字典可调）/ COPY、AES-256 头加密、原子替换；未加密包支持追加（解包重建） |
 | RAR 读 | **可用**：列表、预检、安全解压、CRC 校验、密码、固实包、多卷；基于 `unrar-ng`（UnRAR 许可）；大条目临时文件中转 |
 | tar 家族读 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4；符号链接跳过；无扩展名的压缩包会探测内层 tar |
 | 单文件流读 | **可用**：`.gz` / `.bz2` / `.xz` / `.zst` / `.lz4`，自动去掉压缩扩展名作为文件名 |
 | tar 家族写 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4，原子替换；追加为解包重建 |
-| CLI | `sniff` / `list` / `test` / `extract`（含 --force/--rename/--number）、`pack`（zip 可选 --method bzip2/zstd；7z 可选 --7z-level/--7z-dict；--append 支持 zip / tar 家族） |
+| CLI | `sniff` / `list` / `test` / `extract`（含 --force/--rename/--number）、`pack`（zip 可选 --method bzip2/zstd；7z 可选 --7z-level/--7z-dict；--append 支持 zip / 7z / tar 家族） |
 | 任务线程池 | **可用**：2 条后台 worker、`crossbeam-channel` 事件、进度节流、取消、panic 兜底 |
-| GUI | **可用**：多标签页、打开任意支持格式、后台预检、解压/测试/取消、创建 zip/7z/tar（zip 可选 BZip2/Zstd，7z 可选级别/字典）、追加 zip / tar 家族、AES-256、后台主题包导入、多选与表头排序、删除选中条目、重命名/移动/批量改名模板与正则替换改名（目录自动带上子项）、冲突跳过/覆盖/改名/自动编号；中英文全量界面（含对话框、状态栏、任务与右键菜单） |
+| GUI | **可用**：多标签页、打开任意支持格式、后台预检、解压/测试/取消、创建 zip/7z/tar（zip 可选 BZip2/Zstd，7z 可选级别/字典）、追加 zip / 7z / tar 家族、AES-256、后台主题包导入、多选与表头排序、删除选中条目、重命名/移动/批量改名模板与正则替换改名（目录自动带上子项）、冲突跳过/覆盖/改名/自动编号；中英文全量界面（含对话框、状态栏、任务与右键菜单） |
 | 桌面集成 | **可用**：设置持久化（schema 4，含排序键与窗口大小）、关闭到托盘开关、多文件拖拽多标签页、单实例转交、本地化托盘菜单、资源管理器右键菜单（打开/解压到当前文件夹/解压到单独文件夹/添加到 zip，启动自检 exe 路径）、主题热重载、常用快捷键（Ctrl+O/E/P/T/F、Delete、F2、F5） |
 | 日志 | `%APPDATA%\SpellArchive\spellarchive.log`（级别/模块 + `key=value` 结构化字段，5 MiB 轮转）+ panic hook |
 | 主题引擎 | 可扫描 `themes/*/theme.toml`，按需载入 PNG/SVG 纹理与配色、九宫格背景、主题粒子；缺资源回退内置主题 |

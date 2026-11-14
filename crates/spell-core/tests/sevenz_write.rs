@@ -209,3 +209,33 @@ fn sevenz_encrypted_roundtrip() {
         "灵梦 7z 写入".as_bytes()
     );
 }
+
+#[test]
+fn sevenz_appends_entries_and_rejects_encrypted() {
+    let dir = TempDir::new("append");
+    let src = build_source(dir.path());
+    let limits = Limits::default();
+    let archive = dir.path().join("append.7z");
+    pack(&archive, &src, None);
+
+    let extra = dir.path().join("extra.txt");
+    std::fs::write(&extra, b"appended").unwrap();
+    let entries = scan_inputs(&[extra], &limits).unwrap();
+    let mut writer =
+        backend::create_writer_append(&archive, ArchiveKind::SevenZ, Method::Store).unwrap();
+    write_entries(writer.as_mut(), &entries, None, &CancelToken::new(), &|_| {}).unwrap();
+    writer.finish().unwrap();
+
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target, None);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("素材/说明.txt")).unwrap(),
+        "灵梦 7z 写入".as_bytes()
+    );
+    assert_eq!(std::fs::read(target.join("extra.txt")).unwrap(), b"appended");
+
+    let encrypted = dir.path().join("secret.7z");
+    pack(&encrypted, &src, Some("pw"));
+    assert!(backend::create_writer_append(&encrypted, ArchiveKind::SevenZ, Method::Store).is_err());
+}

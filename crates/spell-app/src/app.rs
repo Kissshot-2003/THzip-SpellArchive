@@ -981,8 +981,32 @@ impl SpellApp {
         }
     }
 
-    fn relocate_error_text(&self, err: &RelocateError) -> String {
-        match err {
+    /// 完成摘要 + 前 5 条失败原因，作为任务行悬停详情。
+    fn summarize_failures(
+        &self,
+        summary: &str,
+        failed: &[(spell_core::EntryId, spell_core::error::FailReason)],
+    ) -> String {
+        if failed.is_empty() {
+            return summary.to_owned();
+        }
+        let mut detail = format!("{summary}\n{}", self.tr.t(TextKey::FailedEntries));
+        for (id, reason) in failed.iter().take(5) {
+            let text = crate::i18n::errors::reason(self.locale, reason);
+            detail.push('\n');
+            detail.push_str(
+                &self
+                    .tr
+                    .tf(TextKey::FailedEntryLine, &[("id", &id.to_string()), ("error", &text)]),
+            );
+        }
+        if failed.len() > 5 {
+            detail.push_str("\n…");
+        }
+        detail
+    }
+
+    fn relocate_error_text(&self, err: &RelocateError) -> String {        match err {
             RelocateError::NoSelection => self.tr.t(TextKey::RelocateNoSelection),
             RelocateError::OneOnly => self.tr.t(TextKey::RelocateOneOnly),
             RelocateError::Invalid => self.tr.t(TextKey::RelocateInvalid),
@@ -1376,10 +1400,11 @@ impl SpellApp {
                         ("crc", &report.crc_mismatch.len().to_string()),
                     ],
                 );
+                let detail = self.summarize_failures(&summary, &report.failed);
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Done;
                     view.progress = 1.0;
-                    view.detail = Some(summary.clone());
+                    view.detail = Some(detail);
                     if report.bytes_written > 0 {
                         view.total = report.bytes_written;
                         view.written = report.bytes_written;
@@ -1485,10 +1510,11 @@ impl SpellApp {
                         ("failed", &report.failed.len().to_string()),
                     ],
                 );
+                let detail = self.summarize_failures(&summary, &report.failed);
                 if let Some(view) = self.task_mut(task) {
                     view.phase = TaskPhase::Done;
                     view.progress = 1.0;
-                    view.detail = Some(summary.clone());
+                    view.detail = Some(detail);
                 }
                 crate::logging::info_fields(
                     "theme",

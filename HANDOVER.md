@@ -30,8 +30,8 @@
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
-- **工作区状态**：最新提交 `7c93f4c`，工作区有未提交改动（本轮功能批次），无远端。
-- **下一步建议**：先跑测试并提交本轮批次，再决定错误文案结构化、批量改名模板或签名。
+- **工作区状态**：最新提交 `c2e5a6e`，工作区干净，无远端。
+- **下一步建议**：错误文案结构化（#31）、正则替换批量改名、tracing 日志或代码签名。
 
 ---
 
@@ -64,10 +64,10 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ### 1.3 代码规模与提交状态
 
 - Rust 约 16969 行（含测试）。
-- 最新提交：`7c93f4c feat: delete selected archive entries by atomic rewrite`
+- 最新提交：`c2e5a6e feat: batch rename, 7z tuning, embedded CJK font and full i18n`
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
-- 当前工作区有未提交改动（本轮：批量改名模板、内嵌 CJK 字体、7z 写入参数、重命名/移动、全量 i18n 文案、右键菜单本地化、i18n 完整性测试）。
-- 接手第一件事：`git status` → 跑测试 → 决定是否提交当前批次。
+- 工作区干净（本轮：批量改名模板、内嵌 CJK 字体、7z 写入参数、重命名/移动、全量 i18n 文案、右键菜单本地化、i18n 完整性测试，已在 `c2e5a6e` 提交）。
+- 接手第一件事：`git status` → 跑测试 → 按路线图选下一项。
 
 ---
 
@@ -762,7 +762,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 11 | 已修复 | schema 3；缺失字段由 serde default 补齐，读入后升级版本号 |
 | 12 | 已修复 | 多文件拖入/多标签页；每个归档独立 reader、搜索与选中集 |
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
-| 14 | 本轮批次未提交 | 无回滚点 | 确认测试后提交 |
+| 14 | 已修复 | 本轮批次已提交（`c2e5a6e`） | 已有回滚点 |
 | 15 | exe 未做代码签名 | SmartScreen 可能拦截 | 发布前购买/配置签名证书 |
 | 16 | 部分修复 | 写入支持 Store/Deflate/BZip2/Zstd；读取支持 Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；加密 LZMA/XZ 不支持 |
 | 17 | zip 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 增量原地追加风险高，暂不做 |
@@ -796,7 +796,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### P2 功能
 
 - 正则替换模式的批量改名；当前模板支持 `{name}` / `{n}` / `{ext}`。
-- 把 `spell-core` 错误文案改为错误码 + UI 层翻译（见 #31）；批量改名模板。
+- 把 `spell-core` 错误文案改为错误码 + UI 层翻译（见 #31）。
 - `tracing` 结构化日志（当前是带级别/模块的文本日志）。
 - 代码签名；Inno 脚本已就绪。
 - RAR 超大条目的性能与磁盘占用优化。

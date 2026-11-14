@@ -100,16 +100,23 @@ pub enum TextKey {
     RenameSelected,
     MoveSelected,
     BatchRenameSelected,
+    RegexRenameSelected,
     RelocateRenameTitle,
     RelocateMoveTitle,
     RelocateBatchTitle,
+    RelocateRegexTitle,
     RelocatePathLabel,
     RelocateFolderLabel,
     RelocateBatchLabel,
+    RelocateRegexPatternLabel,
+    RelocateRegexReplaceLabel,
+    RelocateRegexHint,
+    RelocateCaseInsensitive,
     RelocateApply,
     RelocateNoSelection,
     RelocateOneOnly,
     RelocateInvalid,
+    RelocateInvalidRegex,
     RelocateDuplicate,
     RelocateNested,
     RelocateNoChange,
@@ -304,16 +311,23 @@ impl TextKey {
         TextKey::RenameSelected,
         TextKey::MoveSelected,
         TextKey::BatchRenameSelected,
+        TextKey::RegexRenameSelected,
         TextKey::RelocateRenameTitle,
         TextKey::RelocateMoveTitle,
         TextKey::RelocateBatchTitle,
+        TextKey::RelocateRegexTitle,
         TextKey::RelocatePathLabel,
         TextKey::RelocateFolderLabel,
         TextKey::RelocateBatchLabel,
+        TextKey::RelocateRegexPatternLabel,
+        TextKey::RelocateRegexReplaceLabel,
+        TextKey::RelocateRegexHint,
+        TextKey::RelocateCaseInsensitive,
         TextKey::RelocateApply,
         TextKey::RelocateNoSelection,
         TextKey::RelocateOneOnly,
         TextKey::RelocateInvalid,
+        TextKey::RelocateInvalidRegex,
         TextKey::RelocateDuplicate,
         TextKey::RelocateNested,
         TextKey::RelocateNoChange,
@@ -505,16 +519,23 @@ impl TextKey {
             TextKey::RenameSelected => "rename_selected",
             TextKey::MoveSelected => "move_selected",
             TextKey::BatchRenameSelected => "batch_rename_selected",
+            TextKey::RegexRenameSelected => "regex_rename_selected",
             TextKey::RelocateRenameTitle => "relocate_rename_title",
             TextKey::RelocateMoveTitle => "relocate_move_title",
             TextKey::RelocateBatchTitle => "relocate_batch_title",
+            TextKey::RelocateRegexTitle => "relocate_regex_title",
             TextKey::RelocatePathLabel => "relocate_path_label",
             TextKey::RelocateFolderLabel => "relocate_folder_label",
             TextKey::RelocateBatchLabel => "relocate_batch_label",
+            TextKey::RelocateRegexPatternLabel => "relocate_regex_pattern_label",
+            TextKey::RelocateRegexReplaceLabel => "relocate_regex_replace_label",
+            TextKey::RelocateRegexHint => "relocate_regex_hint",
+            TextKey::RelocateCaseInsensitive => "relocate_case_insensitive",
             TextKey::RelocateApply => "relocate_apply",
             TextKey::RelocateNoSelection => "relocate_no_selection",
             TextKey::RelocateOneOnly => "relocate_one_only",
             TextKey::RelocateInvalid => "relocate_invalid",
+            TextKey::RelocateInvalidRegex => "relocate_invalid_regex",
             TextKey::RelocateDuplicate => "relocate_duplicate",
             TextKey::RelocateNested => "relocate_nested",
             TextKey::RelocateNoChange => "relocate_no_change",
@@ -710,18 +731,27 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::RenameSelected => "重命名…",
             TextKey::MoveSelected => "移动…",
             TextKey::BatchRenameSelected => "批量改名…",
+            TextKey::RegexRenameSelected => "正则改名…",
             TextKey::RelocateRenameTitle => "重命名归档条目",
             TextKey::RelocateMoveTitle => "移动归档条目",
             TextKey::RelocateBatchTitle => "批量重命名归档条目",
+            TextKey::RelocateRegexTitle => "正则替换重命名",
             TextKey::RelocatePathLabel => "新路径（归档内）",
             TextKey::RelocateFolderLabel => "目标文件夹（留空为根目录）",
             TextKey::RelocateBatchLabel => {
                 "命名模板：{name}=原名，{n}=序号，{ext}=扩展名；不写 {ext} 时自动保留"
             }
+            TextKey::RelocateRegexPatternLabel => "正则表达式（只匹配文件名）",
+            TextKey::RelocateRegexReplaceLabel => "替换为（$1、${name} 引用分组）",
+            TextKey::RelocateRegexHint => {
+                "示例：ep(\\d+) → 第$1话；目录改名时子条目会一起跟随"
+            }
+            TextKey::RelocateCaseInsensitive => "忽略大小写",
             TextKey::RelocateApply => "应用",
             TextKey::RelocateNoSelection => "请先选择条目",
             TextKey::RelocateOneOnly => "重命名一次只能处理一个条目",
             TextKey::RelocateInvalid => "归档内路径不合法",
+            TextKey::RelocateInvalidRegex => "正则表达式无效：{error}",
             TextKey::RelocateDuplicate => "重命名后存在重名：{name}",
             TextKey::RelocateNested => "不能把文件夹移动到自身内部",
             TextKey::RelocateNoChange => "路径没有变化",
@@ -785,7 +815,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::SamplingLinear => "LINEAR",
             TextKey::LimitsInfo => "安全限额：总量 {total} GiB · 单条 {entry} GiB · 条目 {entries}",
             TextKey::FeatureSummary => {
-                "已实现：zip / 7z / rar / tar 读取，zip / 7z / tar 写入、单文件流读取、AES-256、\n预检、CRC、后台任务、取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、\n原子覆盖、设置持久化、日志、单实例、托盘、右键菜单、主题包导入、内嵌字体。\n待接入：正则改名模板 / 代码签名。"
+                "已实现：zip / 7z / rar / tar 读取，zip / 7z / tar 写入、单文件流读取、AES-256、\n预检、CRC、后台任务、取消、密码重试、主题与 i18n 回退、路径净化、限额熔断、\n原子覆盖、设置持久化、日志、单实例、托盘、右键菜单、主题包导入、内嵌字体、正则改名。\n待接入：代码签名。"
             }
             TextKey::ConfigPath => "设置文件：{path}",
             TextKey::LogPath => "日志文件：{path}",
@@ -920,18 +950,27 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::RenameSelected => "Rename…",
             TextKey::MoveSelected => "Move…",
             TextKey::BatchRenameSelected => "Batch rename…",
+            TextKey::RegexRenameSelected => "Regex rename…",
             TextKey::RelocateRenameTitle => "Rename archive entry",
             TextKey::RelocateMoveTitle => "Move archive entries",
             TextKey::RelocateBatchTitle => "Batch rename archive entries",
+            TextKey::RelocateRegexTitle => "Regex replace rename",
             TextKey::RelocatePathLabel => "New path (inside archive)",
             TextKey::RelocateFolderLabel => "Target folder (empty for root)",
             TextKey::RelocateBatchLabel => {
                 "Pattern: {name}=original, {n}=number, {ext}=extension; extension is kept unless {ext} is used"
             }
+            TextKey::RelocateRegexPatternLabel => "Regular expression (file name only)",
+            TextKey::RelocateRegexReplaceLabel => "Replace with ($1, ${name} for groups)",
+            TextKey::RelocateRegexHint => {
+                "Example: ep(\\d+) → episode$1; renaming a folder moves its children too"
+            }
+            TextKey::RelocateCaseInsensitive => "Case-insensitive",
             TextKey::RelocateApply => "Apply",
             TextKey::RelocateNoSelection => "Select entries first",
             TextKey::RelocateOneOnly => "Rename handles one entry at a time",
             TextKey::RelocateInvalid => "Invalid archive path",
+            TextKey::RelocateInvalidRegex => "Invalid regular expression: {error}",
             TextKey::RelocateDuplicate => "Duplicate name after rename: {name}",
             TextKey::RelocateNested => "Cannot move a folder into itself",
             TextKey::RelocateNoChange => "Path unchanged",
@@ -1011,7 +1050,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
                 "Safety limits: total {total} GiB · per entry {entry} GiB · {entries} entries"
             }
             TextKey::FeatureSummary => {
-                "Implemented: read zip / 7z / rar / tar; write zip / 7z / tar; single-stream reading; AES-256;\nprecheck, CRC, background tasks, cancellation, password retry, theme and i18n fallback,\npath sanitizing, limit circuit breaker, atomic overwrite, settings persistence, logging,\nsingle instance, tray, context menu, theme pack import, embedded fonts.\nPending: regex rename templates / code signing."
+                "Implemented: read zip / 7z / rar / tar; write zip / 7z / tar; single-stream reading; AES-256;\nprecheck, CRC, background tasks, cancellation, password retry, theme and i18n fallback,\npath sanitizing, limit circuit breaker, atomic overwrite, settings persistence, logging,\nsingle instance, tray, context menu, theme pack import, embedded fonts, regex rename.\nPending: code signing."
             }
             TextKey::ConfigPath => "Settings file: {path}",
             TextKey::LogPath => "Log file: {path}",

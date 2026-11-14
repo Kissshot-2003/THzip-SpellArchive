@@ -303,7 +303,15 @@ fn relocate_dialog(app: &mut SpellApp, ctx: &egui::Context) {
             app.tr.t(TextKey::RelocateBatchTitle),
             app.tr.t(TextKey::RelocateBatchLabel),
         ),
+        RelocateMode::RegexRename => (
+            app.tr.t(TextKey::RelocateRegexTitle),
+            app.tr.t(TextKey::RelocateRegexPatternLabel),
+        ),
     };
+    let regex_mode = dialog.mode == RelocateMode::RegexRename;
+    let replace_label = app.tr.t(TextKey::RelocateRegexReplaceLabel);
+    let regex_hint = app.tr.t(TextKey::RelocateRegexHint);
+    let case_label = app.tr.t(TextKey::RelocateCaseInsensitive);
     let apply_label = app.tr.t(TextKey::RelocateApply);
     let cancel_label = app.tr.t(TextKey::Cancel);
     let mut confirmed = false;
@@ -318,12 +326,43 @@ fn relocate_dialog(app: &mut SpellApp, ctx: &egui::Context) {
         .default_size([440.0, 260.0])
         .show(ctx, |ui| {
             ui.label(label);
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut dialog.input).desired_width(ui.available_width()),
-            );
-            response.request_focus();
-            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                confirmed = true;
+            if regex_mode {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut dialog.regex_pattern)
+                        .hint_text("ep(\\d+)")
+                        .desired_width(ui.available_width()),
+                );
+                response.request_focus();
+                if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    confirmed = true;
+                }
+                ui.add_space(6.0);
+                ui.label(&replace_label);
+                let replacement = ui.add(
+                    egui::TextEdit::singleline(&mut dialog.regex_replacement)
+                        .hint_text("episode$1")
+                        .desired_width(ui.available_width()),
+                );
+                if replacement.lost_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                {
+                    confirmed = true;
+                }
+                ui.checkbox(&mut dialog.regex_case_insensitive, case_label);
+                ui.label(
+                    egui::RichText::new(regex_hint)
+                        .size(12.0)
+                        .color(palette.text_sub),
+                );
+            } else {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut dialog.input)
+                        .desired_width(ui.available_width()),
+                );
+                response.request_focus();
+                if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    confirmed = true;
+                }
             }
             if let Some(error) = &dialog.error {
                 ui.label(egui::RichText::new(error).color(palette.error));

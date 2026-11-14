@@ -3,7 +3,7 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
+> 最后更新：2026-11（结构化错误码、正则替换改名、内嵌 CJK 字体、7z 写入参数、重命名/移动/批量改名、全量中英文 i18n、右键菜单本地化、RAR 读取、多标签页、SVG/九宫格/粒子、XZ 解码、冲突改名、懒加载与桌面集成完成）
 
 ---
 
@@ -25,13 +25,13 @@
 
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
-  多选/排序（排序持久化）；删除/重命名/移动/批量改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（107）；`cargo clippy --workspace --all-targets -- -D warnings`；
+  多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
+- **怎么跑**：`cargo test --workspace`（110）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p spell-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`spell-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
 - **工作区状态**：最新提交 `c2e5a6e`，工作区干净，无远端。
-- **下一步建议**：正则替换批量改名、tracing 日志或代码签名。
+- **下一步建议**：tracing 日志或代码签名。
 
 ---
 
@@ -42,7 +42,7 @@
 SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主题只是皮肤。
 当前 **zip / 7z / tar 家族可读写，RAR 可读，单文件流可读**；GUI 覆盖打开、后台预检、解压、测试、取消、
 冲突跳过/覆盖/改名/自动编号、创建/追加、zip 多压缩方法、7z 级别/字典、密码、后台主题包导入、主题懒加载、
-多标签页、主题粒子、多选与表头排序（持久化）、删除选中条目、重命名/移动/批量改名模板（目录自动带上子项）、设置持久化、拖拽打开与悬停提示、单实例转交、
+多标签页、主题粒子、多选与表头排序（持久化）、删除选中条目、重命名/移动/批量改名模板/正则改名（目录自动带上子项）、设置持久化、拖拽打开与悬停提示、单实例转交、
 关闭到托盘、本地化托盘菜单、中英文全量界面（对话框/状态栏/任务/右键菜单）、内嵌 CJK 字体、右键菜单自检、主题热重载、日志/崩溃落盘。
 
 ### 1.2 能力矩阵
@@ -85,7 +85,7 @@ SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同人主�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 107 个测试
+cargo test --workspace                 # 110 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 cargo run -p spell-app                 # GUI
@@ -129,7 +129,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 107 通过；clippy 无告警。
+12. `cargo test --workspace` 110 通过；clippy 无告警。
 
 ---
 
@@ -526,9 +526,11 @@ pub enum TaskOp {
 - “重命名…”只处理单个条目，输入完整归档内路径；“移动…”把全部选中条目移到输入的文件夹（空 = 根目录）。
 - “批量改名…”使用模板：`{name}` 原名、`{n}` 序号、`{ext}` 扩展名；不写 `{ext}` 时自动保留原扩展名，
   父目录不变；选中目录时子条目跟着目录换前缀。
+- “正则改名…”只对文件名部分做正则替换（`regex` crate），支持 `$1` / `${name}` 分组引用与忽略大小写；
+  非法正则在对话框内提示，选中目录时子条目同样跟随。
 - 选中目录时，重命名/移动会自动把该目录下所有子条目的路径一起改掉；
   前后端都会校验重名、`..`/绝对路径与“把目录移入自身”。
-- 三项操作共用后台 `TaskOp::Rewrite`，先关 reader 释放句柄，再由 `AtomicFile` 原子替换。
+- 四项操作共用后台 `TaskOp::Rewrite`，先关 reader 释放句柄，再由 `AtomicFile` 原子替换。
 
 ### 7.3 任务行
 
@@ -720,14 +722,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **107** 个测试。
+当前共 **110** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
 | `spell-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `spell-app` 单元测试 | 22 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、错误翻译/密码标记 3 |
+| `spell-app` 单元测试 | 25 | theme loader 3（含 SVG）、prefs 解析/排序 2、自然排序 1、通配/正则搜索 2、日志格式 1、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3 |
 | `tests/zip_backend.rs` | 12 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 8 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建 |
@@ -758,7 +760,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 1 | 已修复 | `task_panel` 借用 `&Theme`；设置页只取需要的字段，均不再整包 clone |
 | 2 | 已修复 | Rename 生成 `a~1.txt`，AutoNumber 生成 `a (1).txt`，并避开磁盘已有文件 |
 | 3 | 已修复 | 主题包导入改为后台 `TaskOp::InstallTheme` |
-| 4 | 已修复 | 多选可删除；单条重命名、批量移动、模板批量改名均已完成（目录自动带子项） |
+| 4 | 已修复 | 多选可删除；单条重命名、批量移动、模板批量改名、正则替换改名均已完成（目录自动带子项） |
 | 5 | 已修复 | 进度条底图支持九宫格，绘制矩形吸附物理像素 |
 | 6 | 已修复 | `ThemeStore` 只解码当前主题，切换时 `ensure_loaded` |
 | 7 | 已修复 | 排序写入 prefs schema 3；搜索支持子串、`*`/`?` 通配和 `re:` 正则 |
@@ -801,7 +803,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### P2 功能
 
-- 正则替换模式的批量改名；当前模板支持 `{name}` / `{n}` / `{ext}`。
 - `tracing` 结构化日志（当前是带级别/模块的文本日志）。
 - 代码签名；Inno 脚本已就绪。
 - RAR 超大条目的性能与磁盘占用优化。
@@ -899,6 +900,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 选中目录点“移动…”，输入 `archive`：目录及全部子项都改到 `archive/` 下，内容可解压
 - [ ] 选中单个文件点“重命名…”，输入新路径后条目改名；输入已存在的名字应提示重名且原包不变
 - [ ] 选中多个条目点“批量改名…”，用 `{name}_{n}` 生成新名；文件扩展名保留，重名时提示错误
+- [ ] 选中多个条目点“正则改名…”，`ep(\d+)` → `第$1话` 生效；非法正则在对话框内提示
 - [ ] 解压后文件修改时间等于归档内记录时间
 - [ ] `%APPDATA%\SpellArchive\spellarchive.log` 有启动记录；panic 会落盘
 - [ ] `scripts/package.ps1` 能产出 `dist/SpellArchive/`

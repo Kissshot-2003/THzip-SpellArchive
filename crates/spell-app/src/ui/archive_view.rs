@@ -37,6 +37,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let rename_selected_text = app.tr.t(TextKey::RenameSelected);
     let move_selected_text = app.tr.t(TextKey::MoveSelected);
     let batch_rename_text = app.tr.t(TextKey::BatchRenameSelected);
+    let regex_rename_text = app.tr.t(TextKey::RegexRenameSelected);
     let col_name = app.tr.t(TextKey::ColName);
     let col_size = app.tr.t(TextKey::ColSize);
     let col_packed = app.tr.t(TextKey::ColPacked);
@@ -57,6 +58,7 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
     let mut relocate_rename = false;
     let mut relocate_move = false;
     let mut relocate_batch = false;
+    let mut relocate_regex = false;
     egui::CentralPanel::default()
         .frame(
             egui::Frame::default()
@@ -112,6 +114,9 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                             }
                             if app.selected.len() >= 2 && ui.button(&batch_rename_text).clicked() {
                                 relocate_batch = true;
+                            }
+                            if app.selected.len() >= 2 && ui.button(&regex_rename_text).clicked() {
+                                relocate_regex = true;
                             }
                             if crate::ui::danger_button(ui, &palette, &delete_selected_text).clicked()
                             {
@@ -449,6 +454,8 @@ pub fn show(app: &mut SpellApp, root: &mut egui::Ui) {
                 app.begin_relocate(RelocateMode::Move);
             } else if relocate_batch {
                 app.begin_relocate(RelocateMode::BatchRename);
+            } else if relocate_regex {
+                app.begin_relocate(RelocateMode::RegexRename);
             }
 
             if let Some(key) = header_click {

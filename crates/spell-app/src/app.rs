@@ -186,12 +186,36 @@ pub enum RelocateMode {
     Rename,
     Move,
     BatchRename,
+    RegexRename,
 }
 
 pub struct RelocateDialog {
     pub mode: RelocateMode,
     pub input: String,
+    pub regex_pattern: String,
+    pub regex_replacement: String,
+    pub regex_case_insensitive: bool,
     pub error: Option<String>,
+}
+
+/// 批量改名的输入：模板文本或正则替换。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RelocateInput {
+    Text(String),
+    Regex {
+        pattern: String,
+        replacement: String,
+        case_insensitive: bool,
+    },
+}
+
+impl RelocateInput {
+    fn text(&self) -> &str {
+        match self {
+            RelocateInput::Text(text) => text,
+            RelocateInput::Regex { .. } => "",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -199,6 +223,7 @@ pub(crate) enum RelocateError {
     NoSelection,
     OneOnly,
     Invalid,
+    InvalidRegex(String),
     Duplicate(String),
     Nested,
     NoChange,
@@ -889,10 +914,14 @@ impl SpellApp {
                 .unwrap_or_default(),
             RelocateMode::Move => String::new(),
             RelocateMode::BatchRename => "{name}_{n}".to_owned(),
+            RelocateMode::RegexRename => String::new(),
         };
         self.relocate = Some(RelocateDialog {
             mode,
             input,
+            regex_pattern: String::new(),
+            regex_replacement: String::new(),
+            regex_case_insensitive: false,
             error: None,
         });
     }
@@ -902,7 +931,14 @@ impl SpellApp {
             return;
         };
         let mode = dialog.mode;
-        let input = dialog.input.clone();
+        let input = match mode {
+            RelocateMode::RegexRename => RelocateInput::Regex {
+                pattern: dialog.regex_pattern.clone(),
+                replacement: dialog.regex_replacement.clone(),
+                case_insensitive: dialog.regex_case_insensitive,
+            },
+            _ => RelocateInput::Text(dialog.input.clone()),
+        };
         let Some(path) = self.archive_path.clone() else {
             self.relocate = None;
             self.status = self.tr.t(TextKey::EmptyArchive);
@@ -946,6 +982,9 @@ impl SpellApp {
             RelocateError::NoSelection => self.tr.t(TextKey::RelocateNoSelection),
             RelocateError::OneOnly => self.tr.t(TextKey::RelocateOneOnly),
             RelocateError::Invalid => self.tr.t(TextKey::RelocateInvalid),
+            RelocateError::InvalidRegex(error) => {
+                self.tr.tf(TextKey::RelocateInvalidRegex, &[("error", error)])
+            }
             RelocateError::Duplicate(name) => {
                 self.tr.tf(TextKey::RelocateDuplicate, &[("name", name)])
             }
@@ -1675,7 +1714,7 @@ pub(crate) fn build_relocate(
     entries: &[ArchiveEntry],
     selected: &BTreeSet<usize>,
     mode: RelocateMode,
-    input: &str,
+    input: &RelocateInput,
 ) -> Result<Vec<(u32, String)>, RelocateError> {
     if selected.is_empty() {
         return Err(RelocateError::NoSelection);
@@ -1711,7 +1750,25 @@ pub(crate) fn build_relocate(
         }
     }
 
-    let raw_input = input.trim();
+    let raw_input = input.text().trim();
+    let regex = match input {
+        RelocateInput::Regex {
+            pattern,
+            replacement,
+            case_insensitive,
+        } => {
+            if pattern.is_empty() {
+                return Err(RelocateError::Invalid);
+            }
+            let compiled = regex::RegexBuilder::new(pattern)
+                .case_insensitive(*case_insensitive)
+                .build()
+                .map_err(|err| RelocateError::InvalidRegex(err.to_string()))?;
+            Some((compiled, replacement.clone()))
+        }
+        RelocateInput::Text(_) => None,
+    };
+
     let mut rename: HashMap<usize, String> = HashMap::new();
     for (order, (_, root, is_dir)) in chosen.iter().enumerate() {
         let final_root = match mode {
@@ -1737,6 +1794,20 @@ pub(crate) fn build_relocate(
                 match root.rsplit_once('/') {
                     Some((parent, _)) => format!("{parent}/{base}"),
                     None => base,
+                }
+            }
+            RelocateMode::RegexRename => {
+                let Some((regex, replacement)) = regex.as_ref() else {
+                    return Err(RelocateError::Invalid);
+                };
+                let base = root.rsplit('/').next().unwrap_or(root);
+                let renamed = regex.replace_all(base, replacement.as_str());
+                if renamed.trim().is_empty() {
+                    return Err(RelocateError::Invalid);
+                }
+                match root.rsplit_once('/') {
+                    Some((parent, _)) => format!("{parent}/{renamed}"),
+                    None => renamed.into_owned(),
                 }
             }
         };
@@ -1949,7 +2020,8 @@ pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelocateError, RelocateMode, build_relocate, natural_cmp, search_matches, wildcard_match,
+        RelocateError, RelocateInput, RelocateMode, build_relocate, natural_cmp, search_matches,
+        wildcard_match,
     };
     use spell_core::types::{ArchiveEntry, EntryKind, Method};
     use std::cmp::Ordering;
@@ -2011,14 +2083,25 @@ mod tests {
             entry(2, "c/d.txt", false),
         ];
         let selected = BTreeSet::from([1, 2]);
-        let map = build_relocate(&entries, &selected, RelocateMode::Move, "moved").unwrap();
+        let map = build_relocate(
+            &entries,
+            &selected,
+            RelocateMode::Move,
+            &RelocateInput::Text("moved".to_owned()),
+        )
+        .unwrap();
         assert_eq!(
             map,
             vec![(1, "moved/c".to_owned()), (2, "moved/c/d.txt".to_owned())]
         );
 
-        let map =
-            build_relocate(&entries, &BTreeSet::from([0]), RelocateMode::Move, "").unwrap_err();
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0]),
+            RelocateMode::Move,
+            &RelocateInput::Text(String::new()),
+        )
+        .unwrap_err();
         assert!(matches!(map, RelocateError::NoChange));
     }
 
@@ -2029,7 +2112,7 @@ mod tests {
             &entries,
             &BTreeSet::from([0]),
             RelocateMode::Rename,
-            "docs/a2.txt",
+            &RelocateInput::Text("docs/a2.txt".to_owned()),
         )
         .unwrap();
         assert_eq!(map, vec![(0, "docs/a2.txt".to_owned())]);
@@ -2049,7 +2132,7 @@ mod tests {
             &entries,
             &BTreeSet::from([0, 1]),
             RelocateMode::BatchRename,
-            "{name}_{n}",
+            &RelocateInput::Text("{name}_{n}".to_owned()),
         )
         .unwrap();
         assert_eq!(
@@ -2061,7 +2144,7 @@ mod tests {
             &entries,
             &BTreeSet::from([0, 1]),
             RelocateMode::BatchRename,
-            "{n}.{ext}",
+            &RelocateInput::Text("{n}.{ext}".to_owned()),
         )
         .unwrap();
         assert_eq!(map, vec![(0, "1.jpg".to_owned()), (1, "2.txt".to_owned())]);
@@ -2071,7 +2154,7 @@ mod tests {
             &entries,
             &BTreeSet::from([2]),
             RelocateMode::BatchRename,
-            "folder_{n}",
+            &RelocateInput::Text("folder_{n}".to_owned()),
         )
         .unwrap();
         assert_eq!(
@@ -2083,7 +2166,7 @@ mod tests {
             &entries,
             &BTreeSet::from([1, 4]),
             RelocateMode::BatchRename,
-            "same",
+            &RelocateInput::Text("same".to_owned()),
         )
         .unwrap_err();
         assert!(matches!(err, RelocateError::Duplicate(_)));
@@ -2096,14 +2179,19 @@ mod tests {
             &entries,
             &BTreeSet::from([0]),
             RelocateMode::Rename,
-            "b.txt",
+            &RelocateInput::Text("b.txt".to_owned()),
         )
         .unwrap_err();
         assert!(matches!(err, RelocateError::Duplicate(_)));
 
         let entries = [entry(0, "a.txt", false), entry(1, "x/a.txt", false)];
-        let err =
-            build_relocate(&entries, &BTreeSet::from([1]), RelocateMode::Move, "").unwrap_err();
+        let err = build_relocate(
+            &entries,
+            &BTreeSet::from([1]),
+            RelocateMode::Move,
+            &RelocateInput::Text(String::new()),
+        )
+        .unwrap_err();
         assert!(matches!(err, RelocateError::Duplicate(_)));
 
         let entries = [entry(0, "dir", true), entry(1, "dir/x.txt", false)];
@@ -2111,13 +2199,98 @@ mod tests {
             &entries,
             &BTreeSet::from([0]),
             RelocateMode::Rename,
-            "dir/sub",
+            &RelocateInput::Text("dir/sub".to_owned()),
         )
         .unwrap_err();
         assert!(matches!(err, RelocateError::Nested));
 
-        let err = build_relocate(&entries, &BTreeSet::from([0, 1]), RelocateMode::Rename, "x")
-            .unwrap_err();
+        let err = build_relocate(
+            &entries,
+            &BTreeSet::from([0, 1]),
+            RelocateMode::Rename,
+            &RelocateInput::Text("x".to_owned()),
+        )
+        .unwrap_err();
         assert!(matches!(err, RelocateError::OneOnly));
+    }
+
+    #[test]
+    fn regex_rename_replaces_capture_groups() {
+        let entries = [
+            entry(0, "ep01.txt", false),
+            entry(1, "dir/ep02.txt", false),
+        ];
+        let input = RelocateInput::Regex {
+            pattern: r"ep(\d+)".to_owned(),
+            replacement: "第$1话".to_owned(),
+            case_insensitive: false,
+        };
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0, 1]),
+            RelocateMode::RegexRename,
+            &input,
+        )
+        .unwrap();
+        assert_eq!(
+            map,
+            vec![(0, "第01话.txt".to_owned()), (1, "dir/第02话.txt".to_owned())]
+        );
+    }
+
+    #[test]
+    fn regex_rename_honours_case_insensitive_and_rejects_invalid() {
+        let entries = [entry(0, "EP01.txt", false)];
+        let input = RelocateInput::Regex {
+            pattern: "ep".to_owned(),
+            replacement: "episode".to_owned(),
+            case_insensitive: true,
+        };
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0]),
+            RelocateMode::RegexRename,
+            &input,
+        )
+        .unwrap();
+        assert_eq!(map, vec![(0, "episode01.txt".to_owned())]);
+
+        let invalid = RelocateInput::Regex {
+            pattern: "(".to_owned(),
+            replacement: "x".to_owned(),
+            case_insensitive: false,
+        };
+        let err = build_relocate(
+            &entries,
+            &BTreeSet::from([0]),
+            RelocateMode::RegexRename,
+            &invalid,
+        )
+        .unwrap_err();
+        assert!(matches!(err, RelocateError::InvalidRegex(_)));
+    }
+
+    #[test]
+    fn regex_rename_moves_directory_children() {
+        let entries = [
+            entry(0, "Season 1", true),
+            entry(1, "Season 1/a.txt", false),
+        ];
+        let input = RelocateInput::Regex {
+            pattern: r"Season (\d+)".to_owned(),
+            replacement: "第$1季".to_owned(),
+            case_insensitive: true,
+        };
+        let map = build_relocate(
+            &entries,
+            &BTreeSet::from([0, 1]),
+            RelocateMode::RegexRename,
+            &input,
+        )
+        .unwrap();
+        assert_eq!(
+            map,
+            vec![(0, "第1季".to_owned()), (1, "第1季/a.txt".to_owned())]
+        );
     }
 }

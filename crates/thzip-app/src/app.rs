@@ -185,6 +185,7 @@ pub struct PackState {
     pub zip_method: ZipPackMethod,
     pub sevenz_level: u32,
     pub sevenz_dict_mib: u32,
+    pub volume_mib: u32,
     pub append: bool,
     pub encrypt: bool,
     pub password: String,
@@ -204,6 +205,7 @@ impl Default for PackState {
             zip_method: ZipPackMethod::default(),
             sevenz_level: 6,
             sevenz_dict_mib: 0,
+            volume_mib: 0,
             append: false,
             encrypt: false,
             password: String::new(),
@@ -886,6 +888,7 @@ impl ThzipApp {
             password: None,
             sevenz: SevenZOptions::default(),
             comment: None,
+            volume_size: None,
             limits: self.limits,
         });
         let task_name = self.tr.tf(TextKey::TaskExportTheme, &[("name", &name)]);
@@ -1340,6 +1343,12 @@ impl ThzipApp {
         } else {
             None
         };
+        let volume_size =
+            if kind == ArchiveKind::SevenZ && !append && self.pack_state.volume_mib > 0 {
+                Some(u64::from(self.pack_state.volume_mib) * 1024 * 1024)
+            } else {
+                None
+            };
         let handle = self.runner.submit(TaskOp::Pack {
             output,
             inputs: self.pack_state.sources.clone(),
@@ -1349,6 +1358,7 @@ impl ThzipApp {
             password,
             sevenz,
             comment,
+            volume_size,
             limits: self.limits,
         });
         let task_key = if append {

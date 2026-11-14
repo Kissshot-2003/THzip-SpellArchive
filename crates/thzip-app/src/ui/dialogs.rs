@@ -117,6 +117,8 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
     let template_name_hint = app.tr.t(TextKey::TemplateName);
     let save_template = app.tr.t(TextKey::SaveTemplate);
     let delete_template = app.tr.t(TextKey::DeleteTemplate);
+    let volume_label = app.tr.t(TextKey::VolumeSize);
+    let volume_none = app.tr.t(TextKey::VolumeNone);
     let formats_hint = app.tr.t(TextKey::PackFormatsHint);
     let append_hint = app.tr.t(TextKey::PackAppendHint);
     let overwrite_hint = app.tr.t(TextKey::PackOverwriteHint);
@@ -321,6 +323,28 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
                             for mib in [1u32, 4, 16, 64, 256] {
                                 ui.selectable_value(
                                     &mut app.pack_state.sevenz_dict_mib,
+                                    mib,
+                                    format!("{mib} MiB"),
+                                );
+                            }
+                        });
+                });
+            }
+            if is_7z && !app.pack_state.append {
+                ui.horizontal(|ui| {
+                    ui.label(&volume_label);
+                    let volume_text = if app.pack_state.volume_mib == 0 {
+                        volume_none.clone()
+                    } else {
+                        format!("{} MiB", app.pack_state.volume_mib)
+                    };
+                    egui::ComboBox::from_id_salt("pack_7z_volume")
+                        .selected_text(volume_text)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut app.pack_state.volume_mib, 0, &volume_none);
+                            for mib in [100u32, 700, 1024, 4096] {
+                                ui.selectable_value(
+                                    &mut app.pack_state.volume_mib,
                                     mib,
                                     format!("{mib} MiB"),
                                 );

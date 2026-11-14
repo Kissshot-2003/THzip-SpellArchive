@@ -87,7 +87,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 137 个测试
+cargo test --workspace                 # 138 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 137 通过；clippy 无告警。
+12. `cargo test --workspace` 138 通过；clippy 无告警。
 
 ---
 
@@ -777,13 +777,13 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **137** 个测试。
+当前共 **138** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
-| `thzip-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、TempDir、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
+| `thzip-core` 单元测试 | 46 | path_sanitize、display_guard、bomb、atomic_fs、TempDir、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
 | `thzip-app` 单元测试 | 36 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
 | `thzip-cli` 单元测试 | 1 | JSON 转义 |
 | `tests/zip_backend.rs` | 13 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime、压缩比预检 |
@@ -926,7 +926,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（137 通过）
+- [ ] `cargo test --workspace`（138 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

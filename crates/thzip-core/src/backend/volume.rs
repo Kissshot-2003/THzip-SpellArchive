@@ -1,8 +1,9 @@
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::error::{ArchiveError, FailReason};
+use crate::safety::atomic_fs::AtomicFile;
 
 /// `foo.7z.001` -> true
 pub fn is_volume_name(name: &str) -> bool {
@@ -75,6 +76,76 @@ pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
     }
 
     Ok(found.into_values().collect())
+}
+
+/// 把已写好的 7z 按字节切成 `foo.7z.001`、`.002` …，成功后删除原文件。
+///
+/// 7z 分卷就是字节切分；zip 的 `.z01` 是另一套格式，不属于这里。
+pub fn split_archive(
+    path: &Path,
+    part_size: u64,
+    force: bool,
+) -> Result<Vec<PathBuf>, ArchiveError> {
+    if part_size == 0 {
+        return Err(ArchiveError::Other(FailReason::Raw(
+            "分卷大小必须大于 0".to_owned(),
+        )));
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(ArchiveError::Other(FailReason::VolumeNameInvalid))?;
+    if is_volume_name(name) {
+        return Err(ArchiveError::Other(FailReason::Raw(
+            "目标已经是 7z 分卷".to_owned(),
+        )));
+    }
+    let total = std::fs::metadata(path)?.len();
+    if total == 0 {
+        return Err(ArchiveError::Other(FailReason::Raw(
+            "空文件不能分卷".to_owned(),
+        )));
+    }
+    let parts = total.div_ceil(part_size);
+    let part_paths: Vec<PathBuf> = (1..=parts)
+        .map(|index| path.with_file_name(format!("{name}.{index:03}")))
+        .collect();
+    if !force && let Some(existing) = part_paths.iter().find(|part| part.exists()) {
+        return Err(ArchiveError::Other(FailReason::Raw(format!(
+            "分卷已存在：{}（使用 --force 覆盖）",
+            existing.display()
+        ))));
+    }
+
+    let mut written: Vec<PathBuf> = Vec::new();
+    let result = (|| -> Result<(), ArchiveError> {
+        let mut source = File::open(path)?;
+        for (offset, part_path) in part_paths.iter().enumerate() {
+            let take = part_size.min(total - offset as u64 * part_size);
+            let mut atomic = AtomicFile::create(part_path)?;
+            let copied = std::io::copy(&mut (&mut source).take(take), atomic.file_mut())?;
+            if copied != take {
+                return Err(ArchiveError::Other(FailReason::Raw(format!(
+                    "分卷写入不完整：{}",
+                    part_path.display()
+                ))));
+            }
+            atomic.flush()?;
+            atomic.commit()?;
+            written.push(part_path.clone());
+        }
+        Ok(())
+    })();
+
+    if let Err(err) = result {
+        for part in &written {
+            let _ = std::fs::remove_file(part);
+        }
+        return Err(err);
+    }
+
+    std::fs::remove_file(path)?;
+    Ok(part_paths)
 }
 
 /// 把多个分卷当成一个连续的 Read + Seek 流。
@@ -224,6 +295,42 @@ mod tests {
         assert_eq!(volumes.len(), 3);
         assert!(volumes[0].ends_with("a.7z.001"));
         assert!(volumes[2].ends_with("a.7z.003"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn splits_archive_into_byte_ranges() {
+        let dir = std::env::temp_dir().join(format!(
+            "thzip-spellarchive-vol-split-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data: Vec<u8> = (0..35u8).collect();
+        let archive = dir.join("a.7z");
+        std::fs::write(&archive, &data).unwrap();
+
+        let parts = super::split_archive(&archive, 10, false).unwrap();
+        assert_eq!(parts.len(), 4);
+        assert!(!archive.exists());
+        let joined: Vec<u8> = parts
+            .iter()
+            .flat_map(|part| std::fs::read(part).unwrap())
+            .collect();
+        assert_eq!(joined, data);
+
+        let mut reader = super::MultiVolumeReader::open(&parts).unwrap();
+        let mut all = Vec::new();
+        reader.read_to_end(&mut all).unwrap();
+        assert_eq!(all, data);
+
+        std::fs::write(&archive, &data).unwrap();
+        assert!(super::split_archive(&archive, 10, false).is_err());
+        assert!(super::split_archive(&archive, 10, true).is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

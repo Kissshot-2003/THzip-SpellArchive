@@ -75,7 +75,7 @@ fn usage() {
   thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>] [--json]
                                           安全解压；默认跳过已有文件
   thzip pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
-                [--7z-level <0-9>] [--7z-dict <MiB>]
+                [--7z-level <0-9>] [--7z-dict <MiB>] [--volume-size <MiB>]
                 [--force] [--append] [--password <pw>] [--json]
                                           创建 zip / 7z / tar 家族；--password 用于 zip / 7z 加密
   thzip --version
@@ -90,6 +90,7 @@ fn usage() {
   - --method 只影响 zip：deflate（默认）/ bzip2 / zstd；--store 优先。
   - --7z-level / --7z-dict 只影响 7z：级别 0–9（默认 6），字典 MiB（0 = 自动）。
   - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
+  - --volume-size 只用于新建 .7z：按 MiB 切成 .7z.001 / .002 …；已存在分卷需 --force。
   - --append 支持 zip / 7z / tar 家族；7z 与 tar 会先解包重建，完成后原子替换。
   - pack 会先写入同目录临时文件，成功后原子替换输出。"
     );
@@ -372,6 +373,19 @@ fn pack(args: &[String]) -> ExitCode {
             }
         }
     }
+    let mut volume_mib = 0u32;
+    if let Some(index) = args.iter().position(|arg| arg == "--volume-size") {
+        match args
+            .get(index + 1)
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            Some(mib) if (1..=65536).contains(&mib) => volume_mib = mib,
+            _ => {
+                eprintln!("--volume-size 需要 1–65536 的整数（MiB）");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     let mut sevenz_dict_mib = 0u32;
     if let Some(index) = args.iter().position(|arg| arg == "--7z-dict") {
         match args
@@ -398,6 +412,7 @@ fn pack(args: &[String]) -> ExitCode {
             || arg == "-m"
             || arg == "--7z-level"
             || arg == "--7z-dict"
+            || arg == "--volume-size"
         {
             skip_value = true;
             continue;
@@ -421,6 +436,10 @@ fn pack(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
+    if volume_mib > 0 && (kind != ArchiveKind::SevenZ || append) {
+        eprintln!("--volume-size 只支持新建 .7z");
+        return ExitCode::FAILURE;
+    }
     if append && !backend::supports_append(kind) {
         eprintln!("追加模式只支持 zip / 7z / tar 家族");
         return ExitCode::FAILURE;
@@ -543,9 +562,23 @@ fn pack(args: &[String]) -> ExitCode {
 
     match writer.finish() {
         Ok(report) => {
+            let mut volumes = 0usize;
+            if volume_mib > 0 {
+                match backend::volume::split_archive(
+                    output,
+                    u64::from(volume_mib) * 1024 * 1024,
+                    force,
+                ) {
+                    Ok(parts) => volumes = parts.len(),
+                    Err(err) => {
+                        eprintln!("分卷失败: {err}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             if json {
                 println!(
-                    "{{\"op\":{},\"path\":{},\"format\":{},\"appended\":{},\"entries\":{},\"bytes_in\":{},\"bytes_out\":{},\"elapsed_ms\":{}}}",
+                    "{{\"op\":{},\"path\":{},\"format\":{},\"appended\":{},\"entries\":{},\"bytes_in\":{},\"bytes_out\":{},\"volumes\":{},\"elapsed_ms\":{}}}",
                     json_escape(if append { "append" } else { "pack" }),
                     json_escape(&output.display().to_string()),
                     json_escape(kind.label()),
@@ -553,6 +586,7 @@ fn pack(args: &[String]) -> ExitCode {
                     report.entries,
                     report.bytes_in,
                     report.bytes_out,
+                    volumes,
                     report.elapsed.as_millis()
                 );
             } else {
@@ -560,6 +594,9 @@ fn pack(args: &[String]) -> ExitCode {
                     "完成：{} 个条目，读入 {} 字节，写出 {} 字节，耗时 {:.2?}",
                     report.entries, report.bytes_in, report.bytes_out, report.elapsed
                 );
+                if volumes > 0 {
+                    println!("已切分为 {volumes} 个分卷（.001 起）");
+                }
             }
             ExitCode::SUCCESS
         }

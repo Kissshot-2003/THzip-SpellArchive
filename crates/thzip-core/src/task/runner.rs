@@ -58,6 +58,7 @@ pub enum TaskOp {
         password: Option<SecretString>,
         sevenz: SevenZOptions,
         comment: Option<String>,
+        volume_size: Option<u64>,
         limits: Limits,
     },
     /// 重写归档：删除 `remove` 中的条目，并把 `rename` 中的条目改成新名字。
@@ -453,6 +454,7 @@ fn run_task(
             password,
             sevenz,
             comment,
+            volume_size,
             limits,
         } => {
             if append && password.is_some() {
@@ -556,6 +558,19 @@ fn run_task(
             match write_entries(writer.as_mut(), &entries, Some(method), cancel, &progress) {
                 Ok(()) => match writer.finish() {
                     Ok(report) => {
+                        if let Some(part_size) = volume_size
+                            && let Err(err) =
+                                crate::backend::volume::split_archive(&output, part_size, true)
+                        {
+                            send(
+                                tx,
+                                TaskEvent::Failed {
+                                    task,
+                                    error: err.reason(),
+                                },
+                            );
+                            return Ok(());
+                        }
                         send(
                             tx,
                             TaskEvent::PackFinished {

@@ -87,7 +87,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 136 个测试
+cargo test --workspace                 # 137 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 136 通过；clippy 无告警。
+12. `cargo test --workspace` 137 通过；clippy 无告警。
 
 ---
 
@@ -203,7 +203,7 @@ spell_archive/
 |---|---|
 | `main.rs` | 单实例、日志初始化、窗口参数、启动参数/目录 |
 | `app.rs` | 状态、事件泵、任务表、标签页、打开/解压/创建、预检、设置保存、拖拽、热重载轮询 |
-| `prefs.rs` | schema 4 配置（含排序键、窗口大小）、handoff、日志路径 |
+| `prefs.rs` | schema 5 配置（含排序键、窗口大小、打包模板）、handoff、日志路径 |
 | `logging.rs` | 文本日志 + panic hook，5 MiB 轮转 |
 | `i18n/mod.rs` | zh-CN / en-US 全量文案 + 主题覆盖 + 标准术语开关 + `{name}` 占位符格式化 + 完整性测试 |
 | `i18n/errors.rs` | `FailReason` 的中文/英文翻译；密码相关标记 |
@@ -223,7 +223,7 @@ main
  └─ run_native（首实例）
      └─ ThzipApp::new
          ├─ install_cjk_fonts          # simhei.ttf → Deng.ttf
-         ├─ Prefs::load()              # %APPDATA%\THzip-SpellArchive\prefs.toml（schema 4）
+         ├─ Prefs::load()              # %APPDATA%\THzip-SpellArchive\prefs.toml（schema 5）
          ├─ ThemeStore::load()         # 扫描主题 + 解析纹理路径（不解码）
          ├─ 按 prefs.theme 选中主题
          ├─ themes.ensure_loaded(ctx)  # 只解码当前主题的 PNG
@@ -600,9 +600,10 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
   日志与 handoff 同目录；首次便携启动从 `%APPDATA%\THzip-SpellArchive` 迁移一次。
 - 改名迁移：新路径不存在时读取旧 `%APPDATA%\SpellArchive\prefs.toml`，解析后立即写入新路径；
   旧文件保留不删除，便于回退。
-- 当前 schema 4；字段：`theme`、`locale`、`prefer_standard`、`show_hint`、`close_to_tray`、
-  `last_dir`、`sort_key`、`sort_asc`、`window_size`。
-- schema 1/2/3 读取时自动升级到 4（缺失字段由 serde default 补齐）。
+- 当前 schema 5；字段：`theme`、`locale`、`prefer_standard`、`show_hint`、`close_to_tray`、
+  `last_dir`、`sort_key`、`sort_asc`、`window_size`、`pack_templates`。
+- schema 1–4 读取时自动升级到 5（缺失字段由 serde default 补齐）。
+- `pack_templates` 只保存格式 / 压缩参数，**绝不保存密码**。
 - `window_size` 在启动时作为 `NativeOptions.inner_size` 恢复；只存尺寸不存位置，避免换显示器后
   窗口跑出屏幕。拖动窗口后 400ms 防抖写盘。
 - 变更后 400ms 防抖，用 `AtomicFile` 写入；表头排序切换也会触发保存。
@@ -776,14 +777,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **136** 个测试。
+当前共 **137** 个测试。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
 | `thzip-core` 单元测试 | 45 | path_sanitize、display_guard、bomb、atomic_fs、TempDir、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `thzip-app` 单元测试 | 35 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
+| `thzip-app` 单元测试 | 36 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
 | `thzip-cli` 单元测试 | 1 | JSON 转义 |
 | `tests/zip_backend.rs` | 13 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime、压缩比预检 |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
@@ -925,7 +926,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（136 通过）
+- [ ] `cargo test --workspace`（137 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

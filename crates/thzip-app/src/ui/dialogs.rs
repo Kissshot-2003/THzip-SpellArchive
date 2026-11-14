@@ -112,6 +112,11 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
     let password_hint = app.tr.t(TextKey::Password);
     let comment_label = app.tr.t(TextKey::Comment);
     let comment_hint = app.tr.t(TextKey::CommentHint);
+    let template_label = app.tr.t(TextKey::Template);
+    let template_none = app.tr.t(TextKey::TemplateNone);
+    let template_name_hint = app.tr.t(TextKey::TemplateName);
+    let save_template = app.tr.t(TextKey::SaveTemplate);
+    let delete_template = app.tr.t(TextKey::DeleteTemplate);
     let formats_hint = app.tr.t(TextKey::PackFormatsHint);
     let append_hint = app.tr.t(TextKey::PackAppendHint);
     let overwrite_hint = app.tr.t(TextKey::PackOverwriteHint);
@@ -126,6 +131,9 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
     let mut browse = false;
     let mut start = false;
     let mut cancel = false;
+    let mut apply_template = None;
+    let mut save_template_flag = false;
+    let mut delete_template_flag = false;
 
     egui::Window::new(title)
         .open(&mut open)
@@ -141,6 +149,53 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
                 }
                 if ui.button(add_folder).clicked() {
                     pick_folder = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(&template_label);
+                let selected_text = app
+                    .pack_state
+                    .template_index
+                    .and_then(|index| app.pack_templates.get(index))
+                    .map(|template| template.name.clone())
+                    .unwrap_or_else(|| template_none.clone());
+                egui::ComboBox::from_id_salt("pack_template")
+                    .selected_text(selected_text)
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(
+                                app.pack_state.template_index.is_none(),
+                                &template_none,
+                            )
+                            .clicked()
+                        {
+                            app.pack_state.template_index = None;
+                        }
+                        for (index, template) in app.pack_templates.iter().enumerate() {
+                            if ui
+                                .selectable_label(
+                                    app.pack_state.template_index == Some(index),
+                                    &template.name,
+                                )
+                                .clicked()
+                            {
+                                app.pack_state.template_index = Some(index);
+                                apply_template = Some(index);
+                            }
+                        }
+                    });
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.pack_state.template_name)
+                        .hint_text(&template_name_hint)
+                        .desired_width(120.0),
+                );
+                if ui.button(&save_template).clicked() {
+                    save_template_flag = true;
+                }
+                if app.pack_state.template_index.is_some() && ui.button(&delete_template).clicked()
+                {
+                    delete_template_flag = true;
                 }
             });
 
@@ -355,6 +410,17 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
                 });
             });
         });
+
+    if let Some(index) = apply_template {
+        app.apply_pack_template(index);
+    }
+    if save_template_flag {
+        app.save_pack_template();
+    }
+    if delete_template_flag && let Some(index) = app.pack_state.template_index {
+        app.delete_pack_template(index);
+        app.pack_state.template_index = None;
+    }
 
     if pick_files {
         app.pack_add_files();

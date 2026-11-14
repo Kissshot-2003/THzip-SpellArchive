@@ -4,7 +4,18 @@ use serde::{Deserialize, Serialize};
 use thzip_core::safety::write_atomic;
 
 /// 当前配置 schema。新增字段时递增，并在 `load` 里补迁移。
-pub const CURRENT_SCHEMA: u32 = 4;
+pub const CURRENT_SCHEMA: u32 = 5;
+
+/// 打包任务模板：只保存格式与压缩参数，绝不保存密码。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PackTemplate {
+    pub name: String,
+    pub store: bool,
+    pub zip_method: String,
+    pub sevenz_level: u32,
+    pub sevenz_dict_mib: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -21,6 +32,8 @@ pub struct Prefs {
     pub sort_asc: bool,
     /// 主窗口内尺寸（逻辑点）；只恢复大小，不恢复位置，避免换显示器后跑出屏幕。
     pub window_size: Option<[f32; 2]>,
+    /// 打包任务模板；密码永远不入库。
+    pub pack_templates: Vec<PackTemplate>,
 }
 
 impl Default for Prefs {
@@ -36,6 +49,7 @@ impl Default for Prefs {
             sort_key: None,
             sort_asc: true,
             window_size: None,
+            pack_templates: Vec::new(),
         }
     }
 }
@@ -227,6 +241,17 @@ mod tests {
     fn parses_window_size() {
         let prefs: Prefs = toml::from_str("window_size = [1280.0, 800.0]\n").unwrap();
         assert_eq!(prefs.window_size, Some([1280.0, 800.0]));
+    }
+
+    #[test]
+    fn parses_pack_templates() {
+        let prefs: Prefs = toml::from_str(
+            "[[pack_templates]]\nname = \"快速\"\nstore = true\nzip_method = \"deflate\"\nsevenz_level = 6\n",
+        )
+        .unwrap();
+        assert_eq!(prefs.pack_templates.len(), 1);
+        assert_eq!(prefs.pack_templates[0].name, "快速");
+        assert!(prefs.pack_templates[0].store);
     }
 
     #[test]

@@ -145,6 +145,22 @@ pub enum ZipPackMethod {
 }
 
 impl ZipPackMethod {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Deflate => "deflate",
+            Self::Bzip2 => "bzip2",
+            Self::Zstd => "zstd",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "bzip2" => Self::Bzip2,
+            "zstd" => Self::Zstd,
+            _ => Self::Deflate,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Deflate => "Deflate",
@@ -173,6 +189,8 @@ pub struct PackState {
     pub encrypt: bool,
     pub password: String,
     pub comment: String,
+    pub template_name: String,
+    pub template_index: Option<usize>,
     pub error: Option<String>,
     pub confirm_overwrite: bool,
 }
@@ -190,6 +208,8 @@ impl Default for PackState {
             encrypt: false,
             password: String::new(),
             comment: String::new(),
+            template_name: String::new(),
+            template_index: None,
             error: None,
             confirm_overwrite: false,
         }
@@ -251,6 +271,7 @@ pub struct ThzipApp {
     pub show_settings: bool,
     pub show_first_run_hint: bool,
     pub close_to_tray: bool,
+    pub pack_templates: Vec<crate::prefs::PackTemplate>,
 
     pub dir: PathBuf,
     pub dir_items: Vec<DirItem>,
@@ -333,6 +354,7 @@ impl ThzipApp {
             show_settings: false,
             show_first_run_hint: prefs.show_hint,
             close_to_tray: prefs.close_to_tray,
+            pack_templates: prefs.pack_templates.clone(),
             dir,
             dir_items: Vec::new(),
             archive_name: String::new(),
@@ -694,6 +716,7 @@ impl ThzipApp {
             sort_key: Some(self.sort_key.as_str().to_owned()),
             sort_asc: self.sort_asc,
             window_size: self.window_size,
+            pack_templates: self.pack_templates.clone(),
         };
         if let Err(err) = prefs.save() {
             crate::logging::warn_fields("prefs", "save failed", &[("error", &err.to_string())]);
@@ -1338,6 +1361,51 @@ impl ThzipApp {
         self.show_pack = false;
         self.pack_state.password.clear();
         self.pack_state.error = None;
+    }
+
+    pub fn apply_pack_template(&mut self, index: usize) {
+        let Some(template) = self.pack_templates.get(index).cloned() else {
+            return;
+        };
+        self.pack_state.store = template.store;
+        self.pack_state.zip_method = ZipPackMethod::from_key(&template.zip_method);
+        self.pack_state.sevenz_level = template.sevenz_level.min(9);
+        self.pack_state.sevenz_dict_mib = template.sevenz_dict_mib.min(1024);
+        self.pack_state.confirm_overwrite = false;
+        self.pack_state.error = None;
+    }
+
+    pub fn save_pack_template(&mut self) {
+        let name = self.pack_state.template_name.trim().to_owned();
+        if name.is_empty() {
+            return;
+        }
+        let template = crate::prefs::PackTemplate {
+            name: name.clone(),
+            store: self.pack_state.store,
+            zip_method: self.pack_state.zip_method.key().to_owned(),
+            sevenz_level: self.pack_state.sevenz_level.min(9),
+            sevenz_dict_mib: self.pack_state.sevenz_dict_mib.min(1024),
+        };
+        if let Some(existing) = self
+            .pack_templates
+            .iter_mut()
+            .find(|existing| existing.name == name)
+        {
+            *existing = template;
+        } else {
+            self.pack_templates.push(template);
+        }
+        self.pack_state.template_name.clear();
+        self.touch_settings();
+        self.status = self.tr.t(TextKey::TemplateSaved);
+    }
+
+    pub fn delete_pack_template(&mut self, index: usize) {
+        if index < self.pack_templates.len() {
+            self.pack_templates.remove(index);
+            self.touch_settings();
+        }
     }
 
     pub fn start_test(&mut self) {

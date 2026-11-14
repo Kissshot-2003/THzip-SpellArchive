@@ -33,9 +33,15 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    let prefs = prefs::Prefs::load();
+    let window_size = prefs
+        .window_size
+        .map(|[width, height]| [width.max(960.0), height.max(600.0)])
+        .unwrap_or([1280.0, 820.0]);
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 820.0])
+            .with_inner_size(window_size)
             .with_min_inner_size([960.0, 600.0])
             .with_title("SpellArchive"),
         ..Default::default()

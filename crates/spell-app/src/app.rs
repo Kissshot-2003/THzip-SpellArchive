@@ -277,6 +277,7 @@ pub struct SpellApp {
     next_handoff_check: Instant,
     theme_signature: Option<(u64, SystemTime)>,
     next_theme_check: Instant,
+    window_size: Option<[f32; 2]>,
     tray: Option<Tray>,
     quitting: bool,
 }
@@ -354,6 +355,7 @@ impl SpellApp {
             next_handoff_check: Instant::now(),
             theme_signature,
             next_theme_check: Instant::now() + Duration::from_secs(1),
+            window_size: prefs.window_size,
             tray,
             quitting: false,
         };
@@ -668,6 +670,7 @@ impl SpellApp {
             last_dir: Some(self.dir.display().to_string()),
             sort_key: Some(self.sort_key.as_str().to_owned()),
             sort_asc: self.sort_asc,
+            window_size: self.window_size,
         };
         if let Err(err) = prefs.save() {
             crate::logging::warn_fields("prefs", "save failed", &[("error", &err.to_string())]);
@@ -1600,6 +1603,20 @@ impl SpellApp {
 impl eframe::App for SpellApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+
+        // 记住主窗口大小；只记录逻辑尺寸，位置不持久化，避免换显示器后跑出屏幕。
+        if let Some(rect) = ctx.input(|input| input.viewport().inner_rect) {
+            let size = [rect.width().round(), rect.height().round()];
+            if size[0] >= 640.0 && size[1] >= 480.0 {
+                let changed = self.window_size.is_none_or(|old| {
+                    (old[0] - size[0]).abs() >= 1.0 || (old[1] - size[1]).abs() >= 1.0
+                });
+                if changed {
+                    self.window_size = Some(size);
+                    self.settings_dirty = true;
+                }
+            }
+        }
 
         if ctx.input(|input| input.viewport().close_requested())
             && self.close_to_tray

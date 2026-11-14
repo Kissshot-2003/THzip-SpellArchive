@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use spell_core::safety::write_atomic;
 
 /// 当前配置 schema。新增字段时递增，并在 `load` 里补迁移。
-pub const CURRENT_SCHEMA: u32 = 3;
+pub const CURRENT_SCHEMA: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -19,6 +19,8 @@ pub struct Prefs {
     /// 归档表排序键：name / size / packed / ratio / method / time。
     pub sort_key: Option<String>,
     pub sort_asc: bool,
+    /// 主窗口内尺寸（逻辑点）；只恢复大小，不恢复位置，避免换显示器后跑出屏幕。
+    pub window_size: Option<[f32; 2]>,
 }
 
 impl Default for Prefs {
@@ -33,6 +35,7 @@ impl Default for Prefs {
             last_dir: None,
             sort_key: None,
             sort_asc: true,
+            window_size: None,
         }
     }
 }
@@ -104,7 +107,14 @@ mod tests {
         assert!(prefs.close_to_tray);
         assert!(prefs.sort_asc);
         assert_eq!(prefs.sort_key, None);
+        assert_eq!(prefs.window_size, None);
         assert_eq!(prefs.schema, super::CURRENT_SCHEMA);
+    }
+
+    #[test]
+    fn parses_window_size() {
+        let prefs: Prefs = toml::from_str("window_size = [1280.0, 800.0]\n").unwrap();
+        assert_eq!(prefs.window_size, Some([1280.0, 800.0]));
     }
 
     #[test]

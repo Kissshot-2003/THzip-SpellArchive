@@ -20,7 +20,7 @@ cargo run -p thzip-cli -- test <归档>            # CRC 完整性测试
 cargo run -p thzip-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
 cargo run -p thzip-cli -- pack <输出> <输入...>      # 格式由扩展名决定；7z 可加 --volume-size <MiB>
 # sniff / list / test / extract / pack 都支持 --json，输出单行机读结果
-cargo test --workspace                           # 144 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 145 个单元 / 集成 / 归档格式用例
 cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / 解压 / 7z 打包基准
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```

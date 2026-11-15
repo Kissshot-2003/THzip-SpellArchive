@@ -36,6 +36,7 @@
 ### 修复
 
 - 安装版带有 `themes/` 曾被误判为便携模式；现在检测 `unins000.exe`，安装版继续使用 `%APPDATA%`。
+- CLI `--version` 曾输出旧的 `spell` 名称；现在输出 `thzip <版本> (THzip-SpellArchive)`。
 
 ### 修复
 

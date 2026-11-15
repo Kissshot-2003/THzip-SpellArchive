@@ -25,7 +25,7 @@ fn main() -> ExitCode {
             }
         }
         Some("--version" | "-V") => {
-            println!("spell {}", env!("CARGO_PKG_VERSION"));
+            println!("thzip {} (THzip-SpellArchive)", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Some("sniff") => with_path(&args, |path| sniff(path, has_json(&args))),

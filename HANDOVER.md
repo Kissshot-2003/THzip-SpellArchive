@@ -28,7 +28,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（144）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（145）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -87,7 +87,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 144 个测试
+cargo test --workspace                 # 145 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 144 通过；clippy 无告警。
+12. `cargo test --workspace` 145 通过；clippy 无告警。
 
 ---
 
@@ -785,7 +785,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **144** 个测试。
+当前共 **145** 个测试。
 
 ### 9.2 测试分布
 
@@ -794,7 +794,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `thzip-core` 单元测试 | 47 | path_sanitize、display_guard、bomb、atomic_fs、TempDir、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
 | `thzip-app` 单元测试 | 37 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
 | `thzip-cli` 单元测试 | 1 | JSON 转义 |
-| `thzip-cli/tests/cli.rs` | 2 | CLI `--json` 打包/列出/测试/解压往返、注释、7z 分卷创建与回读 |
+| `thzip-cli/tests/cli.rs` | 3 | CLI `--json` 打包/列出/测试/解压往返、注释、7z 分卷创建与回读、版本号 |
 | `tests/zip_backend.rs` | 13 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime、压缩比预检 |
 | `tests/rar_backend.rs` | 3 | RAR 列表/解压/测试、密码、固实包 |
 | `tests/zip_write.rs` | 10 | zip 创建、取消、原子性、名字净化、追加、重名拒绝、AES、BZip2/Zstd 创建、注释往返 |
@@ -935,7 +935,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（144 通过）
+- [ ] `cargo test --workspace`（145 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

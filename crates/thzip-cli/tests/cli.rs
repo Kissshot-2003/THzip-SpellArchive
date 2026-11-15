@@ -119,3 +119,12 @@ fn split_7z_volumes_are_readable() {
     assert!(list.status.success(), "{}", stdout(&list));
     assert!(stdout(&list).contains("\"name\":\"payload.bin\""));
 }
+
+#[test]
+fn version_uses_product_name() {
+    let output = run(&["--version"]);
+    assert!(output.status.success());
+    let body = stdout(&output);
+    assert!(body.starts_with("thzip "), "{body}");
+    assert!(body.contains("THzip-SpellArchive"), "{body}");
+}

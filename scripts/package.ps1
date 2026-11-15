@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Version = ""
 )
 
@@ -20,8 +20,15 @@ try {
     }
 
     Write-Host "Building THzip-SpellArchive $Version ..."
+    # PowerShell 5.1 会把原生命令写往 stderr 的内容当成错误记录，而 cargo 的编译进度全在
+    # stderr 上，配合 $ErrorActionPreference = "Stop" 会让脚本在编译中途直接抛出。
+    # 这里临时放宽，靠 $LASTEXITCODE 判断成败。
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     cargo build -p thzip-app -p thzip-cli --release
-    if ($LASTEXITCODE -ne 0) {
+    $buildExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedEap
+    if ($buildExit -ne 0) {
         throw "release build failed"
     }
 

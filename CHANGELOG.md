@@ -31,6 +31,7 @@
 - 8 MiB 以内的 zip 整包读入内存：10k 条目列表 328 ms → 8 ms；大包仍走文件流。
 - 单文件流尺寸优先读元数据：gz 尾部 ISIZE、zstd/lz4 帧头 Content Size，避免打开即整包解压；bz2/xz 保留回退。
 - 打包脚本自动在 PATH 与常见安装目录查找 Inno Setup 的 `iscc`。
+- CLI 集成测试：`--json` 全流程与 7z 分卷创建/回读。
 
 ### 修复
 

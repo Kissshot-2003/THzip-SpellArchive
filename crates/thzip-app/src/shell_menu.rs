@@ -478,6 +478,19 @@ pub fn uninstall() -> io::Result<()> {
 mod tests {
     use super::*;
 
+    /// 动注册表的测试必须串行。
+    ///
+    /// 这些测试改的是同一个 HKCU 树，`cargo test` 默认并行跑线程——
+    /// 一个测试的 `uninstall()` 会把另一个刚装好的菜单删掉，
+    /// 甚至在别的测试正打开某个键时把它标记为删除。
+    /// 用进程内的全局锁把它们排成队列，不需要额外引入 `serial_test`。
+    static REGISTRY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 取注册表锁；被毒化时也要能继续跑——测试失败不该连锁失败。
+    fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        REGISTRY_LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
     #[test]
     fn extension_list_has_no_duplicates() {
         let mut seen = ARCHIVE_EXTENSIONS.to_vec();
@@ -530,6 +543,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn install_produces_expected_layout_and_preserves_associations() {
+        let _guard = registry_guard();
         use winreg::RegKey;
         use winreg::enums::HKEY_CURRENT_USER;
 
@@ -638,6 +652,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn classic_menu_toggle_roundtrips() {
+        let _guard = registry_guard();
         use winreg::RegKey;
         use winreg::enums::HKEY_CURRENT_USER;
 
@@ -661,5 +676,89 @@ mod tests {
         if was_on {
             set_classic_menu(true).unwrap();
         }
+    }
+
+    /// 迁移回归：旧名 SpellArchive 的菜单要被换成新名，并清掉旧的 `*` 菜单。
+    ///
+    /// 升级路径是「先装新菜单，再删旧键」——顺序不能反，否则中间态会让
+    /// 用户右键看不到任何菜单。这个测试按真实顺序走一遍，并确认：
+    /// 新菜单在位、旧菜单已消失、上一版挂在 `*` 下的菜单也被清掉。
+    #[cfg(windows)]
+    #[test]
+    fn migration_replaces_legacy_menu_and_clears_star_keys() {
+        let _guard = registry_guard();
+        use winreg::RegKey;
+        use winreg::enums::HKEY_CURRENT_USER;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let exe = std::env::current_exe().unwrap();
+
+        // 先摆出旧版的痕迹：旧名菜单 + 上一版挂在 `*` 下的菜单。
+        for base in LEGACY_FILE_MENUS.iter().chain(LEGACY_DIR_MENUS.iter()) {
+            let (key, _) = hkcu.create_subkey(base).unwrap();
+            key.set_value("", &"旧版菜单").unwrap();
+        }
+        for base in LEGACY_STAR_MENUS.iter() {
+            let (key, _) = hkcu.create_subkey(base).unwrap();
+            key.set_value("", &"上一版菜单").unwrap();
+        }
+
+        // 走真实的迁移路径：检测到旧菜单就装新的，然后清旧键。
+        assert!(legacy_installed(), "刚摆出的旧菜单应被检测到");
+        install(&exe, Locale::ZhCn).expect("安装新菜单");
+        remove_legacy().expect("清理旧菜单");
+
+        // 新菜单在位
+        let new_key = format!(r"Software\Classes\.zip\shell\{VERB_PREFIX}.ExtractHere");
+        assert!(
+            hkcu.open_subkey(&new_key).is_ok(),
+            "新菜单应在位: {new_key}"
+        );
+
+        // 旧名菜单已清掉
+        for base in LEGACY_FILE_MENUS.iter().chain(LEGACY_DIR_MENUS.iter()) {
+            assert!(hkcu.open_subkey(base).is_err(), "旧菜单应被清理: {base}");
+        }
+
+        // 上一版挂在 `*` 下的菜单也已清掉——否则右键任何文件都还挂着旧动词。
+        for base in LEGACY_STAR_MENUS.iter() {
+            assert!(
+                hkcu.open_subkey(base).is_err(),
+                "`*` 下的旧菜单应被清理: {base}"
+            );
+        }
+
+        // 收尾：卸掉新菜单，让注册表回到测试前的状态。
+        uninstall().expect("卸载");
+    }
+
+    /// 迁移必须幂等：重复安装不应改变结果，重复清理也不应报错。
+    #[cfg(windows)]
+    #[test]
+    fn migration_is_idempotent() {
+        let _guard = registry_guard();
+        use winreg::RegKey;
+        use winreg::enums::HKEY_CURRENT_USER;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let exe = std::env::current_exe().unwrap();
+
+        install(&exe, Locale::ZhCn).expect("第一次安装");
+        install(&exe, Locale::EnUs).expect("第二次安装（换语言）");
+
+        // 第二次安装后菜单仍在，且语言已更新。
+        let key = format!(r"Software\Classes\.zip\shell\{VERB_PREFIX}.ExtractHere");
+        let name: String = hkcu
+            .open_subkey(&key)
+            .expect("菜单应在位")
+            .get_value("")
+            .unwrap();
+        assert_eq!(name, "Extract here", "第二次安装应更新语言文案");
+
+        // 清理旧键在「本来就没有」时不应报错。
+        remove_legacy().expect("清理不存在的旧键不应报错");
+        remove_legacy().expect("重复清理不应报错");
+
+        uninstall().expect("卸载");
     }
 }

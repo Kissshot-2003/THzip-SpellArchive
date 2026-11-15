@@ -8,7 +8,7 @@
 ### 新增
 
 - CI：stable 测试 / clippy / fmt，tag 触发可复现打包并上传 Release。
-- 差分测试：与固定 SHA-256 的 7-Zip 26.04 双向比对列出、解压与 AES 密码。
+- 差分测试：与固定 SHA-256 的 7-Zip 26.04 双向比对列出/解压、AES zip、AES 7z 与 7z 分卷。
 - fuzz：4 个 cargo-fuzz 目标 + stable 确定性变异 smoke 测试。
 - criterion 基准：格式嗅探、10k 条目 zip 列表、16 MiB 解压、4 MiB 7z 打包。
 - 便携模式：exe 同目录存在 `portable.flag` 或 `themes/` 时，配置、日志、handoff 写入 `<exe>\config\`，首次启动从 `%APPDATA%` 迁移。

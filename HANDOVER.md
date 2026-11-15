@@ -28,7 +28,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（142）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（144）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -87,7 +87,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 142 个测试
+cargo test --workspace                 # 144 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 142 通过；clippy 无告警。
+12. `cargo test --workspace` 144 通过；clippy 无告警。
 
 ---
 
@@ -785,7 +785,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **142** 个测试。
+当前共 **144** 个测试。
 
 ### 9.2 测试分布
 
@@ -804,7 +804,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/stream_backend.rs` | 1 | 5 种单文件流读取/解压/测试 |
 | `tests/sevenz_write.rs` | 7 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝、重名条目、追加取消 |
 | `tests/fuzz_smoke.rs` | 1 | 6 个 fixture × 48 次确定性变异 + 512 个随机头，保证不 panic |
-| `tests/differential.rs` | 3 | 与固定版 7-Zip 双向列出、解压、AES-256 密码互通；未设置 `THZIP_7Z` 时跳过 |
+| `tests/differential.rs` | 5 | 与固定版 7-Zip 双向列出/解压、AES zip、AES 7z、7z 分卷；未设置 `THZIP_7Z` 时跳过 |
 
 ### 9.3 手工验收（每次改格式/任务层都跑）
 
@@ -935,7 +935,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（142 通过）
+- [ ] `cargo test --workspace`（144 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

@@ -131,9 +131,9 @@ fn listing_from_core(archive: &Path) -> BTreeMap<String, u64> {
         .collect()
 }
 
-fn extract_all(archive: &Path, target: &Path) {
+fn extract_all(archive: &Path, target: &Path, password: Option<&thzip_core::SecretString>) {
     let limits = Limits::default();
-    let mut reader = backend::open(archive, None).expect("open for extract");
+    let mut reader = backend::open(archive, password).expect("open for extract");
     let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
     let plan = reader.plan(&ids, target, &limits).expect("plan");
     let decisions = DecisionTable {
@@ -229,7 +229,7 @@ fn reads_archives_created_by_7zip() {
         assert_eq!(ours, theirs, "listing mismatch for 7z-created {name}");
 
         let target = dir.path().join("out");
-        extract_all(&archive, &target);
+        extract_all(&archive, &target, None);
         assert_eq!(
             std::fs::read(target.join("src/hello.txt")).unwrap(),
             b"hello from thzip"
@@ -296,4 +296,90 @@ fn passwords_interoperate_with_7zip() {
     let reader = backend::open(&theirs, Some(&password)).expect("open encrypted 7z");
     assert!(!reader.entries().is_empty());
     assert!(backend::open(&theirs, None).is_err());
+}
+
+#[test]
+fn reads_aes_zip_created_by_7zip() {
+    let Some(sevenzip) = seven_zip() else {
+        eprintln!("THZIP_7Z not set; skipping AES zip test");
+        return;
+    };
+    let dir = TempDir::new("aes-zip");
+    let src = build_source(dir.path());
+    let archive = dir.path().join("theirs-aes.zip");
+
+    let output = Command::new(&sevenzip)
+        .args(["a", "-tzip", "-phunter2", "-mem=AES256"])
+        .arg(&archive)
+        .arg(src.join("hello.txt"))
+        .output()
+        .expect("run 7z a -tzip");
+    assert!(
+        output.status.success(),
+        "7z could not create AES zip: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let password = thzip_core::SecretString::new("hunter2");
+    let reader = backend::open(&archive, Some(&password)).expect("open AES zip");
+    assert_eq!(reader.entries().len(), 1);
+    assert!(reader.entries()[0].encrypted);
+    // zip 的 AES 只加密数据，中央目录仍可读；无密码打开只用于列目录。
+    let metadata_only = backend::open(&archive, None).expect("list without password");
+    assert!(metadata_only.entries()[0].encrypted);
+
+    let target = dir.path().join("out-aes");
+    extract_all(&archive, &target, Some(&password));
+    assert_eq!(
+        std::fs::read(target.join("hello.txt")).unwrap(),
+        b"hello from thzip"
+    );
+}
+
+#[test]
+fn reads_split_7z_created_by_7zip() {
+    let Some(sevenzip) = seven_zip() else {
+        eprintln!("THZIP_7Z not set; skipping split 7z test");
+        return;
+    };
+    let dir = TempDir::new("split-7z");
+    let src = build_source(dir.path());
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let blob: Vec<u8> = (0..1_500_000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state & 0xFF) as u8
+        })
+        .collect();
+    std::fs::write(src.join("blob.bin"), &blob).unwrap();
+
+    let archive = dir.path().join("split.7z");
+    let output = Command::new(&sevenzip)
+        .args(["a", "-t7z", "-v1m"])
+        .arg(&archive)
+        .arg(&src)
+        .output()
+        .expect("run 7z a -v1m");
+    assert!(
+        output.status.success(),
+        "7z could not create split archive: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let first = dir.path().join("split.7z.001");
+    assert!(first.is_file());
+    assert!(dir.path().join("split.7z.002").is_file());
+
+    let reader = backend::open(&first, None).expect("open split 7z");
+    assert!(
+        reader
+            .entries()
+            .iter()
+            .any(|entry| entry.display.ends_with("blob.bin"))
+    );
+
+    let target = dir.path().join("out-split");
+    extract_all(&first, &target, None);
+    assert_eq!(std::fs::read(target.join("src/blob.bin")).unwrap(), blob);
 }

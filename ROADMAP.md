@@ -43,7 +43,7 @@
 ## 3. Phase 1：质量护栏
 
 - [x] `cargo-fuzz` 4 个 target：`classify`、zip 中央目录、7z 头、tar 头（stable 另有 `fuzz_smoke` 确定性变异）
-- [x] 差分测试：固定 SHA-256 的 7-Zip 26.04，双向列出 / 解压 / AES 密码互通
+- [x] 差分测试：固定 SHA-256 的 7-Zip 26.04，双向列出/解压、AES zip、AES 7z、7z 分卷
 - [x] `criterion` 基准：10k 条目列表、16 MiB 解压、4 MiB 7z 打包（10 万条目与内存峰值待补）
 - [ ] `egui_kittest` 冒烟：打开 → 预检 → 解压 → 取消
 - [x] 把基准结果写入 README；`bench.yml` 可手动跑并上传 criterion 报告（10k 列表 340ms 待优化）

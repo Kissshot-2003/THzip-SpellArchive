@@ -32,6 +32,9 @@ jobs:
       - name: Build CLI
         run: cargo build -p thzip-cli --release
 
+      - name: Check fuzz targets
+        run: cargo check --manifest-path fuzz/Cargo.toml
+
   differential:
     runs-on: windows-latest
     steps:

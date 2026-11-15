@@ -324,6 +324,8 @@ UI 选目标目录
 读取：
 
 - `zip = 4.6`，启用 `deflate`、`deflate-flate2-zlib-rs`、`deflate64`、`bzip2`、`zstd`、`ppmd`、`aes-crypto`。
+- ≤ 8 MiB 的包整包读入 `Cursor<Vec<u8>>` 再解析：避免逐条目 `seek`，10k 列表约 8 ms；
+  更大的包回退 `BufReader<File>`。`ZipArchive` 的源类型统一为 `Box<dyn Read + Seek + Send>`。
 - 名字用 `name_raw()` + `name_codec` 还原，不直接吃 CP437。
 - 支持 AES 解压；AES 条目 CRC 字段为 0，读取时置 `crc32=None`，避免误报。
 - `plan()` 负责路径净化、冲突、重解析点、超长、链接、可疑显示名。

@@ -30,6 +30,15 @@ fn bench_list(criterion: &mut Criterion) {
             black_box(reader.entries().len())
         });
     });
+
+    criterion.bench_function("open_10k_zip_central_directory_only", |bencher| {
+        bencher.iter(|| {
+            let file = std::fs::File::open(&archive).expect("open file");
+            let reader = std::io::BufReader::new(file);
+            let archive = zip::ZipArchive::new(reader).expect("parse central directory");
+            black_box(archive.len())
+        });
+    });
 }
 
 criterion_group!(benches, bench_list);

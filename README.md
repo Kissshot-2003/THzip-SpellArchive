@@ -30,11 +30,13 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 | 场景 | 耗时 |
 |---|---|
 | `classify_600b`（17 组样本） | ~5 µs |
-| 打开并列出 10k 条目 zip | ~340 ms |
+| 打开并列出 10k 条目 zip（≤ 8 MiB 包） | ~8 ms |
+| 仅解析 10k 条目中央目录（文件 seek） | ~100 ms |
 | 解压 16 MiB zip 到计数 sink | ~1.7 ms |
 | 打包 4 MiB 随机数据为 7z（LZMA2 L6） | ~950 ms |
 
-数字只用于前后对比；10k 列表偏慢已记录在 `ROADMAP.md` Phase 4。
+数字只用于前后对比。8 MiB 以内的 zip 会整包读入内存，避免逐条目 seek；更大的包仍走文件流。
+此前 10k 列表约 340 ms，优化后约 8 ms。
 
 ## 便携模式
 

@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -22,17 +22,25 @@ const READ_BUF: usize = 64 * 1024;
 
 pub struct ZipReader {
     path: PathBuf,
-    archive: Option<zip::ZipArchive<BufReader<File>>>,
+    archive: Option<zip::ZipArchive<ZipSource>>,
     entries: Vec<ArchiveEntry>,
     password: Option<SecretString>,
 }
 
 /// zip 条目读取器。LZMA（方法 14）由 lzma-rust2 自行解码：
 /// zip crate 的 LZMA 解压器不认识 ZIP 内部头，会把合法条目误判为格式错误。
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+/// 小包整体读入内存，避免逐条目 seek 触发系统调用与杀软扫描。
+type ZipSource = Box<dyn ReadSeek + Send>;
+
+const SMALL_ARCHIVE_LIMIT: u64 = 8 * 1024 * 1024;
+
 enum ZipEntryReader<'a> {
-    Plain(Box<zip::read::ZipFile<'a, BufReader<File>>>),
-    Lzma(Box<lzma_rust2::LzmaReader<zip::read::ZipFile<'a, BufReader<File>>>>),
-    Xz(Box<liblzma::bufread::XzDecoder<BufReader<zip::read::ZipFile<'a, BufReader<File>>>>>),
+    Plain(Box<zip::read::ZipFile<'a, ZipSource>>),
+    Lzma(Box<lzma_rust2::LzmaReader<zip::read::ZipFile<'a, ZipSource>>>),
+    Xz(Box<liblzma::bufread::XzDecoder<BufReader<zip::read::ZipFile<'a, ZipSource>>>>),
 }
 
 impl std::io::Read for ZipEntryReader<'_> {
@@ -47,10 +55,17 @@ impl std::io::Read for ZipEntryReader<'_> {
 
 impl ZipReader {
     pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
-        let file =
+        let mut file =
             File::open(path).map_err(|err| ArchiveError::Open(FailReason::Raw(err.to_string())))?;
-        let reader = BufReader::with_capacity(256 * 1024, file);
-        let mut archive = zip::ZipArchive::new(reader).map_err(map_open_error)?;
+        let size = file.metadata().map(|meta| meta.len()).unwrap_or(u64::MAX);
+        let source: ZipSource = if size <= SMALL_ARCHIVE_LIMIT {
+            let mut bytes = Vec::with_capacity(size as usize);
+            file.read_to_end(&mut bytes)?;
+            Box::new(Cursor::new(bytes))
+        } else {
+            Box::new(BufReader::with_capacity(256 * 1024, file))
+        };
+        let mut archive = zip::ZipArchive::new(source).map_err(map_open_error)?;
 
         let total = archive.len();
         let mut entries = Vec::with_capacity(total);
@@ -109,7 +124,7 @@ impl ZipReader {
         &self.path
     }
 
-    fn archive_mut(&mut self) -> Result<&mut zip::ZipArchive<BufReader<File>>, ArchiveError> {
+    fn archive_mut(&mut self) -> Result<&mut zip::ZipArchive<ZipSource>, ArchiveError> {
         self.archive.as_mut().ok_or_else(|| {
             ArchiveError::Other(FailReason::ArchiveClosed {
                 format: "zip".to_owned(),
@@ -517,7 +532,7 @@ fn finish_entry(
     }
 }
 
-fn entry_kind(file: &zip::read::ZipFile<'_, BufReader<File>>) -> EntryKind {
+fn entry_kind(file: &zip::read::ZipFile<'_, ZipSource>) -> EntryKind {
     if let Some(mode) = file.unix_mode() {
         match mode & 0o170000 {
             0o120000 => return EntryKind::Symlink,

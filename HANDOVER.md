@@ -26,7 +26,7 @@
 | `LICENSE` | MIT 全文 |
 
 工程路径：仓库根目录（本文件所在处）
-素材目录：`../assets/`（与工程同级；仓库内已包含 `themes/` 的成品素材）
+素材目录：原始像素画 `assets/` 不在版本控制内；仓库内已包含同步后的 `themes/` 成品素材
 
 ### 0.1 30 秒摘要
 
@@ -745,7 +745,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 8.1 数据流
 
 ```text
-../assets/  (原始素材)
+assets/  (原始素材，不在仓库内)
    └─ scripts/sync-themes.ps1
         └─ themes/<skin>/png/       (运行时读取)
              └─ theme.toml [resource] key → 路径
@@ -754,6 +754,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ```
 
 素材源与主题目录是两份：改素材后跑一次 `.\scripts\sync-themes.ps1`，`theme.toml` 不会被覆盖。
+仓库只包含同步后的 `themes/`，原始素材 `assets/` 不在版本控制内。
 
 注意：`assets/tokens/tokens.json` 里的文件名多数不存在；实际可用的是
 `icons/icon-*.png`、`avatars/*-256.png`、`progress/*.png`。

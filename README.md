@@ -143,9 +143,13 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 
 ## 主题与素材
 
-`themes/{reimu,marisa,sanae,cirno}/` 是从 `../assets/` 复制并按 `theme.toml` 组织好的四个主题：
-头像、功能图标、底图 / 填充进度条。修改主题只需改 `theme.toml` 的路径与配色，
-不需要改 Rust 代码。资源 Key 与回退规则见 `docs/theme_spec.md`。
+`themes/{reimu,marisa,sanae,cirno}/` 是四个内置主题：头像、功能图标、底图 / 填充进度条。
+修改主题只需改 `theme.toml` 的路径与配色，不需要改 Rust 代码。
+资源 Key 与回退规则见 `docs/theme_spec.md`。
+
+素材源目录（`assets/`）是原始像素画，仓库内只保留了同步后的成品主题。
+拿到原始素材后跑一次 `scripts/sync-themes.ps1` 即可重新同步——脚本会按
+`theme.toml` 的 `[resource]` 段把贴图复制到位，且不会覆盖 `theme.toml` 本身。
 
 素材授权：CC BY-NC-SA 4.0（禁止商用），代码 MIT；边界见 `NOTICE.md`。
 

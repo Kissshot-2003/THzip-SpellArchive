@@ -7,6 +7,9 @@
 
 ### 新增
 
+- `main` 分支保护：改动必须走 pull request，`check` / `supply-chain` /
+  `differential` / `long-path` 四个 CI 检查全绿才能合并；强推与删分支被禁；
+  提交历史保持线性。详见 `CONTRIBUTING.md` 的「提交流程」。
 - zip 加密条目现在支持**任意压缩方法组合**（含 AES+LZMA / AES+XZ）。
   WinZip AES 规范把加密条目的 compression method 记作 99、真实方法放在
   0x9901 extra field 里；zip crate 9.x 解析时已用真实方法覆盖 99 并按

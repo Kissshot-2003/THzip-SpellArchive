@@ -42,6 +42,13 @@ fn seven_zip() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// 仓库内置的测试夹具。
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
 fn build_source(root: &Path) -> PathBuf {
     let src = root.join("src");
     std::fs::create_dir_all(src.join("sub")).unwrap();
@@ -333,6 +340,98 @@ fn reads_aes_zip_created_by_7zip() {
     assert_eq!(
         std::fs::read(target.join("hello.txt")).unwrap(),
         b"hello from thzip"
+    );
+}
+
+/// AES 加密 + LZMA 压缩的 zip 必须能解开。
+///
+/// WinZip AES 规范里，加密条目的 compression method 记作 99，真实压缩算法
+/// 放在 0x9901 extra field 里。zip crate 解析时会用真实方法覆盖 99，
+/// 再按「先 AES 解密、再按真实方法解压」的顺序走完。
+///
+/// 早期版本把 method 99 一律当成未知方法拒绝，这类包就打不开了。
+///
+/// 夹具 `aes-lzma.zip` 是按 WinZip AE-2 规范手工构造的：AE-256 + LZMA1。
+/// 7-Zip 与 pyzipper 都只写 AES + Store，造不出这个组合，所以样本得自带。
+/// 重新生成：`tests/fixtures/generate/make_aes_zip.py <输出> <方法码>`。
+#[test]
+fn reads_aes_zip_with_lzma_payload() {
+    let archive = fixture("aes-lzma.zip");
+    let password = thzip_core::SecretString::new("hunter2");
+
+    let reader = backend::open(&archive, Some(&password)).expect("open AES+LZMA zip");
+    assert_eq!(reader.entries().len(), 1);
+    assert!(reader.entries()[0].encrypted);
+    assert_eq!(reader.entries()[0].method, Method::Lzma);
+
+    let dir = TempDir::new("aes-lzma");
+    let target = dir.path().join("out");
+    extract_all(&archive, &target, Some(&password));
+    assert_eq!(
+        std::fs::read(target.join("hello.txt")).unwrap(),
+        b"hello from thzip"
+    );
+}
+
+/// AES 加密 + XZ 压缩的 zip 同样要能解开。
+///
+/// 与上面同一个机制，只是内层压缩方法换成 XZ。
+#[test]
+fn reads_aes_zip_with_xz_payload() {
+    let archive = fixture("aes-xz.zip");
+    let password = thzip_core::SecretString::new("hunter2");
+
+    let reader = backend::open(&archive, Some(&password)).expect("open AES+XZ zip");
+    assert_eq!(reader.entries().len(), 1);
+    assert!(reader.entries()[0].encrypted);
+    assert_eq!(reader.entries()[0].method, Method::Xz);
+
+    let dir = TempDir::new("aes-xz");
+    let target = dir.path().join("out");
+    extract_all(&archive, &target, Some(&password));
+    assert_eq!(
+        std::fs::read(target.join("hello.txt")).unwrap(),
+        b"hello from thzip"
+    );
+}
+
+/// 加密包缺密码时，条目要失败且原因指向「需要密码」。
+///
+/// 注意 extract 对单条目失败是「记进 report」而不是「整体返回 Err」——
+/// 只有密码错误这种需要用户介入的情况才整体中断。无密码时同样走
+/// report：条目失败，reason 是 PasswordRequired。
+#[test]
+fn aes_zip_without_password_asks_for_one() {
+    let archive = fixture("aes-lzma.zip");
+    let dir = TempDir::new("aes-lzma-nopw");
+    let target = dir.path().join("out");
+
+    let limits = Limits::default();
+    let mut reader = backend::open(&archive, None).expect("list without password");
+    assert!(reader.entries()[0].encrypted);
+
+    let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
+    let plan = reader.plan(&ids, &target, &limits).expect("plan");
+    assert!(plan.needs_password, "预检应标记需要密码");
+
+    let decisions = DecisionTable {
+        default: OverwritePolicy::Overwrite,
+        ..Default::default()
+    };
+    let cancel = CancelToken::new();
+    let mut sink = ExtractDirSink::new(&plan, &decisions, limits);
+    let report = reader
+        .extract(&plan, &decisions, &cancel, &mut sink)
+        .expect("extract reports failures per entry");
+
+    assert_eq!(report.failed.len(), 1, "{:?}", report.failed);
+    assert!(
+        matches!(
+            report.failed[0].1,
+            thzip_core::error::FailReason::PasswordRequired
+        ),
+        "失败原因应为缺密码: {:?}",
+        report.failed[0].1
     );
 }
 

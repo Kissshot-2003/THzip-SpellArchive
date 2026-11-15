@@ -209,10 +209,12 @@ impl ArchiveReader for ZipReader {
             }
 
             // 明确不支持的方法在预检阶段提示并跳过，避免解压到一半才失败。
-            // Unknown(99) 是 WinZip AES，实际压缩方法仍由 zip crate 处理。
+            //
+            // 加密条目不再列入：WinZip AES 条目的压缩方法记作 99，真实方法在
+            // 0x9901 extra field 里，zip crate 会用真实方法覆盖它并按
+            // 「先解密、再按真实方法解压」走完，因此 AES + LZMA / AES + XZ
+            // 这些组合现在都能正常解开。
             let unsupported = match entry.method {
-                Method::Xz => entry.encrypted,
-                Method::Lzma => entry.encrypted,
                 Method::Unknown(code) => code != 99,
                 _ => false,
             };
@@ -452,10 +454,29 @@ impl ZipReader {
         let size = self.entries[index].size;
         let encrypted = self.entries[index].encrypted;
 
+        // 加密条目一律交给 zip crate 处理。
+        //
+        // WinZip AES 规范里，加密条目的压缩方法记作 99，真实方法藏在 0x9901
+        // extra field 里；zip crate 解析时会用真实方法覆盖 99，然后按
+        // 「先 AES 解密、再按真实方法解压」的顺序走完。走 crate 这条路才能
+        // 支持 AES + LZMA / AES + XZ 这类组合——项目自己的解码器拿不到
+        // 明文流，因为 AES 解密封装在 crate 内部。
+        //
+        // 未加密的 LZMA / XZ 仍然走项目自己的解码器：这样字典大小上限、
+        // 进度节流这些策略由本项目掌握，不依赖 crate 的行为。
+        if encrypted {
+            let password = self.password.clone();
+            let Some(password) = password else {
+                return Err(ArchiveError::PasswordRequired);
+            };
+            return self
+                .archive_mut()?
+                .by_index_decrypt(index, password.expose().as_bytes())
+                .map(|file| ZipEntryReader::Plain(Box::new(file)))
+                .map_err(map_entry_error);
+        }
+
         if matches!(method, Method::Xz) {
-            if encrypted {
-                return Err(ArchiveError::Unsupported(FailReason::EncryptedXzZipEntry));
-            }
             let raw = self
                 .archive_mut()?
                 .by_index_raw(index)
@@ -470,9 +491,6 @@ impl ZipReader {
         }
 
         if matches!(method, Method::Lzma) {
-            if encrypted {
-                return Err(ArchiveError::Unsupported(FailReason::EncryptedLzmaZipEntry));
-            }
             let mut raw = self
                 .archive_mut()?
                 .by_index_raw(index)
@@ -505,20 +523,10 @@ impl ZipReader {
             return Ok(ZipEntryReader::Lzma(Box::new(reader)));
         }
 
-        let password = self.password.clone();
-        match (encrypted, password.as_ref()) {
-            (true, Some(password)) => self
-                .archive_mut()?
-                .by_index_decrypt(index, password.expose().as_bytes())
-                .map(|file| ZipEntryReader::Plain(Box::new(file)))
-                .map_err(map_entry_error),
-            (true, None) => Err(ArchiveError::PasswordRequired),
-            (false, _) => self
-                .archive_mut()?
-                .by_index(index)
-                .map(|file| ZipEntryReader::Plain(Box::new(file)))
-                .map_err(map_entry_error),
-        }
+        self.archive_mut()?
+            .by_index(index)
+            .map(|file| ZipEntryReader::Plain(Box::new(file)))
+            .map_err(map_entry_error)
     }
 }
 
@@ -566,9 +574,16 @@ fn map_method(method: zip::CompressionMethod) -> Method {
         zip::CompressionMethod::Bzip2 => Method::Bzip2,
         zip::CompressionMethod::Zstd => Method::Zstd,
         zip::CompressionMethod::Ppmd => Method::Ppmd,
+        // zip crate 启用了 lzma / xz feature 时，这两种方法会走到专门的
+        // 枚举分支而不是 Unsupported(id)。未启用时它们是 Unsupported(14/95)，
+        // 下面一并处理，两条路都归到同一个 Method。
+        zip::CompressionMethod::Lzma => Method::Lzma,
+        zip::CompressionMethod::Xz => Method::Xz,
+        // 方法 99 表示「加密」，真实压缩方法在 0x9901 extra field 里。
+        // zip crate 解析时会用真实方法覆盖掉 99；只有在 extra field 缺失
+        // 或格式异常时才会看到 99 本身。
         zip::CompressionMethod::Aes => Method::Unknown(99),
         // 未启用的压缩方法会落到 Unsupported(id)，按 zip 规范编号还原。
-        // LZMA 由本模块自行解码，不走 zip crate 的解压器。
         zip::CompressionMethod::Unsupported(id) => match id {
             14 => Method::Lzma,
             95 => Method::Xz,

@@ -67,6 +67,7 @@ impl ArchiveReader for StreamReader {
     ) -> Result<ExtractPlan, ArchiveError> {
         let mut plan = ExtractPlan {
             free_space: crate::safety::available_space(target),
+            root: target.to_path_buf(),
             limits: *limits,
             ..Default::default()
         };

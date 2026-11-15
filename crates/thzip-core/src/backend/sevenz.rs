@@ -112,6 +112,7 @@ impl ArchiveReader for SevenZReader {
 
         let mut plan = ExtractPlan {
             free_space: available_space(target),
+            root: target.to_path_buf(),
             limits: *limits,
             ..Default::default()
         };

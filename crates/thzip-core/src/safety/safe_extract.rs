@@ -18,6 +18,8 @@ pub struct ExtractDirSink {
     budget: Budget,
     actions: HashMap<EntryId, ResolvedAction>,
     current: Option<CurrentEntry>,
+    /// 解压根目录；逐级创建子目录时用它划定「安全边界」。
+    root: PathBuf,
     pub bytes_written: u64,
     pub crc_mismatch: Vec<EntryId>,
     /// 目录条目在子项写完后统一恢复 mtime。
@@ -43,6 +45,7 @@ impl ExtractDirSink {
             budget: Budget::new(limits),
             actions: resolve_all(plan, decisions),
             current: None,
+            root: plan.root.clone(),
             bytes_written: 0,
             crc_mismatch: Vec::new(),
             dir_times: Vec::new(),
@@ -66,7 +69,7 @@ impl ExtractSink for ExtractDirSink {
         self.budget.on_entry().map_err(limit_error)?;
 
         if entry.kind.is_dir() {
-            ensure_safe_dir(&path)?;
+            ensure_dir_chain(&self.root, &path)?;
             if let Some(time) = entry.mtime {
                 self.dir_times.push((path, time));
             }
@@ -75,7 +78,7 @@ impl ExtractSink for ExtractDirSink {
         }
 
         if let Some(parent) = path.parent() {
-            ensure_safe_dir(parent)?;
+            ensure_dir_chain(&self.root, parent)?;
         }
 
         // 目标本身是 junction / symlink：拒绝，不顺着它写出去。
@@ -165,7 +168,12 @@ impl ExtractSink for ExtractDirSink {
         if let Some(expected) = expected_crc
             && hasher.finalize() != expected
         {
+            // CRC 不符说明内容已损坏，不能落盘。丢弃 AtomicFile 会删掉临时文件，
+            // 目标位置保持原样：既不覆盖已有文件，也不留下半截内容。
             self.crc_mismatch.push(current_id);
+            return Err(SinkError::Other(FailReason::EntryCrcFailed {
+                detail: format!("条目 CRC 校验失败，已丢弃未落盘内容: {}", path.display()),
+            }));
         }
 
         atomic.commit()?;
@@ -178,7 +186,51 @@ impl ExtractSink for ExtractDirSink {
     }
 }
 
-fn ensure_safe_dir(path: &std::path::Path) -> Result<(), SinkError> {
+/// 在解压根目录之下逐级创建目录链，每一级都做 reparse point 检查。
+///
+/// 只检查直接父目录是不够的：直接父目录尚不存在时检查必然通过（`symlink_metadata`
+/// 返回 NotFound），随后 `create_dir_all` 却会穿过祖先链上的 junction / symlink，
+/// 把文件写到解压根目录之外。逐级检查 + 逐级创建才能封死这条路径。
+fn ensure_dir_chain(root: &std::path::Path, target: &std::path::Path) -> Result<(), SinkError> {
+    let relative = if root.as_os_str().is_empty() {
+        None
+    } else {
+        target.strip_prefix(root).ok()
+    };
+
+    let Some(relative) = relative else {
+        // 目标不在 root 之下（手工构造的计划）：只能检查直接父目录。
+        return ensure_single_dir(target);
+    };
+
+    // root 由调用方指定，它本身是不是链接是用户的选择，不做拦截；
+    // 但 root 之下任何一级是链接都必须拒绝。
+    let mut current = root.to_path_buf();
+    if !current.exists() {
+        std::fs::create_dir_all(&current)?;
+    }
+
+    for component in relative.components() {
+        current.push(component);
+        if is_reparse_point(&current)? {
+            return Err(SinkError::Other(FailReason::ReparsePointWrite {
+                path: current.display().to_string(),
+            }));
+        }
+        if !current.exists() {
+            // 逐级创建，不使用 create_dir_all，避免穿过未校验的层级。
+            match std::fs::create_dir(&current) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 退化路径：只检查直接父目录是不是 reparse point。
+fn ensure_single_dir(path: &std::path::Path) -> Result<(), SinkError> {
     if is_reparse_point(path)? {
         return Err(SinkError::Other(FailReason::ReparsePointWrite {
             path: path.display().to_string(),
@@ -192,4 +244,153 @@ fn ensure_safe_dir(path: &std::path::Path) -> Result<(), SinkError> {
 
 fn limit_error(hit: LimitHit) -> SinkError {
     SinkError::Limit(hit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plan::{OverwritePolicy, PlanAction, PlannedItem};
+    use crate::types::EntryKind;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "thzip-spellarchive-sink-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// CRC 不符时内容不得落盘：临时文件被删除，目标位置保持原样。
+    #[test]
+    fn crc_mismatch_does_not_commit() {
+        let dir = temp_dir("crc");
+        let root = dir.join("out");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("payload.bin");
+
+        let mut plan = ExtractPlan {
+            root: root.clone(),
+            ..Default::default()
+        };
+        plan.items.push(PlannedItem {
+            id: 0,
+            rel_path: target.clone(),
+            kind: EntryKind::File,
+            size: 5,
+            action: PlanAction::Create,
+        });
+
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Overwrite,
+            ..Default::default()
+        };
+        let mut sink = ExtractDirSink::new(&plan, &decisions, Limits::default());
+
+        let mut entry = ArchiveEntry::new(0, b"payload.bin", "payload.bin", EntryKind::File);
+        entry.crc32 = Some(0xDEAD_BEEF); // 与实际内容不符
+        sink.on_entry_begin(0, &entry).unwrap();
+        sink.on_data(0, b"hello").unwrap();
+
+        let result = sink.on_entry_end(0, true);
+        assert!(result.is_err(), "CRC 不符必须报错");
+        assert!(!target.exists(), "CRC 不符的文件不得落盘");
+        assert_eq!(sink.take_crc_mismatch(), vec![0]);
+        assert_eq!(sink.bytes_written(), 0, "未落盘的内容不计入写入量");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// CRC 相符时正常落盘。
+    #[test]
+    fn matching_crc_commits() {
+        let dir = temp_dir("crc-ok");
+        let root = dir.join("out");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("payload.bin");
+
+        let mut plan = ExtractPlan {
+            root: root.clone(),
+            ..Default::default()
+        };
+        plan.items.push(PlannedItem {
+            id: 0,
+            rel_path: target.clone(),
+            kind: EntryKind::File,
+            size: 5,
+            action: PlanAction::Create,
+        });
+
+        let decisions = DecisionTable {
+            default: OverwritePolicy::Overwrite,
+            ..Default::default()
+        };
+        let mut sink = ExtractDirSink::new(&plan, &decisions, Limits::default());
+
+        let mut entry = ArchiveEntry::new(0, b"payload.bin", "payload.bin", EntryKind::File);
+        entry.crc32 = Some(crc32fast::hash(b"hello"));
+        sink.on_entry_begin(0, &entry).unwrap();
+        sink.on_data(0, b"hello").unwrap();
+        sink.on_entry_end(0, true).unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"hello");
+        assert_eq!(sink.bytes_written(), 5);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 正常路径：根目录之下的多级目录应当被逐级创建。
+    #[test]
+    fn creates_nested_dirs_under_root() {
+        let dir = temp_dir("nested");
+        let root = dir.join("root");
+        let target = root.join("a").join("b").join("c.txt");
+        ensure_dir_chain(&root, target.parent().unwrap()).unwrap();
+        assert!(root.join("a").join("b").is_dir());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 祖先链上有 junction 时必须拒绝：只检查直接父目录不够。
+    ///
+    /// 直接父目录不存在时，旧实现的检查必然通过（NotFound 被当作「不是链接」），
+    /// 随后的 `create_dir_all` 却会穿过祖先 junction 把内容写到解压根目录之外。
+    #[cfg(windows)]
+    #[test]
+    fn rejects_junction_in_ancestor_chain() {
+        let dir = temp_dir("junction");
+        let root = dir.join("root");
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let link = root.join("esc");
+        let created = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&outside)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(created, "创建 junction 失败");
+
+        let deep = root.join("esc").join("sub");
+        assert!(
+            ensure_dir_chain(&root, &deep).is_err(),
+            "祖先链上的 junction 必须被拒绝"
+        );
+        assert!(
+            !outside.join("sub").exists(),
+            "不得在解压根目录之外创建目录"
+        );
+
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

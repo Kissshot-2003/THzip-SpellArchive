@@ -67,6 +67,8 @@ pub struct ExtractPlan {
     pub warnings: Vec<PlanWarning>,
     pub needs_password: bool,
     pub free_space: Option<u64>,
+    /// 解压根目录。写盘时据此逐级校验祖先链，任何一级是 reparse point 就拒绝写入。
+    pub root: PathBuf,
     /// 生成计划时使用的限额；解压阶段据此校验字典等运行期参数。
     pub limits: Limits,
 }

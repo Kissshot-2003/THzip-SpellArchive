@@ -20,7 +20,7 @@ cargo run -p thzip-cli -- test <归档>            # CRC 完整性测试
 cargo run -p thzip-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
 cargo run -p thzip-cli -- pack <输出> <输入...>      # 格式由扩展名决定；7z 可加 --volume-size <MiB>
 # sniff / list / test / extract / pack 都支持 --json，输出单行机读结果
-cargo test --workspace                           # 145 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 154 个单元 / 集成 / 归档格式用例
 cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / 解压 / 7z 打包基准
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
@@ -49,7 +49,7 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 | 模块 | 状态 |
 |---|---|
 | 格式嗅探（magic bytes） | 可用 |
-| 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护 | 可用，含测试 |
+| 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护（覆盖整条祖先链） | 可用，含测试 |
 | zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA / XZ；不支持方法预检提示；同名自动 `~1` 改名 |
 | zip 写 | **可用**：Store / Deflate / BZip2 / Zstd、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
 | 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密、`.7z.001` 分卷拼接 |

@@ -89,6 +89,11 @@ fn reason_en(reason: &FailReason) -> String {
         FailReason::RewriteExtractFailed { count } => {
             format!("Failed to extract {count} retained entries; rewrite cancelled")
         }
+        FailReason::RewriteUnsupportedEntries { count } => {
+            format!(
+                "{count} entries cannot be written back (symlinks or unsupported methods); rewrite cancelled"
+            )
+        }
         FailReason::EncryptUnsupported { format } => {
             format!("{format} does not support encryption")
         }

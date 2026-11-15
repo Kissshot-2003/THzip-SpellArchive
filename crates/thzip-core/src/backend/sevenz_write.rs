@@ -1,12 +1,13 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::backend;
 use crate::error::{ArchiveError, FailReason, path_text};
 use crate::limits::Limits;
-use crate::plan::{DecisionTable, OverwritePolicy};
+use crate::plan::{DecisionTable, OverwritePolicy, ResolvedAction};
 use crate::safety::ExtractDirSink;
 use crate::safety::TempDir;
 use crate::safety::atomic_fs::AtomicFile;
@@ -105,13 +106,25 @@ impl SevenZArchiveWriter {
         let entries = reader.entries().to_vec();
         drop(reader);
 
+        // 实际落盘路径可能与 `plan.items[].rel_path` 不同：包内同名条目会被 sink 改名
+        // （a.txt → a~1.txt）。必须用 sink 记录的路径读回来，否则会读到别的条目的内容。
+        let written: HashMap<EntryId, PathBuf> = sink
+            .actions()
+            .iter()
+            .filter_map(|(id, action)| match action {
+                ResolvedAction::Write { path, .. } => Some((*id, path.clone())),
+                _ => None,
+            })
+            .collect();
+
         // 解压子项会刷新目录 mtime；在写回前恢复归档内记录的时间。
         for item in &plan.items {
             if let Some(entry) = entries.get(item.id as usize)
                 && entry.kind.is_dir()
                 && let Some(time) = entry.mtime
+                && let Some(written_path) = written.get(&item.id)
             {
-                let _ = crate::safety::set_mtime(&item.rel_path, time);
+                let _ = crate::safety::set_mtime(written_path, time);
             }
         }
 
@@ -124,10 +137,15 @@ impl SevenZArchiveWriter {
                 }));
             };
             let name = entry.display.trim_end_matches('/');
+            let Some(source) = written.get(&item.id) else {
+                return Err(ArchiveError::Other(FailReason::EntryMissing {
+                    id: item.id,
+                }));
+            };
             let result = if entry.kind.is_dir() {
-                writer.add_dir(&item.rel_path, name)
+                writer.add_dir(source, name)
             } else {
-                writer.add(&item.rel_path, name, None, cancel, &|_| {})
+                writer.add(source, name, None, cancel, &|_| {})
             };
             result?;
         }

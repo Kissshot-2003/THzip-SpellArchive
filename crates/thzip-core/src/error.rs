@@ -64,6 +64,9 @@ pub enum FailReason {
     RewriteExtractFailed {
         count: usize,
     },
+    RewriteUnsupportedEntries {
+        count: usize,
+    },
     EncryptUnsupported {
         format: String,
     },
@@ -233,6 +236,9 @@ impl FailReason {
             FailReason::EncryptedRewrite => "加密归档暂不支持修改条目".to_owned(),
             FailReason::RewriteExtractFailed { count } => {
                 format!("保留条目解压失败 {count} 条，已取消重写")
+            }
+            FailReason::RewriteUnsupportedEntries { count } => {
+                format!("有 {count} 条条目无法写回新归档（符号链接或不支持的方法），已取消重写")
             }
             FailReason::EncryptUnsupported { format } => format!("{format} 暂不支持加密写入"),
             FailReason::NotDecompressible { format } => format!("不是可解压容器：{format}"),

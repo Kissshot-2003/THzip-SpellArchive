@@ -75,7 +75,7 @@
 ## 6. Phase 4：性能与架构
 
 - [x] 10k 条目 zip 打开 328 ms → 8 ms：≤ 8 MiB 包整包读入内存，避免逐条目 seek
-- [ ] 单文件流尺寸懒加载，去掉打开时双读（HANDOVER 24）
+- [x] 单文件流尺寸：gz 读尾部 ISIZE、zstd/lz4 读帧头；bz2/xz 保留完整解码回退（HANDOVER 24）
 - [ ] RAR 超大条目流式中转，替代整文件落盘
 - [x] 拆分 `app.rs`：类型 → `app/state.rs`，搜索 → `filter.rs`，打包 → `pack.rs`，改名 → `relocate.rs`，测试 → `tests.rs`
 - [x] 主文件从 2627 行降到约 1380 行（目标 < 1500 已达成）

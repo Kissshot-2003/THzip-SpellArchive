@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -28,7 +28,7 @@ impl StreamReader {
     pub fn new(path: &Path, kind: ArchiveKind) -> Result<Self, ArchiveError> {
         let meta = std::fs::metadata(path)?;
         let display = stream_name(path);
-        let size = decompressed_size(path, kind)?;
+        let size = metadata_size(path, kind).unwrap_or(decompressed_size(path, kind)?);
 
         let mut entry = ArchiveEntry::new(0, display.as_bytes(), display.as_str(), EntryKind::File);
         entry.size = size;
@@ -252,6 +252,56 @@ impl ArchiveReader for StreamReader {
     }
 }
 
+/// 尽量从容器头/尾读出解压后大小，避免打开时整包解压一遍。
+/// 读不到或不放心时返回 None，由 [`decompressed_size`] 回退到完整解码。
+fn metadata_size(path: &Path, kind: ArchiveKind) -> Option<u64> {
+    match kind {
+        ArchiveKind::Gz => gzip_isize(path),
+        ArchiveKind::Zstd => zstd_content_size(path),
+        ArchiveKind::Lz4 => lz4_content_size(path),
+        _ => None,
+    }
+}
+
+/// gzip 尾部 ISIZE 是解压大小 mod 2^32；0 且文件不小则视为 4 GiB 倍数或多成员，回退。
+fn gzip_isize(path: &Path) -> Option<u64> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len < 18 {
+        return None;
+    }
+    file.seek(SeekFrom::End(-4)).ok()?;
+    let mut tail = [0u8; 4];
+    file.read_exact(&mut tail).ok()?;
+    let size = u64::from(u32::from_le_bytes(tail));
+    if size == 0 && len > 1024 {
+        return None;
+    }
+    Some(size)
+}
+
+fn zstd_content_size(path: &Path) -> Option<u64> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = [0u8; 18];
+    let read = file.read(&mut header).ok()?;
+    zstd::zstd_safe::get_frame_content_size(&header[..read])
+        .ok()
+        .flatten()
+}
+
+/// LZ4 frame：magic 后 FLG 的 0x08 位存在时，Content Size 是紧随 BD 的 8 字节小端。
+fn lz4_content_size(path: &Path) -> Option<u64> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = [0u8; 14];
+    let read = file.read(&mut header).ok()?;
+    if read < 14 || header[0..4] != [0x04, 0x22, 0x4D, 0x18] || header[4] & 0x08 == 0 {
+        return None;
+    }
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&header[6..14]);
+    Some(u64::from_le_bytes(bytes))
+}
+
 fn decompressed_size(path: &Path, kind: ArchiveKind) -> Result<u64, ArchiveError> {
     let mut reader = open_reader(path, kind)?;
     std::io::copy(&mut reader, &mut std::io::sink()).map_err(|err| ArchiveError::CorruptEntry {
@@ -302,5 +352,19 @@ mod tests {
         assert_eq!(stream_name(Path::new("a.txt.gz")), "a.txt");
         assert_eq!(stream_name(Path::new("a.tar.zst")), "a.tar");
         assert_eq!(stream_name(Path::new(".gz")), "data");
+    }
+
+    #[test]
+    fn reads_gzip_isize_without_decoding() {
+        use std::io::Write;
+
+        let dir = crate::safety::TempDir::create("thzip-gz-size").unwrap();
+        let path = dir.path().join("note.txt.gz");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        encoder.write_all(b"hello gzip").unwrap();
+        encoder.finish().unwrap();
+
+        assert_eq!(metadata_size(&path, ArchiveKind::Gz), Some(10));
     }
 }

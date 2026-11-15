@@ -27,12 +27,17 @@ MIT（见 LICENSE，若尚未添加则以仓库声明为准）。
 
 见 `Cargo.lock`。
 
-RAR 读取通过 `unrar-ng` / `unrar-ng-sys` 使用 UnRAR 源码：
+RAR 读取通过 `unrar-rs` 实现。该 crate 是纯 Rust 的 RAR 解码器，其 RAR 引擎
+源自 UnRAR 程序，因此沿用 UnRAR 许可条款：
 
-- `unrar-ng` 包装层为 MIT OR Apache-2.0。
-- UnRAR 源码适用 UnRAR 许可证，全文见 `third_party/unrar-license.txt`。
-  允许用于解压 RAR；**不得**用于开发 RAR 兼容压缩器。分发二进制时需保留该许可证。
-- 除 RAR 外的格式均为纯 Rust 实现，不依赖 7z.dll 等外部运行库。
+- `unrar-rs` 的许可为 Apache License 2.0，附加一条 UnRAR 条件，
+  全文见 `third_party/unrar-rs-license.txt`。
+- 该条件允许免费用于处理 RAR 归档（含商业用途），但**禁止**用于开发
+  RAR（WinRAR）兼容压缩器或逆向 RAR 压缩算法。
+- 二进制分发必须附带该许可文件。打包脚本已把整个 `third_party/` 复制进
+  `dist/`，因此 `unrar-rs-license.txt` 会随包分发。
+
+除 RAR 外的格式均为纯 Rust 实现，不依赖 7z.dll 等外部运行库。
 
 ## 同人声明
 

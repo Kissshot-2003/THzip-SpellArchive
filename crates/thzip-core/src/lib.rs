@@ -2,7 +2,7 @@
 //!
 //! 分层约定：
 //! - `types` / `plan` / `reader` / `writer`：纯数据与契约
-//! - `backend`：格式实现（目前为占位，待接入 sevenz-rust2 / zip / tar）
+//! - `backend`：格式实现（zip / 7z / rar / tar 家族与单文件流的读写）
 //! - `safety`：路径净化、显示名防护、限额、原子覆盖（必须被所有写盘入口复用）
 //! - `task`：任务事件、取消令牌、`catch_unwind` 保护
 

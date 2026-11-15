@@ -19,7 +19,7 @@ bzip2.workspace = true
 lzma-rust2.workspace = true
 zstd.workspace = true
 lz4_flex.workspace = true
-unrar-ng.workspace = true
+unrar-rs.workspace = true
 liblzma.workspace = true
 
 [target.'cfg(windows)'.dependencies]

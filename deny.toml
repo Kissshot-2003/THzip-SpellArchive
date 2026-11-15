@@ -1,9 +1,10 @@
 # 供应链门禁：许可白名单 + 已知漏洞 + 来源限制。
 #
-# 重点盯 unrar-ng / unrar-ng-sys：它们是 C++ UnRAR 源码的 Rust 封装，
-# crate 的 license 字段写的是 MIT OR Apache-2.0，但捆绑的 UnRAR 源码适用
-# UnRAR 许可（禁止用其逆向 RAR 压缩算法）。声明式检查看不到这一层，
-# 交付前需人工确认法务边界，见 docs/legal/unrar-note.md。
+# 重点盯 unrar-rs：它的 RAR 引擎源自 UnRAR 源码，许可为「Apache-2.0 +
+# UnRAR 条件」，且用 `license-file` 声明（非标准许可），cargo-deny 无法
+# 解析成 SPDX id。UnRAR 条件允许免费处理 RAR 归档（含商用），但禁止
+# 用于开发 RAR 兼容压缩器。条款全文见 third_party/unrar-rs-license.txt，
+# 法务边界见 docs/legal/unrar-note.md。
 
 [graph]
 targets = [
@@ -49,6 +50,11 @@ allow = [
     "bzip2-1.0.6",
 ]
 confidence-threshold = 0.9
+# unrar-rs 用 `license-file` 声明「非标准许可」，cargo-deny 解析不出 SPDX id，
+# 会按「未授权许可」报错。整体豁免该 crate，改为人工核对许可文件。
+exceptions = [
+    { allow = ["MIT", "Apache-2.0", "Unlicense"], crate = "unrar-rs" },
+]
 
 [bans]
 multiple-versions = "warn"

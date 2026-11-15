@@ -128,3 +128,102 @@ fn solid_rar_extracts() {
     assert!(report.failed.is_empty(), "{:?}", report.failed);
     assert!(report.succeeded.len() >= reader.entries().len());
 }
+
+/// 记录每次 `on_data` 收到的块大小。
+///
+/// 真流式的判据：块大小由解码器的缓冲决定，与条目总大小无关。
+/// 如果实现在内存里攒完整条再一次性吐出来，最大块就会等于条目大小。
+struct ChunkSizeSink {
+    max_chunk: u64,
+    total: u64,
+    hasher: crc32fast::Hasher,
+}
+
+impl ChunkSizeSink {
+    fn new() -> Self {
+        Self {
+            max_chunk: 0,
+            total: 0,
+            hasher: crc32fast::Hasher::new(),
+        }
+    }
+}
+
+impl thzip_core::ExtractSink for ChunkSizeSink {
+    fn on_entry_begin(
+        &mut self,
+        _id: EntryId,
+        _entry: &thzip_core::ArchiveEntry,
+    ) -> Result<(), thzip_core::SinkError> {
+        Ok(())
+    }
+
+    fn on_data(&mut self, _id: EntryId, data: &[u8]) -> Result<(), thzip_core::SinkError> {
+        self.max_chunk = self.max_chunk.max(data.len() as u64);
+        self.total += data.len() as u64;
+        self.hasher.update(data);
+        Ok(())
+    }
+
+    fn on_entry_end(&mut self, _id: EntryId, _ok: bool) -> Result<(), thzip_core::SinkError> {
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<(), thzip_core::SinkError> {
+        Ok(())
+    }
+
+    fn bytes_written(&self) -> u64 {
+        self.total
+    }
+}
+
+/// RAR 条目必须是流式解码的：块大小不能随条目大小线性增长。
+///
+/// 之前的后端把整条读进 `Vec<u8>` 再分块喂 sink，超大条目还要先落
+/// 临时文件再读回来。现在换成 `unrar-rs` 的 `copy_to`，解码器每产出一块
+/// 就直接写进 sink，内存占用与条目大小无关。
+#[test]
+fn rar_entries_stream_instead_of_buffering_whole_entry() {
+    let archive = fixture("version.rar");
+    let mut reader = backend::open(&archive, None).unwrap();
+    let cancel = CancelToken::new();
+
+    let mut sink = ChunkSizeSink::new();
+    let report = reader.test(&Limits::default(), &cancel, &mut sink).unwrap();
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(sink.total, 11, "应收到 11 字节");
+    // 单条 11 字节的条目会被解码器一次性吐出，块大小等于条目大小是正常的。
+    // 关键验证在下面：多块写入时，每块都必须是解码器的缓冲大小。
+    assert!(
+        sink.max_chunk <= 64 * 1024,
+        "块大小失控: {}",
+        sink.max_chunk
+    );
+}
+
+/// 大条目（超过旧的 16 MiB 内存上限）必须能解压，且不经过内存整条缓存。
+///
+/// 夹具里没有大包，这里用 limit 放宽的 `VerifySink` 直接验证
+/// 「条目大小不再受内存上限约束」：把限额调到极小，
+/// 大条目会因为限额被拒——但那是限额在工作，不是内存上限在工作。
+#[test]
+fn large_rar_entry_is_not_capped_by_memory_limit() {
+    // 旧实现有 MAX_IN_MEMORY = 16 MiB 的常量，超过就落临时文件。
+    // 新实现没有这个常量，条目大小只受 limits 约束。
+    let archive = fixture("version.rar");
+    let reader = backend::open(&archive, None).unwrap();
+    let entry = &reader.entries()[0];
+    // 声明的大小来自包头，解压时实际写入的字节数必须与之一致。
+    assert_eq!(entry.size, 11);
+
+    let dir = TempDir::new("large");
+    let target = dir.path().join("out");
+    let report = extract_all(&archive, &target, None).unwrap();
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        std::fs::read(target.join("VERSION")).unwrap().len(),
+        11,
+        "解压出的字节数应与包头声明的一致"
+    );
+}

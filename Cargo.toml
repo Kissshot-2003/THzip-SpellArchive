@@ -57,7 +57,13 @@ bzip2 = "0.6"
 lzma-rust2 = { version = "0.16", features = ["xz", "encoder"] }
 zstd = "0.13"
 lz4_flex = { version = "0.12", features = ["frame"] }
-unrar-ng = "0.7"
+# RAR 读取。unrar-rs 是纯 Rust 实现，`copy_to` 能把解码产物直接写进
+# 调用方的 writer——零缓冲、零临时文件，天然满足「任意大小条目流式解压」。
+#
+# 许可：Apache-2.0 + UnRAR 条款（允许解压，禁止用于开发 RAR 兼容压缩器）。
+# 默认 feature 走 aws-lc-rs，需要 NASM 才能编译；改用 crypto-rust 走纯 Rust
+# 的 aes/cbc/hmac，构建链更简单，也省掉一个 C 依赖。
+unrar-rs = { version = "0.15.2", default-features = false, features = ["crypto-rust"] }
 single-instance = "0.3"
 tray-icon = "0.24"
 winreg = "0.56"

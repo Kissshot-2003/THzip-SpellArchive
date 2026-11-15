@@ -171,7 +171,7 @@ pub fn open(
     }
 }
 
-/// 创建归档写入器。目前只支持 zip；7z/tar 仍是占位。
+/// 创建归档写入器。zip / 7z / tar 家族均可写；rar 只读，不提供写入器。
 pub fn create_writer(
     path: &Path,
     kind: ArchiveKind,

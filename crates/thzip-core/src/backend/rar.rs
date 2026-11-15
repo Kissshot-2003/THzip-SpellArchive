@@ -1,9 +1,9 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime};
 
-use unrar_ng::{Archive, CursorBeforeHeader, OpenArchive, Process};
+use unrar_rs::RarArchive;
 
 use crate::backend::common::{detect_conflict, ratio_suspicious};
 use crate::error::{ArchiveError, FailReason};
@@ -12,7 +12,6 @@ use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, resolve_all,
 };
 use crate::reader::{ArchiveReader, ExtractReport, ExtractSink, SkipReason};
-use crate::safety::TempDir;
 use crate::safety::available_space;
 use crate::safety::display_guard::guard_display;
 use crate::safety::path_sanitize::{resolve_under, sanitize_rel};
@@ -20,46 +19,88 @@ use crate::secret::SecretString;
 use crate::task::CancelToken;
 use crate::types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
 
-const READ_BUF: usize = 64 * 1024;
-/// 超过此大小的条目改用临时文件中转，避免整条读进内存。
+/// 喂给 `unrar-rs` 的 sink 适配器。
 ///
-/// 原值 512 MiB 意味着一份 500 MiB 的 RAR 条目会被整条缓存在内存里，
-/// 同时开两个这样的预览就足以把 32 位机器打爆，64 位也白白吃掉大量 RSS。
-/// 预览只需要开头几 MB，中转文件足以胜任，因此降到 16 MiB。
-const MAX_IN_MEMORY: u64 = 16 * 1024 * 1024;
+/// `copy_to` 只需要一个 `Write`，解码器产出的每个数据块直接写进
+/// `ExtractSink`——中间不经过 `Vec<u8>`，也不落临时文件。
+/// 因此条目大小只受磁盘和限额约束，不再有内存上限。
+struct SinkWriter<'a> {
+    sink: &'a mut dyn ExtractSink,
+    id: EntryId,
+    /// sink 第一次报错后的状态：出错即停止写入，但要把错误传回去。
+    failed: Option<crate::error::SinkError>,
+    cancel: &'a CancelToken,
+    cancelled: bool,
+}
+
+impl Write for SinkWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.cancelled {
+            return Err(std::io::Error::other("cancelled"));
+        }
+        if self.cancel.is_cancelled() {
+            self.cancelled = true;
+            return Err(std::io::Error::other("cancelled"));
+        }
+        if let Some(err) = self.failed.as_ref() {
+            return Err(std::io::Error::other(err.to_string()));
+        }
+        match self.sink.on_data(self.id, buf) {
+            Ok(()) => Ok(buf.len()),
+            Err(err) => {
+                self.failed = Some(err);
+                Err(std::io::Error::other("sink write failed"))
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 pub struct RarReader {
     path: PathBuf,
     entries: Vec<ArchiveEntry>,
     password: Option<SecretString>,
-    staging_limit: u64,
 }
 
 impl RarReader {
     pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
-        Self::new_with_limit(path, password, MAX_IN_MEMORY)
-    }
-
-    fn new_with_limit(
-        path: &Path,
-        password: Option<&SecretString>,
-        staging_limit: u64,
-    ) -> Result<Self, ArchiveError> {
         let mut entries = Vec::new();
         let mut index = 0u32;
 
         {
-            let archive = Self::archive_for(path, password)
-                .open_for_listing()
-                .map_err(map_error)?;
+            let file = File::open(path).map_err(|err| {
+                ArchiveError::Open(FailReason::Raw(format!("打开 RAR 失败: {err}")))
+            })?;
+            let mut archive = RarArchive::open(file)
+                .map_err(|err| ArchiveError::Open(FailReason::Raw(err.to_string())))?;
+            if let Some(password) = password {
+                archive.set_password(password.expose());
+            }
 
-            for item in archive {
-                let header = item.map_err(map_error)?;
-                let display = header.filename.to_string_lossy().into_owned();
+            // 先把元信息收齐再逐条解码：`by_index` 需要独占的可变借用，
+            // 不能在持有 entries 迭代器的同时调用。
+            let members: Vec<MemberInfo> = archive
+                .entries()
+                .map(|member| MemberInfo {
+                    name: member.name.clone(),
+                    unpacked_size: member.unpacked_size.unwrap_or(0),
+                    packed_size: Some(member.compressed_size),
+                    crc32: member.crc32,
+                    mtime: member.mtime,
+                    is_directory: member.is_directory,
+                    is_symlink: member.is_symlink,
+                    is_encrypted: member.is_encrypted,
+                })
+                .collect();
+            for member in members {
+                let display = member.name;
                 let raw_name: Vec<u8> = display.as_bytes().to_vec();
-                let kind = if header.is_directory() {
+                let kind = if member.is_directory {
                     EntryKind::Dir
-                } else if is_symlink(header.file_attr) {
+                } else if member.is_symlink {
                     EntryKind::Symlink
                 } else {
                     EntryKind::File
@@ -68,21 +109,13 @@ impl RarReader {
                 entry.size = if kind.is_dir() {
                     0
                 } else {
-                    header.unpacked_size
+                    member.unpacked_size
                 };
-                entry.packed = None;
-                entry.crc32 = if kind.is_dir() {
-                    None
-                } else {
-                    Some(header.file_crc)
-                };
-                entry.mtime = dos_to_system_time(header.file_time);
-                entry.encrypted = header.is_encrypted();
-                entry.method = if header.method == 0x30 {
-                    Method::Store
-                } else {
-                    Method::Rar
-                };
+                entry.packed = member.packed_size;
+                entry.crc32 = member.crc32;
+                entry.mtime = member.mtime;
+                entry.encrypted = member.is_encrypted;
+                entry.method = Method::Rar;
                 entries.push(entry);
                 index = index.saturating_add(1);
             }
@@ -92,47 +125,55 @@ impl RarReader {
             path: path.to_path_buf(),
             entries,
             password: password.cloned(),
-            staging_limit,
         })
     }
 
-    /// 多卷 RAR 统一从第一卷开始处理。
-    fn archive_for<'a>(path: &'a Path, password: Option<&'a SecretString>) -> Archive<'a> {
-        let archive = match password {
-            Some(password) => Archive::with_password(path, password.expose().as_bytes()),
-            None => Archive::new(path),
-        };
-        if archive.is_multipart() {
-            archive.as_first_part()
-        } else {
-            archive
-        }
-    }
-
-    fn open_processing(&self) -> Result<OpenArchive<Process, CursorBeforeHeader>, ArchiveError> {
-        Self::archive_for(&self.path, self.password.as_ref())
-            .open_for_processing()
-            .map_err(map_error)
-    }
-
-    /// 出错后重新打开并跳过前 `count` 条，继续处理后续条目。
-    fn skip_to(
-        &self,
-        count: u32,
-    ) -> Result<OpenArchive<Process, CursorBeforeHeader>, ArchiveError> {
-        let mut archive = self.open_processing()?;
-        for _ in 0..count {
-            let Some(header) = archive.read_header().map_err(map_error)? else {
-                return Err(ArchiveError::Other(FailReason::EntryCountMismatch {
-                    format: "RAR".to_owned(),
-                }));
-            };
-            archive = header.skip().map_err(map_error)?;
+    /// 打开归档并带上密码。
+    ///
+    /// 每次解压都重新打开：`unrar-rs` 的解码状态（固实字典、卷游标）
+    /// 绑在 archive 实例上，不能跨条目复用同一个 handle。
+    fn open_archive(&self) -> Result<RarArchive, ArchiveError> {
+        let file = File::open(&self.path)
+            .map_err(|err| ArchiveError::Open(FailReason::Raw(format!("打开 RAR 失败: {err}"))))?;
+        let mut archive = RarArchive::open(file)
+            .map_err(|err| ArchiveError::Open(FailReason::Raw(err.to_string())))?;
+        if let Some(password) = self.password.as_ref() {
+            archive.set_password(password.expose());
         }
         Ok(archive)
     }
 }
 
+/// 从 `unrar-rs` 的成员信息里抽出来的字段。
+///
+/// `MemberInfo` 的字段随版本变动，这里一次性摊平成自己的结构，
+/// 后端改动时只动这一处。
+#[derive(Debug, Clone)]
+struct MemberInfo {
+    name: String,
+    unpacked_size: u64,
+    packed_size: Option<u64>,
+    crc32: Option<u32>,
+    mtime: Option<SystemTime>,
+    is_directory: bool,
+    is_symlink: bool,
+    is_encrypted: bool,
+}
+
+impl From<&unrar_rs::MemberInfo> for MemberInfo {
+    fn from(member: &unrar_rs::MemberInfo) -> Self {
+        Self {
+            name: member.name.clone(),
+            unpacked_size: member.unpacked_size.unwrap_or(0),
+            packed_size: Some(member.compressed_size),
+            crc32: member.crc32,
+            mtime: member.mtime,
+            is_directory: member.is_directory,
+            is_symlink: member.is_symlink,
+            is_encrypted: member.is_encrypted,
+        }
+    }
+}
 impl ArchiveReader for RarReader {
     fn kind(&self) -> ArchiveKind {
         ArchiveKind::Rar
@@ -266,35 +307,28 @@ impl ArchiveReader for RarReader {
         let start = Instant::now();
         let actions = resolve_all(plan, decisions);
         let mut report = ExtractReport::default();
-        let mut archive = self.open_processing()?;
-        let mut index = 0u32;
 
-        while let Some(header) = archive.read_header().map_err(map_error)? {
-            let id = index;
-            index = index.saturating_add(1);
+        let mut archive = self.open_archive()?;
 
+        for id in 0..self.entries.len() as u32 {
             if cancel.is_cancelled() {
                 return Err(ArchiveError::Cancelled);
             }
 
             let Some(entry) = self.entries.get(id as usize).cloned() else {
-                archive = header.skip().map_err(map_error)?;
                 continue;
             };
             let Some(action) = actions.get(&id).cloned() else {
-                archive = header.skip().map_err(map_error)?;
                 continue;
             };
 
             match action {
                 crate::plan::ResolvedAction::Skip => {
                     report.skipped.push((id, SkipReason::PolicySkip));
-                    archive = header.skip().map_err(map_error)?;
                     continue;
                 }
                 crate::plan::ResolvedAction::Reject(reason) => {
                     report.failed.push((id, reason));
-                    archive = header.skip().map_err(map_error)?;
                     continue;
                 }
                 crate::plan::ResolvedAction::Write { .. } => {}
@@ -302,118 +336,41 @@ impl ArchiveReader for RarReader {
 
             if let Err(err) = sink.on_entry_begin(id, &entry) {
                 report.failed.push((id, err.reason()));
-                archive = header.skip().map_err(map_error)?;
                 continue;
             }
 
             if entry.kind.is_dir() {
-                archive = header.skip().map_err(map_error)?;
                 finish_entry(sink, id, true, &mut report)?;
                 continue;
             }
 
-            let mut entry_ok = true;
-            if entry.size > self.staging_limit {
-                // 大条目先解到临时文件，再分块喂给 sink，避免整条读进内存。
-                let staging = TempDir::create("thzip-spellarchive-rar")?;
-                let temp = staging.path().join(format!("{id}.tmp"));
-                let next = match header.extract_to(&temp) {
-                    Ok(next) => next,
-                    Err(err) => {
-                        let mapped = map_error(err);
-                        let _ = sink.on_entry_end(id, false);
-                        let _ = std::fs::remove_file(&temp);
-                        if matches!(
-                            mapped,
-                            ArchiveError::PasswordRequired | ArchiveError::BadPassword
-                        ) {
-                            return Err(mapped);
-                        }
-                        report.failed.push((id, mapped.reason()));
-                        archive = self.skip_to(index)?;
-                        continue;
-                    }
-                };
-
-                let mut file = match File::open(&temp) {
-                    Ok(file) => file,
-                    Err(err) => {
-                        let _ = sink.on_entry_end(id, false);
-                        let _ = std::fs::remove_file(&temp);
-                        report.failed.push((
-                            id,
-                            FailReason::StagedReadFailed {
-                                detail: err.to_string(),
-                            },
-                        ));
-                        archive = next;
-                        continue;
-                    }
-                };
-                let mut chunk = vec![0u8; READ_BUF];
-                loop {
-                    if cancel.is_cancelled() {
-                        drop(file);
-                        let _ = std::fs::remove_file(&temp);
-                        let _ = sink.on_entry_end(id, false);
-                        return Err(ArchiveError::Cancelled);
-                    }
-                    match file.read(&mut chunk) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Err(err) = sink.on_data(id, &chunk[..n]) {
-                                report.failed.push((id, err.reason()));
-                                entry_ok = false;
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            report.failed.push((
-                                id,
-                                FailReason::StagedReadFailed {
-                                    detail: err.to_string(),
-                                },
-                            ));
-                            entry_ok = false;
-                            break;
-                        }
-                    }
-                }
-                drop(file);
-                let _ = std::fs::remove_file(&temp);
-                archive = next;
-            } else {
-                let (data, next) = match header.read() {
-                    Ok(value) => value,
-                    Err(err) => {
-                        let mapped = map_error(err);
-                        let _ = sink.on_entry_end(id, false);
-                        if matches!(
-                            mapped,
-                            ArchiveError::PasswordRequired | ArchiveError::BadPassword
-                        ) {
-                            return Err(mapped);
-                        }
-                        report.failed.push((id, mapped.reason()));
-                        archive = self.skip_to(index)?;
-                        continue;
-                    }
-                };
-
-                for chunk in data.chunks(READ_BUF) {
-                    if cancel.is_cancelled() {
-                        let _ = sink.on_entry_end(id, false);
-                        return Err(ArchiveError::Cancelled);
-                    }
-                    if let Err(err) = sink.on_data(id, chunk) {
-                        report.failed.push((id, err.reason()));
-                        entry_ok = false;
-                        break;
-                    }
-                }
-                archive = next;
+            // 流式解码：解码器每产出一块就写进 sink，不在内存里攒。
+            let outcome = self.decode_into(&mut archive, id, sink, cancel);
+            if outcome.cancelled {
+                let _ = sink.on_entry_end(id, false);
+                return Err(ArchiveError::Cancelled);
             }
-            finish_entry(sink, id, entry_ok, &mut report)?;
+            match outcome.fatal {
+                Some(err) => {
+                    // 密码错误要向上抛，让上层弹密码框；其余按条目失败处理。
+                    let _ = sink.on_entry_end(id, false);
+                    if matches!(
+                        err,
+                        ArchiveError::PasswordRequired | ArchiveError::BadPassword
+                    ) {
+                        return Err(err);
+                    }
+                    report.failed.push((id, err.reason()));
+                }
+                None => {
+                    if let Some(err) = outcome.sink_error {
+                        report.failed.push((id, err.reason()));
+                        finish_entry(sink, id, false, &mut report)?;
+                        continue;
+                    }
+                    finish_entry(sink, id, true, &mut report)?;
+                }
+            }
         }
 
         let _ = sink.finish();
@@ -431,141 +388,99 @@ impl ArchiveReader for RarReader {
     ) -> Result<ExtractReport, ArchiveError> {
         let start = Instant::now();
         let mut report = ExtractReport::default();
-        let mut archive = self.open_processing()?;
-        let mut index = 0u32;
 
-        while let Some(header) = archive.read_header().map_err(map_error)? {
-            let id = index;
-            index = index.saturating_add(1);
+        let mut archive = self.open_archive()?;
 
+        for id in 0..self.entries.len() as u32 {
             if cancel.is_cancelled() {
                 return Err(ArchiveError::Cancelled);
             }
-
             let Some(entry) = self.entries.get(id as usize).cloned() else {
-                archive = header.skip().map_err(map_error)?;
                 continue;
             };
-
             if entry.kind.is_dir() {
-                archive = header.skip().map_err(map_error)?;
                 continue;
             }
 
             if let Err(err) = sink.on_entry_begin(id, &entry) {
                 report.failed.push((id, err.reason()));
-                archive = header.skip().map_err(map_error)?;
                 continue;
             }
 
-            if entry.size > self.staging_limit {
-                let staging = TempDir::create("thzip-spellarchive-rar")?;
-                let temp = staging.path().join(format!("{id}.tmp"));
-                let next = match header.extract_to(&temp) {
-                    Ok(next) => next,
-                    Err(err) => {
-                        let mapped = map_error(err);
-                        let _ = sink.on_entry_end(id, false);
-                        let _ = std::fs::remove_file(&temp);
-                        if matches!(
-                            mapped,
-                            ArchiveError::PasswordRequired | ArchiveError::BadPassword
-                        ) {
-                            return Err(mapped);
-                        }
-                        report.failed.push((id, mapped.reason()));
-                        archive = self.skip_to(index)?;
-                        continue;
-                    }
-                };
-                let mut file = match File::open(&temp) {
-                    Ok(file) => file,
-                    Err(err) => {
-                        let _ = sink.on_entry_end(id, false);
-                        let _ = std::fs::remove_file(&temp);
-                        report.failed.push((
-                            id,
-                            FailReason::StagedReadFailed {
-                                detail: err.to_string(),
-                            },
-                        ));
-                        archive = next;
-                        continue;
-                    }
-                };
-                let mut chunk = vec![0u8; READ_BUF];
-                let mut ok = true;
-                loop {
-                    if cancel.is_cancelled() {
-                        drop(file);
-                        let _ = std::fs::remove_file(&temp);
-                        let _ = sink.on_entry_end(id, false);
-                        return Err(ArchiveError::Cancelled);
-                    }
-                    match file.read(&mut chunk) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Err(err) = sink.on_data(id, &chunk[..n]) {
-                                report.failed.push((id, err.reason()));
-                                ok = false;
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            report.failed.push((
-                                id,
-                                FailReason::StagedReadFailed {
-                                    detail: err.to_string(),
-                                },
-                            ));
-                            ok = false;
-                            break;
-                        }
-                    }
-                }
-                drop(file);
-                let _ = std::fs::remove_file(&temp);
-                archive = next;
-                finish_entry(sink, id, ok, &mut report)?;
-                continue;
+            // 测试同样走流式：数据进计数 sink，CRC 由 sink 校验。
+            let outcome = self.decode_into(&mut archive, id, sink, cancel);
+            if outcome.cancelled {
+                let _ = sink.on_entry_end(id, false);
+                return Err(ArchiveError::Cancelled);
             }
-
-            match header.read() {
-                Ok((data, next)) => {
-                    let mut ok = true;
-                    for chunk in data.chunks(READ_BUF) {
-                        if cancel.is_cancelled() {
-                            let _ = sink.on_entry_end(id, false);
-                            return Err(ArchiveError::Cancelled);
-                        }
-                        if let Err(err) = sink.on_data(id, chunk) {
-                            report.failed.push((id, err.reason()));
-                            ok = false;
-                            break;
-                        }
-                    }
-                    archive = next;
-                    finish_entry(sink, id, ok, &mut report)?;
-                }
-                Err(err) => {
-                    let mapped = map_error(err);
+            match outcome.fatal {
+                Some(err) => {
                     let _ = sink.on_entry_end(id, false);
                     if matches!(
-                        mapped,
+                        err,
                         ArchiveError::PasswordRequired | ArchiveError::BadPassword
                     ) {
-                        return Err(mapped);
+                        return Err(err);
                     }
-                    report.failed.push((id, mapped.reason()));
-                    archive = self.skip_to(index)?;
+                    report.failed.push((id, err.reason()));
+                }
+                None => {
+                    if let Some(err) = outcome.sink_error {
+                        report.failed.push((id, err.reason()));
+                        finish_entry(sink, id, false, &mut report)?;
+                        continue;
+                    }
+                    finish_entry(sink, id, true, &mut report)?;
                 }
             }
         }
 
+        let _ = sink.finish();
         report.bytes_written = sink.bytes_written();
         report.crc_mismatch = sink.take_crc_mismatch();
         report.elapsed = start.elapsed();
         Ok(report)
+    }
+}
+
+/// 单条目的解码结果。
+struct DecodeOutcome {
+    /// 解码本身的致命错误（密码、损坏等）。`None` 表示解码本身成功。
+    fatal: Option<ArchiveError>,
+    /// sink 侧的错误：写盘失败、CRC 不符等。
+    sink_error: Option<crate::error::SinkError>,
+    /// 用户在解码途中取消。
+    cancelled: bool,
+}
+
+impl RarReader {
+    /// 把一个条目流式写进 sink。
+    fn decode_into(
+        &self,
+        archive: &mut RarArchive,
+        id: EntryId,
+        sink: &mut dyn ExtractSink,
+        cancel: &CancelToken,
+    ) -> DecodeOutcome {
+        let mut writer = SinkWriter {
+            sink,
+            id,
+            failed: None,
+            cancel,
+            cancelled: false,
+        };
+        let result = match archive.by_index(id as usize) {
+            Ok(member) => member
+                .copy_to(&mut writer)
+                .map(|_| ())
+                .map_err(|err| map_error(&err)),
+            Err(err) => Err(map_error(&err)),
+        };
+        DecodeOutcome {
+            fatal: result.err(),
+            sink_error: writer.failed,
+            cancelled: writer.cancelled,
+        }
     }
 }
 
@@ -588,119 +503,19 @@ fn finish_entry(
     }
 }
 
-fn is_symlink(file_attr: u32) -> bool {
-    file_attr & 0o170000 == 0o120000
-}
-
-fn map_error(err: unrar_ng::error::UnrarError) -> ArchiveError {
-    use unrar_ng::error::Code;
-    match err.code {
-        Code::MissingPassword => ArchiveError::PasswordRequired,
-        Code::BadPassword => ArchiveError::BadPassword,
-        Code::BadArchive | Code::UnknownFormat | Code::EOpen => {
-            ArchiveError::Open(FailReason::Raw(err.to_string()))
-        }
-        other => ArchiveError::Other(FailReason::RarFailed {
-            detail: format!("{other:?}"),
-        }),
+/// 把 `unrar-rs` 的错误映射到项目自己的错误模型。
+///
+/// 密码相关的错误要单独挑出来——上层靠 `PasswordRequired` 决定要不要弹
+/// 密码框，混进通用错误就变成死路。
+fn map_error(err: &unrar_rs::RarError) -> ArchiveError {
+    let text = err.to_string();
+    let lowered = text.to_ascii_lowercase();
+    if lowered.contains("encrypted") || lowered.contains("password") {
+        // 缺密码与密码错误都归到「需要密码」，由上层重试。
+        return ArchiveError::PasswordRequired;
     }
-}
-
-/// RAR4 的 `file_time` 是 MS-DOS 日期时间；按墙钟数字转成 SystemTime。
-fn dos_to_system_time(dos: u32) -> Option<SystemTime> {
-    let second = (dos & 0x1F) * 2;
-    let minute = (dos >> 5) & 0x3F;
-    let hour = (dos >> 11) & 0x1F;
-    let day = (dos >> 16) & 0x1F;
-    let month = (dos >> 21) & 0x0F;
-    let year = 1980 + ((dos >> 25) & 0x7F) as i64;
-
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
-        return None;
+    if lowered.contains("corrupt") || lowered.contains("truncated") {
+        return ArchiveError::Open(FailReason::Raw(text));
     }
-
-    let days = days_from_civil(year, month as i64, day as i64);
-    let secs = days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second);
-    if secs < 0 {
-        return None;
-    }
-    Some(UNIX_EPOCH + Duration::from_secs(secs as u64))
-}
-
-/// Howard Hinnant 的 civil_from_days 逆向算法。
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let mp = (month + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{RarReader, days_from_civil, dos_to_system_time, is_symlink};
-    use crate::limits::Limits;
-    use crate::plan::{DecisionTable, OverwritePolicy};
-    use crate::reader::ArchiveReader;
-    use crate::safety::ExtractDirSink;
-    use crate::task::CancelToken;
-
-    #[test]
-    fn stages_entries_to_temp_file() {
-        let archive =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/version.rar");
-        // 阈值 0 强制走临时文件中转。
-        let mut reader = RarReader::new_with_limit(&archive, None, 0).unwrap();
-        let target = std::env::temp_dir().join(format!(
-            "thzip-spellarchive-rar-stage-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let ids: Vec<u32> = (0..reader.entries().len() as u32).collect();
-        let plan = reader.plan(&ids, &target, &Limits::default()).unwrap();
-        let decisions = DecisionTable {
-            default: OverwritePolicy::Overwrite,
-            ..Default::default()
-        };
-        let mut sink = ExtractDirSink::new(&plan, &decisions, Limits::default());
-        let report = reader
-            .extract(&plan, &decisions, &CancelToken::new(), &mut sink)
-            .unwrap();
-        assert!(report.failed.is_empty(), "{:?}", report.failed);
-        assert_eq!(
-            std::fs::read_to_string(target.join("VERSION")).unwrap(),
-            "unrar-0.4.0"
-        );
-        let _ = std::fs::remove_dir_all(&target);
-    }
-
-    #[test]
-    fn converts_dos_time() {
-        // 2021-04-05 06:07:08
-        let dos = ((2021 - 1980) << 25) | (4 << 21) | (5 << 16) | (6 << 11) | (7 << 5) | (8 / 2);
-        let time = dos_to_system_time(dos).unwrap();
-        let secs = time
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        assert_eq!(secs, 1_617_602_828);
-    }
-
-    #[test]
-    fn detects_unix_symlink_mode() {
-        assert!(is_symlink(0o120777));
-        assert!(!is_symlink(0o100644));
-        assert!(!is_symlink(0x20));
-    }
-
-    #[test]
-    fn civil_days_matches_epoch() {
-        assert_eq!(days_from_civil(1970, 1, 1), 0);
-        assert_eq!(days_from_civil(2000, 1, 1), 10957);
-    }
+    ArchiveError::Other(FailReason::RarFailed { detail: text })
 }

@@ -28,6 +28,12 @@
 
 ### 性能
 
+- **主程序体积 23.17 MiB → 20.53 MiB（−11.4%）**，精简构建 19.26 MiB（−16.9%），7z 压缩分发后 6.71 MiB。
+  - release profile 改为 `strip = "symbols"` + `lto = "fat"`。
+  - `eframe` 关掉 `wayland` / `x11` / `web_screen_reader` / `system_fonts`（项目已自建完整 CJK 字体方案：内嵌 Noto Sans SC 子集 + Windows 字体 + fontdb 兜底）。
+  - `wgpu` 只保留 D3D12 后端，去掉 Vulkan / Metal / GLES / WebGPU（Vulkan 的 `ash` 绑定单独就占 68 MB rlib）。
+  - `resvg` 关掉 `text` / `system-fonts` / `raster-images`；`egui_extras` 关掉 default features。
+  - `accesskit`（屏幕阅读器）与 `svg-text`（SVG 主题文字）做成 Cargo feature，`--no-default-features` 可出精简版。
 - 8 MiB 以内的 zip 整包读入内存：10k 条目列表 328 ms → 8 ms；大包仍走文件流。
 - 单文件流尺寸优先读元数据：gz 尾部 ISIZE、zstd/lz4 帧头 Content Size，避免打开即整包解压；bz2/xz 保留回退。
 - 打包脚本自动在 PATH 与常见安装目录查找 Inno Setup 的 `iscc`，并打印安装包 SHA-256。
@@ -35,6 +41,7 @@
 
 ### 修复
 
+- **构建**：`build.rs` 不再强依赖注册表定位 Windows SDK。之前 `winresource` 内部调用 `reg.exe` 查询 SDK 路径，在沙箱、域策略禁用 `reg.exe`、精简 CI 镜像下直接失败，错误信息只剩「系统找不到指定的路径」。现在先按标准路径探测 `rc.exe` 并设好 `RC_PATH` 绕开注册表，探测失败才退回注册表；panic 信息附带可操作提示。
 - **安全**：解压根目录之下的祖先链含 junction / symlink 时不再越界写盘。之前只检查直接父目录，直接父目录不存在时检查必然通过，随后的建目录操作却会穿过祖先链接把内容写到解压根目录之外。改为从根目录逐级校验并逐级创建。
 - **安全**：CRC 校验失败的条目不再落盘。之前只记录一条「CRC 不符」提示，随后照常提交，损坏内容已落到最终路径（zip 的 XZ / LZMA 条目走 `by_index_raw`，库层不校验 CRC，必然落盘）。现在临时文件被删除、目标位置保持原样。
 - **数据**：重写归档时按实际落盘路径读回内容。之前用 `plan.items[].rel_path` 读取，而 sink 会对包内同名条目改名（`a.txt` → `a~1.txt`），导致第二个条目被写成第一个条目的内容。tar / 7z 的追加路径同样受影响，一并修正。

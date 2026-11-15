@@ -9,11 +9,30 @@ license.workspace = true
 name = "thzip-spellarchive"
 path = "src/main.rs"
 
+[features]
+default = ["accesskit", "svg-text"]
+
+# 屏幕阅读器（Windows UI Automation）支持。关掉约省 3 MiB。
+accesskit = ["eframe/accesskit"]
+
+# 自定义 SVG 主题里的文字渲染。需要 usvg 的字体栈（rustybuzz / ttf-parser），
+# 关掉约省 1 MiB。内置主题全是 PNG，不受影响。
+svg-text = ["resvg/text"]
+
 [dependencies]
 thzip-core.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
+# 只保留 D3D12 后端。wgpu 默认还会带上 Vulkan / Metal / GLES / WebGPU，
+# 其中 Vulkan（ash）单独就占约 4 MiB。需要兜底老显卡或虚拟机时，
+# 在下面补 "vulkan" 即可。
+wgpu = { version = "30", default-features = false, features = [
+    "std",
+    "wgsl",
+    "dx12",
+    "parking_lot",
+] }
 serde.workspace = true
 toml.workspace = true
 image.workspace = true

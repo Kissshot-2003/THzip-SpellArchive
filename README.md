@@ -22,8 +22,20 @@ cargo run -p thzip-cli -- pack <输出> <输入...>      # 格式由扩展名决
 # sniff / list / test / extract / pack 都支持 --json，输出单行机读结果
 cargo test --workspace                           # 154 个单元 / 集成 / 归档格式用例
 cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / 解压 / 7z 打包基准
+cargo build --release -p thzip-app --no-default-features   # 精简版：省掉屏幕阅读器与 SVG 文字
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
+
+## 体积
+
+| 版本 | 体积 | 7z 压缩后 |
+|---|---|---|
+| GUI（默认，含屏幕阅读器与 SVG 文字） | 20.53 MiB | 6.71 MiB |
+| GUI（`--no-default-features`） | 19.26 MiB | 6.35 MiB |
+| CLI | 4.46 MiB | 1.46 MiB |
+
+渲染后端只保留 D3D12；Vulkan / Metal / GLES / WebGPU 未编入。需要兜底老显卡或虚拟机时，
+在 `crates/thzip-app/Cargo.toml` 的 `wgpu` features 里补 `"vulkan"`。
 
 ## 性能基线（本机，`cargo bench --quick`）
 

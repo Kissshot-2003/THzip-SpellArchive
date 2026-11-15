@@ -3,7 +3,12 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（本次：私有远端 + CI、fuzz/差分/基准、便携模式与 CLI JSON、归档注释、主题导出、任务模板、文本/图片预览、7z 分卷创建、设置 schema 5、`app.rs` 拆分为 state/filter/pack/relocate、10k zip 打开 328→8 ms、安装包实测；此前：项目改名、7z/tar 追加、RAR 读取、多标签页、全量 i18n 等）
+> 最后更新：2026-11（本次：Win11 右键菜单按扩展名收敛 + 多选 + 经典菜单开关、
+> RAR 后端换 unrar-rs 实现真流式、代码签名通道、文档漂移修正；
+> 此前：私有远端 + CI、fuzz/差分/基准、便携模式与 CLI JSON、归档注释、主题导出、
+> 任务模板、文本/图片预览、7z 分卷创建、设置 schema 5、`app.rs` 拆分、
+> 10k zip 打开 328→8 ms、安装包实测；再此前：项目改名、7z/tar 追加、RAR 读取、
+> 多标签页、全量 i18n 等）
 
 ---
 
@@ -28,7 +33,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（199）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（204）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -60,7 +65,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 | tar.zst / tzst | 是 | 是 | 是 | 否 | 同上 |
 | tar.lz4 / tlz4 | 是 | 是 | 是 | 否 | 同上 |
 | gz / bz2 / xz / zst / lz4 | 是 | 否 | 否 | 否 | 单文件流，打开时先读一遍求大小 |
-| rar | 是 | 否 | 否 | 支持 | 基于 unrar-ng（UnRAR 许可）；支持多卷（从任意卷打开）；大条目走临时文件中转 |
+| rar | 是 | 否 | 否 | 支持 | 基于 unrar-rs（纯 Rust，Apache-2.0 + UnRAR 许可）；支持多卷（从任意卷打开）；**条目流式解码**，内存与条目大小无关 |
 | 分卷 `.7z.001` | 是 | 否 | 否 | 同主包 | 读取时按字节拼接成逻辑流；从任意卷号打开都可 |
 
 ### 1.3 代码规模与提交状态
@@ -87,7 +92,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 199 个测试
+cargo test --workspace                 # 204 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +147,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 199 通过；clippy 无告警。
+12. `cargo test --workspace` 204 通过；clippy 无告警。
 
 ---
 
@@ -188,7 +193,7 @@ spell_archive/
 | `backend/zip.rs` | zip 读取：中央目录、名字编码、预检、流式解压、AES、CRC；LZMA 自解码；不支持方法预检跳过 |
 | `backend/zip_write.rs` | zip 创建/追加：Store/Deflate/BZip2/Zstd、AES-256、zip64、原子替换 |
 | `backend/rewrite.rs` | 删除 / 重命名 / 移动条目：保留项解到临时目录→按最终名字写新包→原子替换；含重名与目录自嵌套校验 |
-| `backend/rar.rs` | RAR 读取：unrar-ng 列表 / 预检 / 解压 / 测试、密码、固实包、多卷、临时文件中转 |
+| `backend/rar.rs` | RAR 读取：unrar-rs 列表 / 预检 / 解压 / 测试、密码、固实包、多卷、**流式解码**（`copy_to` 直连 sink） |
 | `backend/sevenz.rs` | 7z 读取：固实包、AES、单条提取、空根目录过滤 |
 | `backend/sevenz_write.rs` | 7z 创建：LZMA2（级别/字典可调）/COPY、AES-256 头加密 |
 | `backend/tar.rs` | tar 家族读取：6 种容器、PAX/GNU longname、跳过链接 |
@@ -215,7 +220,7 @@ spell_archive/
 | `i18n/warnings.rs` | `PlanWarning` / `Conflict` 的中文/英文翻译；预检列表上限 |
 | `theme/{mod,loader}.rs` | 主题扫描、纹理路径解析、按需解码、九宫格切片、签名轮询、主题目录定位 |
 | `tray.rs` | 托盘图标与本地化菜单 |
-| `shell_menu.rs` | HKCU 右键菜单：打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip；启动自检 exe 路径 |
+| `shell_menu.rs` | HKCU 右键菜单：**按归档扩展名注册**（12 种）、多选批量传参、文件夹与文件夹空白处、Win11 经典菜单恢复开关、`SHChangeNotify` 刷新 |
 | `ui/*` | 工具栏、标签栏、文件浏览、归档表、任务行、预检/密码/打包对话框、设置、进度条、拖拽遮罩 |
 
 ### 3.5 启动顺序
@@ -389,7 +394,9 @@ UI 选目标目录
 
 读取：
 
-- `unrar-ng = 0.7`（包装 UnRAR C++ 源码，MIT/Apache 包装层 + UnRAR 许可证，见 `third_party/unrar-license.txt`）。
+- `unrar-rs = 0.15`（纯 Rust RAR 解码器，Apache-2.0 + UnRAR 条件，见 `third_party/unrar-rs-license.txt`）。
+  固定 `default-features = false, features = ["crypto-rust"]`：默认 feature 走 `aws-lc-rs`，
+  需要 NASM 才能编译；`crypto-rust` 走纯 Rust 的 aes/cbc/hmac，构建链更简单。
 - 列表使用 `open_for_listing()`；解压/测试使用 `open_for_processing()` 顺序处理。
 - 只读：不支持创建、追加；多卷 RAR 会自动定位第一卷。
 - 密码：`Archive::with_password`；缺密码/错密码映射为 `PasswordRequired` / `BadPassword`。
@@ -788,7 +795,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **199** 个测试（core 143 + app 52 + cli 4）。
+当前共 **204** 个测试（core 141 + app 59 + cli 4）。
 
 ### 9.2 测试分布
 
@@ -857,7 +864,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 24 | 部分修复 | gz 读尾部 ISIZE、zstd/lz4 读帧头 Content Size，常见文件不再预先解压；bz2/xz 仍完整读一遍；多成员/多帧时显示首/末成员大小 | 需要精确总长时再完整解码 |
 | 25 | 已修复 | 解压收尾阶段按深度倒序恢复目录 mtime；tar 写入按只读属性生成 444/644、目录 555/755 |
 | 26 | 部分修复 | tar 家族支持追加（解包重建 + 原子替换），仍不支持加密 | 加密不在 tar 规范内，保持不支持 |
-| 27 | 已修复 | 多卷自动定位第一卷；大条目临时文件中转，无 512 MiB 硬上限 |
+| 27 | 已修复 | 多卷自动定位第一卷；条目流式解码（unrar-rs `copy_to` 直连 sink），无内存上限、无临时文件中转 |
 | 28 | 单实例 handoff 已支持多路径，但仍靠 250/500ms 文件轮询 | 空闲有低频唤醒 | 需要时换 named pipe / WM_COPYDATA |
 | 29 | 已修复 | 托盘菜单走 i18n，语言切换后 `rebuild_tray` |
 | 30 | 已修复 | 启动时 `refresh_if_installed` 自动改写为当前 exe 路径 |
@@ -871,7 +878,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 1. 单实例：mutex + `handoff.txt` + `SetForegroundWindow`。
 2. 托盘：显示/隐藏/退出菜单、关闭到托盘、双击恢复。
-3. 右键菜单：`winreg` 写 HKCU，文件与目录，设置页开关；Win11 收进“显示更多选项”。
+3. 右键菜单：`winreg` 写 HKCU，**按归档扩展名注册**（不在 `*` 下），文件与目录，设置页开关；
+   Win11 默认收进“显示更多选项”，设置页可一键恢复 Win10 经典菜单（CLSID 掩码）。
 4. 主题热重载：每秒轮询 `theme.toml` / `png` 签名，保留当前主题 id。
 5. 拖拽：文件/目录打开 + 全屏悬停覆盖提示。
 
@@ -923,7 +931,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 |---|---|---|
 | GUI | egui + eframe 0.37 | 自绘像素 UI、单二进制、跨平台 |
 | 7z | sevenz-rust2 0.20 | 纯 Rust；7z.dll 无 C ABI，需 COM vtable + 分架构 DLL |
-| RAR | unrar-ng 0.7（UnRAR C++） | 纯 Rust 无成熟读取实现；包装层 MIT/Apache，UnRAR 许可证允许解压 |
+| RAR | unrar-rs 0.15（纯 Rust） | Apache-2.0 + UnRAR 条件；`copy_to` 支持真流式，无需 C++ 工具链 |
 | tar 解压 | tar + flate2/bzip2/lzma-rust2/zstd/lz4_flex | 纯 Rust 为主，保持单 exe |
 | 解压接口 | plan → decisions → extract 两阶段 | worker 不能同步询问 UI |
 | 覆盖 | 临时文件 + ReplaceFileW | 直接写会截断原文件 |
@@ -935,7 +943,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 设置 | `%APPDATA%\THzip-SpellArchive\prefs.toml` | 不污染安装目录，符合 Windows 习惯 |
 | 单实例 | mutex + handoff 文件 + SetForegroundWindow | 不引入 IPC 依赖；跨进程转交简单 |
 | 托盘 | tray-icon + muda，关闭隐藏 | 桌面工具习惯；托盘菜单可恢复/退出 |
-| 右键菜单 | winreg 写 HKCU，多动词 | 免管理员；Win11 收进“显示更多选项”；支持解压/添加 |
+| 右键菜单 | winreg 写 HKCU，按扩展名注册，多动词 | 免管理员；不污染非归档文件；Win11 可切经典菜单 |
 | 平台 | Windows 10+ / x64 | Win7 需要旧工具链，不值得 |
 | 项目名 | THzip-SpellArchive（v0.2.0 起） | 旧名 SpellArchive 保留为迁移常量；AppData、注册表、单实例键同步更新 |
 
@@ -946,7 +954,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（199 通过）
+- [ ] `cargo test --workspace`（204 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示
@@ -966,7 +974,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] 切换语言后托盘菜单文案同步变化，状态栏重置为本地化“就绪”
 - [ ] 切换到 English 后：打包/预检/密码对话框、设置页、任务状态、文件选择器标题均为英文；再切回中文无残留
 - [ ] 已安装右键菜单时切换语言，`reg query` 中菜单显示名同步更新
-- [ ] 设置页勾选/取消右键菜单，`reg query HKCU\Software\Classes\*\shell\THzip-SpellArchive` 有/无
+- [ ] 设置页勾选/取消右键菜单，`reg query HKCU\Software\Classes\.zip\shell\THzip-SpellArchive.Open` 有/无
 - [ ] 右键 zip 分别试“打开 / 解压到当前文件夹 / 解压到单独文件夹 / 添加到 zip”
 - [ ] 命令行 `thzip-spellarchive.exe --extract-here <zip>` 能直接弹预检
 - [ ] 复制一份 exe 改名后启动，右键菜单命令路径自动更新为当前 exe
@@ -1031,7 +1039,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 取消 / 暂停 | 已实现 | `CancelToken` 内含 `cancelled` / `paused` 两个原子位；`checkpoint()` 批量边界轮询 20 ms，1 小时自愈 |
 | 任务模型 | 已实现 | 操作队列 `bounded(1024)` + `send_timeout(5s)`；同路径写操作按 `canonicalize` 键串行化（`TaskRunner::prune_locks` 回收） |
 | 预览路径记忆上限 | 已实现 | `MemorySink::with_limits` 接入 `Budget` 与 CRC（L-3） |
-| RAR 内存峰值 | 已修复 | `MAX_IN_MEMORY` 512 MiB → 16 MiB（L-9） |
+| RAR 内存峰值 | 已修复 | 后端换 `unrar-rs`，`copy_to` 流式解码；`MAX_IN_MEMORY` 常量整体移除（L-9） |
 
 ### 16.3 L-1 ~ L-10
 
@@ -1045,7 +1053,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | L-6 | `PlanAction::Rename` 目标名被丢弃；`CaseCollision` 死代码 | `resolve_all` 用 `sanitize_rel` 重新净化目标名并拼到 root 下；`ExtractPlan::case_collisions()` 供 UI 提示 |
 | L-7 | Unix 降级 | `set_mtime` 用 `utimensat` + `UTIME_OMIT`；`available_space` 用 `statvfs` |
 | L-8 | `free_space` 只显示不拒绝 | `ensure_space()` 返回 `FailReason::InsufficientSpace`，CLI 与 GUI 都据此拦 |
-| L-9 | RAR 512 MiB 整条入内存 | 降到 16 MiB |
+| L-9 | RAR 512 MiB 整条入内存 | 换 `unrar-rs` 流式解码，内存与条目大小无关 |
 | L-10 | `raw_name` 注释与实际用途不符 | 注释改为「原始字节，仅供诊断；落盘用 `display`」 |
 
 ### 16.4 UI / 平台章

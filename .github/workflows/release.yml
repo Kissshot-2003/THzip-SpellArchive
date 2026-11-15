@@ -51,6 +51,28 @@ jobs:
           ./scripts/package.ps1 -Version $version
           Compress-Archive -Path dist/THzip-SpellArchive -DestinationPath dist/THzip-SpellArchive.zip -Force
 
+      # 代码签名。没有配置证书就跳过并在日志里说明——
+      # 签名需要付费证书，这是唯一需要仓库所有者介入的一步。
+      - name: Sign (if certificate configured)
+        shell: pwsh
+        env:
+          THZIP_SIGN_PFX: ${{ secrets.SIGN_PFX_BASE64 }}
+          THZIP_SIGN_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:THZIP_SIGN_PFX)) {
+            Write-Host "No signing certificate configured (secret SIGN_PFX_BASE64). Skipping signing."
+            Write-Host "See docs/legal/signing.md for how to add one."
+            exit 0
+          }
+          # 证书以 base64 存进 Secret，避免二进制文件直接进仓库。
+          $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:THZIP_SIGN_PFX))
+          try {
+            ./scripts/sign.ps1 -Pfx $pfx -Password $env:THZIP_SIGN_PASSWORD
+          } finally {
+            Remove-Item -Force -ErrorAction SilentlyContinue $pfx
+          }
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:

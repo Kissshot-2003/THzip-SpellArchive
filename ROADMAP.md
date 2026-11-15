@@ -1,7 +1,7 @@
 # THzip-SpellArchive 长任务路线图
 
 > 面向后续接手的开发者和 AI 代理。本文件是可执行的长任务清单，不是宣传文档。
-> 当前基线：`0.2.0`，39 次提交，`cargo test --workspace` 128 通过，clippy / fmt 干净。
+> 当前基线：`0.2.0`，70 次提交，`cargo test --workspace` 204 通过（core 141 / app 59 / cli 4），clippy / fmt 干净。
 > 最后更新：2026-11-15（Phase 0 启动）。
 
 ## 0. 约束（任何阶段都不得破坏）
@@ -76,7 +76,9 @@
 
 - [x] 10k 条目 zip 打开 328 ms → 8 ms：≤ 8 MiB 包整包读入内存，避免逐条目 seek
 - [x] 单文件流尺寸：gz 读尾部 ISIZE、zstd/lz4 读帧头；bz2/xz 保留完整解码回退（HANDOVER 24）
-- [ ] RAR 超大条目流式中转（阻塞：unrar-ng 只提供整条 `read` 或 `extract_to` 文件，无流式回调）
+- [x] RAR 超大条目流式中转：后端换成 `unrar-rs`（纯 Rust），`copy_to` 把解码产物直接写进 sink——
+      不再整条读进内存，也不再落临时文件再读回。旧的 16 MiB 内存上限与临时文件中转全部移除。
+      与 `unrar-ng` 逐字节比对一致（普通包 / 固实包 / 加密包三种夹具哈希相同）。
 - [x] 拆分 `app.rs`：类型 → `app/state.rs`，搜索 → `filter.rs`，打包 → `pack.rs`，改名 → `relocate.rs`，测试 → `tests.rs`
 - [x] 主文件从 2627 行降到约 1380 行（目标 < 1500 已达成）
 - [ ] 单实例 handoff 轮询改 `WM_COPYDATA`（阻塞：winit 持有 WndProc，需要消息窗口 + 子类化与不安全代码；当前 250/500 ms 轮询成本可接受）
@@ -86,11 +88,12 @@
 
 ## 7. Phase 5：发布 1.0
 
-- [ ] 代码签名证书接入 CI（阻塞：没有可用的代码签名证书）
+- [ ] 代码签名证书接入 CI（**通道已就绪**，只差证书本身：`scripts/sign.ps1` + release.yml 的
+      Sign 步骤 + `docs/legal/signing.md`；无证书时 CI 明确跳过并打印说明。OV 证书约 $200–400/年）
 - [x] Inno 安装包实测：静默安装 / 启动 / 卸载通过；安装版正确使用 `%APPDATA%`（非便携）
 - [ ] 迁移回归：旧 `SpellArchive` → `THzip-SpellArchive` 配置与注册表
 - [x] 文档定稿：README 能力表、HANDOVER、本路线图、CHANGELOG 与测试计数同步
-- [ ] 干净 Win10 / Win11 各装一遍，SmartScreen 无拦截
+- [ ] 干净 Win10 / Win11 各装一遍，SmartScreen 无拦截（依赖上面的证书）
 
 **退出标准**：无管理员权限可安装；卸载无残留；日志与崩溃落盘正常。
 

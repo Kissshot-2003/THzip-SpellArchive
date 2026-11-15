@@ -7,6 +7,23 @@
 
 ### 新增
 
+- Win11 右键菜单优化：
+  - 菜单改为**按归档扩展名注册**（`.zip` / `.7z` / `.rar` / `.tar` 等 12 种），
+    不再挂在 `*\shell` 下——之前右键任何一个 `.txt` 都会看到「解压到当前文件夹」。
+  - 支持**多选批量传参**（`%1` → `%*` + `MultiSelectModel=Player`），一次选中多个文件
+    能一次加进压缩包。
+  - 新增**文件夹空白处**右键菜单（`Directory\Background\shell`，传 `%V`），
+    在文件夹里点空白处即可把该文件夹打包。
+  - 新增**「恢复 Win10 经典右键菜单」开关**：Win11 的紧凑菜单只显示通过
+    `IExplorerCommand` + 应用标识注册的命令，注册表动词一律被塞进「显示更多选项」。
+    该开关用 CLSID 掩码让资源管理器退回 Win10 风格菜单，菜单项直接出现在右键第一层。
+  - 注册表变更后调用 `SHChangeNotify` 通知资源管理器重读，不必重启 explorer.exe。
+  - 升级时自动清理旧版挂在 `*\shell` 下的菜单键。
+- 代码签名通道：`scripts/sign.ps1`（PFX 文件或证书存储指纹两种方式，RFC 3161 时间戳，
+  签完自动 verify）+ release.yml 的 Sign 步骤 + `docs/legal/signing.md`。
+  无证书时 CI 明确跳过并打印指引——签名只剩「买证书」这一步。
+- RAR 后端换成 `unrar-rs`（纯 Rust）：`copy_to` 把解码产物直接写进 sink，
+  **条目流式解码**，内存占用与条目大小无关。旧的 16 MiB 内存上限与临时文件中转全部移除。
 - CI：stable 测试 / clippy / fmt，tag 触发可复现打包并上传 Release。
 - 差分测试：与固定 SHA-256 的 7-Zip 26.04 双向比对列出/解压、AES zip、AES 7z 与 7z 分卷。
 - fuzz：4 个 cargo-fuzz 目标 + stable 确定性变异 smoke 测试。

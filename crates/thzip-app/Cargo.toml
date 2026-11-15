@@ -52,6 +52,8 @@ winresource = "0.1"
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
+    # SHChangeNotify：注册表变更后通知资源管理器重读右键菜单
+    "Win32_UI_Shell",
     # DPAPI：记住密码
     "Win32_Security_Cryptography",
     # 多显示器可见性校验

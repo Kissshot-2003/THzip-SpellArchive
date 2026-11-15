@@ -18,6 +18,8 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let mut remember_password = app.remember_password;
     let shell_installed = crate::shell_menu::is_installed();
     let mut shell_want = shell_installed;
+    let classic_menu_on = crate::shell_menu::classic_menu_enabled();
+    let mut classic_menu_want = classic_menu_on;
     let mut import_theme = false;
     let mut export_theme = false;
     let mut open = true;
@@ -27,6 +29,8 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let standard_terms = app.tr.t(TextKey::StandardTerms);
     let close_to_tray_label = app.tr.t(TextKey::CloseToTray);
     let shell_menu_label = app.tr.t(TextKey::ShellMenu);
+    let classic_menu_label = app.tr.t(TextKey::ShellClassicMenu);
+    let classic_menu_note = app.tr.t(TextKey::ShellClassicMenuNote);
     let reduce_motion_label = app.tr.t(TextKey::ReduceMotion);
     let high_contrast_label = app.tr.t(TextKey::HighContrast);
     let remember_label = app.tr.t(TextKey::RememberPassword);
@@ -174,6 +178,15 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
             if cfg!(windows) {
                 ui.add_space(4.0);
                 ui.checkbox(&mut shell_want, shell_menu_label);
+                ui.add_space(4.0);
+                // Win11 把注册表动词全塞进「显示更多选项」，用户常常以为菜单没装上。
+                // 这个开关用 CLSID 掩码把资源管理器退回 Win10 风格菜单。
+                ui.checkbox(&mut classic_menu_want, classic_menu_label);
+                ui.label(
+                    egui::RichText::new(&classic_menu_note)
+                        .size(11.0)
+                        .color(palette.text_sub),
+                );
             }
             ui.add_space(8.0);
             ui.checkbox(&mut reduce_motion, reduce_motion_label);
@@ -311,6 +324,19 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 .tf(TextKey::ShellMenuFailed, &[("error", &err.to_string())]),
         };
         app.status = status;
+        // 注册表变了，通知资源管理器重读，否则菜单要等下次开 explorer.exe 才更新。
+        crate::shell_menu::notify_shell_change();
+    }
+
+    if classic_menu_want != classic_menu_on {
+        let result = crate::shell_menu::set_classic_menu(classic_menu_want);
+        app.status = match result {
+            Ok(true) if classic_menu_want => app.tr.t(TextKey::ShellClassicMenuOn),
+            Ok(_) => app.tr.t(TextKey::ShellClassicMenuOff),
+            Err(err) => app
+                .tr
+                .tf(TextKey::ShellMenuFailed, &[("error", &err.to_string())]),
+        };
     }
 
     app.show_settings = open;

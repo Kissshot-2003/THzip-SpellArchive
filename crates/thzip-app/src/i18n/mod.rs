@@ -275,6 +275,10 @@ pub enum TextKey {
     ShellExtractHere,
     ShellExtractTo,
     ShellAddToZip,
+    ShellClassicMenu,
+    ShellClassicMenuNote,
+    ShellClassicMenuOn,
+    ShellClassicMenuOff,
     NoMatches,
     OnlyAnomalies,
     SuspiciousName,
@@ -526,6 +530,10 @@ impl TextKey {
         TextKey::ShellExtractHere,
         TextKey::ShellExtractTo,
         TextKey::ShellAddToZip,
+        TextKey::ShellClassicMenu,
+        TextKey::ShellClassicMenuNote,
+        TextKey::ShellClassicMenuOn,
+        TextKey::ShellClassicMenuOff,
         TextKey::NoMatches,
         TextKey::OnlyAnomalies,
         TextKey::SuspiciousName,
@@ -776,6 +784,10 @@ impl TextKey {
             TextKey::ShellExtractHere => "shell_extract_here",
             TextKey::ShellExtractTo => "shell_extract_to",
             TextKey::ShellAddToZip => "shell_add_to_zip",
+            TextKey::ShellClassicMenu => "shell_classic_menu",
+            TextKey::ShellClassicMenuNote => "shell_classic_menu_note",
+            TextKey::ShellClassicMenuOn => "shell_classic_menu_on",
+            TextKey::ShellClassicMenuOff => "shell_classic_menu_off",
             TextKey::NoMatches => "no_matches",
             TextKey::OnlyAnomalies => "only_anomalies",
             TextKey::SuspiciousName => "suspicious_name",
@@ -1040,6 +1052,12 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ShellExtractHere => "解压到当前文件夹",
             TextKey::ShellExtractTo => "解压到单独文件夹",
             TextKey::ShellAddToZip => "添加到 zip 压缩包",
+            TextKey::ShellClassicMenu => "恢复 Win10 经典右键菜单",
+            TextKey::ShellClassicMenuNote => {
+                "让菜单项直接出现在右键第一层，不用点“显示更多选项”。需重启资源管理器生效。"
+            }
+            TextKey::ShellClassicMenuOn => "已恢复 Win10 经典右键菜单，请重启资源管理器",
+            TextKey::ShellClassicMenuOff => "已恢复 Win11 新版右键菜单，请重启资源管理器",
             TextKey::NoMatches => "没有匹配的条目",
             TextKey::OnlyAnomalies => "只看异常项",
             TextKey::SuspiciousName => "可疑文件名：{detail}",
@@ -1329,6 +1347,16 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ShellExtractHere => "Extract here",
             TextKey::ShellExtractTo => "Extract to folder",
             TextKey::ShellAddToZip => "Add to zip",
+            TextKey::ShellClassicMenu => "Restore Win10 classic context menu",
+            TextKey::ShellClassicMenuNote => {
+                "Shows menu items directly on right-click instead of under \"Show more options\". Requires restarting Explorer."
+            }
+            TextKey::ShellClassicMenuOn => {
+                "Win10 classic context menu restored, please restart Explorer"
+            }
+            TextKey::ShellClassicMenuOff => {
+                "Win11 modern context menu restored, please restart Explorer"
+            }
             TextKey::NoMatches => "No matching entries",
             TextKey::OnlyAnomalies => "Only anomalies",
             TextKey::SuspiciousName => "Suspicious name: {detail}",

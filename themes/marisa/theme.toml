@@ -21,10 +21,10 @@ task_done = "符卡咏唱完成"
 particles = true
 
 [resource]
-IconArchive7z = "png/icon-archive.png"
-IconArchiveZip = "png/icon-archive.png"
-IconArchiveZst = "png/icon-archive.png"
-IconArchiveEncrypted = "png/icon-archive.png"
+IconArchive7z = "png/arc_7z.png"
+IconArchiveZip = "png/arc_zip.png"
+IconArchiveZst = "png/arc_zst.png"
+IconArchiveEncrypted = "png/arc_lock.png"
 IconFile = "png/icon-file.png"
 IconFolder = "png/icon-folder.png"
 IconFileUnknown = "png/icon-file.png"

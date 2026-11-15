@@ -605,6 +605,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 - 路径：默认 `%APPDATA%\THzip-SpellArchive\prefs.toml`（没有 APPDATA 时退回当前目录）。
 - 便携模式：exe 同目录有 `portable.flag` 或 `themes/` 时写 `<exe 目录>\config\prefs.toml`；
   日志与 handoff 同目录；首次便携启动从 `%APPDATA%\THzip-SpellArchive` 迁移一次。
+  带 `unins000.exe` / `unins000.dat` 的 Inno 安装版不算便携，继续用 `%APPDATA%`。
 - 改名迁移：新路径不存在时读取旧 `%APPDATA%\SpellArchive\prefs.toml`，解析后立即写入新路径；
   旧文件保留不删除，便于回退。
 - 当前 schema 5；字段：`theme`、`locale`、`prefer_standard`、`show_hint`、`close_to_tray`、

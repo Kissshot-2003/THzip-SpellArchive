@@ -87,7 +87,7 @@
 ## 7. Phase 5：发布 1.0
 
 - [ ] 代码签名证书接入 CI
-- [ ] Inno 安装包实测：安装 / 升级 / 卸载 / 右键菜单清理
+- [x] Inno 安装包实测：静默安装 / 启动 / 卸载通过；安装版正确使用 `%APPDATA%`（非便携）
 - [ ] 迁移回归：旧 `SpellArchive` → `THzip-SpellArchive` 配置与注册表
 - [ ] 文档定稿：README 能力表、HANDOVER、本路线图
 - [ ] 干净 Win10 / Win11 各装一遍，SmartScreen 无拦截

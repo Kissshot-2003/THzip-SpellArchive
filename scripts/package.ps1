@@ -56,9 +56,23 @@ try {
     Write-Host "Staged: $stage"
     Write-Host "Version: $Version"
 
-    $iscc = Get-Command iscc -ErrorAction SilentlyContinue
-    if ($null -ne $iscc) {
-        & $iscc.Source "/DMyAppVersion=$Version" (Join-Path $root "packaging\THzip-SpellArchive.iss")
+    $isccCommand = Get-Command iscc -ErrorAction SilentlyContinue
+    $iscc = if ($null -ne $isccCommand) { $isccCommand.Source } else { $null }
+    if ([string]::IsNullOrEmpty($iscc)) {
+        $candidates = @(
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+        )
+        foreach ($candidate in $candidates) {
+            if (Test-Path -LiteralPath $candidate) {
+                $iscc = $candidate
+                break
+            }
+        }
+    }
+    if (-not [string]::IsNullOrEmpty($iscc)) {
+        & $iscc "/DMyAppVersion=$Version" (Join-Path $root "packaging\THzip-SpellArchive.iss")
         if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup failed"
         }

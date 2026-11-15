@@ -42,7 +42,7 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 
 exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：配置、日志、单实例 handoff 都写到
 `<exe 目录>\config\`，不再使用 `%APPDATA%`。首次便携启动会从 `%APPDATA%\THzip-SpellArchive` 迁移一次设置，
-之后以 `config\prefs.toml` 为准。
+之后以 `config\prefs.toml` 为准。Inno 安装版带 `unins000.exe`，不会被误判为便携，仍使用 `%APPDATA%`。
 
 ## 当前状态
 
@@ -79,7 +79,7 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 
 `scripts/package.ps1` 从 `Cargo.toml` 读取版本并执行 release 构建，把 GUI 与 CLI 两个 exe、themes、
 README/CHANGELOG/LICENSE/NOTICE、third_party 许可证复制到 `dist/THzip-SpellArchive/`，同时生成 `SHA256SUMS.txt`。
-版本号不一致会直接失败。若 PATH 中有 Inno Setup 的 `iscc`，还会生成
+版本号不一致会直接失败。若 PATH 或常见安装目录中有 Inno Setup 的 `iscc`，还会生成
 `dist/THzip-SpellArchive-<version>-setup.exe`（`packaging/THzip-SpellArchive.iss`，安装到用户目录，无需管理员）。
 
 ## 交接与后续

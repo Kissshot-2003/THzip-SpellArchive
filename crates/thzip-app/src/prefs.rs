@@ -129,7 +129,12 @@ pub fn portable_config_path(root: &Path) -> PathBuf {
 
 /// exe 同目录存在 `portable.flag` 或 `themes/` 即视为便携模式。
 fn is_portable_dir(dir: &Path) -> bool {
-    dir.join("portable.flag").is_file() || dir.join("themes").is_dir()
+    if dir.join("portable.flag").is_file() {
+        return true;
+    }
+    // 安装版同样带 themes/，用 Inno 的卸载器把两者区分开。
+    let installed = dir.join("unins000.exe").is_file() || dir.join("unins000.dat").is_file();
+    dir.join("themes").is_dir() && !installed
 }
 
 pub fn is_portable() -> bool {
@@ -215,6 +220,12 @@ mod tests {
 
         std::fs::write(dir.join("portable.flag"), b"").unwrap();
         assert!(super::is_portable_dir(&dir));
+        std::fs::remove_file(dir.join("portable.flag")).unwrap();
+
+        // 安装版带 themes/，但有卸载器，不应误判为便携。
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        std::fs::write(dir.join("unins000.exe"), b"").unwrap();
+        assert!(!super::is_portable_dir(&dir));
 
         assert_eq!(
             super::portable_config_path(&dir),

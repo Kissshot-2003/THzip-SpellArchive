@@ -17,6 +17,32 @@ cargo run -p thzip-app          # 启动 GUI
 Windows 上开发体验最完整。Linux / macOS 可以编译与跑测试，但 GUI 的托盘、
 资源管理器右键菜单、单实例这些是 Windows 专属实现，在别的平台上是空实现。
 
+## 提交流程
+
+`main` 是受保护分支，改动一律走 pull request：
+
+```powershell
+git switch -c feature/你的改动
+# ... 改代码 ...
+git commit -am "你的提交信息"
+git push -u origin feature/你的改动
+gh pr create --fill
+```
+
+合并前必须满足这几条：
+
+- **四个 CI 检查全绿**：`check`（fmt / clippy / 测试 / 特性矩阵 / 体积门禁）、
+  `supply-chain`（cargo-deny 许可与漏洞）、`differential`（与 7-Zip 的差分测试）、
+  `long-path`（长路径兼容）。任何一个红着都合并不了。
+- **分支与 `main` 同步**（严格模式）。`main` 有新提交时，先 rebase 或 merge 一次。
+- **讨论已解决**。评审里没回复的对话会挡住合并。
+- **线性历史**。合并方式选 squash 或 rebase，不要产生 merge commit。
+
+不需要别人 approve 就能合——这是单人维护的项目，设成「一人审批」只会把维护者
+自己锁在门外。评审意见由维护者在合并前人工处理。
+
+强推和删分支都被禁了。`main` 上的历史一旦写进去就改不了，这是有意的。
+
 ## 代码结构
 
 | Crate | 职责 | 硬约束 |

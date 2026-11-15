@@ -38,6 +38,9 @@
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读（UnRAR 许可限制）；exe 未签名；7z 固实包无压缩字节级进度（上游库未暴露回调）。
 - **工作区状态**：工作区干净；远端见 `git remote -v`；最新提交见 `git log -1`。
+- **提交方式**：`main` 已开分支保护——改动必须走 PR，且 `check` / `supply-chain` /
+  `differential` / `long-path` 四个检查全绿才能合。强推与删分支被禁。
+  也就是说 `git push origin main` 不再可行，流程见 `CONTRIBUTING.md` 的「提交流程」。
 - **下一步建议**：代码签名（需证书，见 `docs/legal/signing.md`）；handoff IPC 改 WM_COPYDATA 与
   7z 固实进度均为上游或风险阻塞，详见 `ROADMAP.md`。
 

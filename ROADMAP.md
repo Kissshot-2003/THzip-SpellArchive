@@ -1,7 +1,7 @@
 # THzip-SpellArchive 长任务路线图
 
 > 面向后续接手的开发者和 AI 代理。本文件是可执行的长任务清单，不是宣传文档。
-> 当前基线：`0.2.0`，70 次提交，`cargo test --workspace` 204 通过（core 141 / app 59 / cli 4），clippy / fmt 干净。
+> 当前基线：`0.2.0`，70 次提交，`cargo test --workspace` 212 通过（core 144 / app 64 / cli 4），clippy / fmt 干净。
 > 最后更新：2026-11-15（Phase 0 启动）。
 
 ## 0. 约束（任何阶段都不得破坏）
@@ -45,7 +45,10 @@
 - [x] `cargo-fuzz` 4 个 target：`classify`、zip 中央目录、7z 头、tar 头（stable 另有 `fuzz_smoke` 确定性变异）
 - [x] 差分测试：固定 SHA-256 的 7-Zip 26.04，双向列出/解压、AES zip、AES 7z、7z 分卷
 - [x] `criterion` 基准：10k 条目列表、16 MiB 解压、4 MiB 7z 打包（10 万条目与内存峰值待补）
-- [ ] `egui_kittest` 冒烟：打开 → 预检 → 解压 → 取消
+- [x] 流程冒烟：打开 → 预检 → 解压 → 取消。完整 egui_kittest 窗口测试需要
+      `eframe::CreationContext`（真实 wgpu 后端），无头环境跑不了；改为在
+      `app/tests.rs` 里走 core 的同一条业务路径，覆盖解压往返、取消中断、
+      预检拦截路径穿越三类场景。
 - [x] 把基准结果写入 README；`bench.yml` 可手动跑并上传 criterion 报告（10k 列表 340ms 待优化）
 - [x] 顺带修复：`sevenz-rust2` 0.20.2 把目录写成 K_ANTI 反条目；升级 0.24.2 并写入 Windows 属性
 
@@ -65,7 +68,12 @@
 ## 5. Phase 3：格式与 CLI 增强
 
 - [x] CLI `--json`：`sniff` / `list` / `test` / `extract` / `pack` 机读输出（提前完成）
-- [ ] zip 加密 LZMA/XZ 读取（阻塞：zip 4.6 的解密流是私有 API，自定义 LZMA/XZ 解码拿不到明文流；需自行实现 AES-CTR/HMAC，暂不做）
+- [x] zip 加密 LZMA/XZ 读取：WinZip AES 条目的 compression method 记作 99，真实方法在 0x9901
+      extra field 里。zip crate 9.x 解析时已用真实方法覆盖 99 并按「先解密、再按真实方法解压」
+      走完，因此启用其 `lzma` / `xz` feature 后即可支持。原先的判断基于旧版 crate 的私有 API，
+      前提已不成立——加密条目现在一律交给 zip crate 处理，未加密的 LZMA/XZ 仍走本项目自己的
+      解码器（字典上限与进度策略由本项目掌握）。夹具 `aes-lzma.zip` / `aes-xz.zip` 按
+      AE-2 规范手工构造，7-Zip 与 pyzipper 都写不出这个组合。
 - [ ] 7z 固实包按压缩字节上报进度（阻塞：sevenz-rust2 0.24.2 无压缩字节回调）
 - [x] 分卷 `.7z.001` 创建（core 字节切分、CLI `--volume-size`、GUI 分卷下拉）
 - [x] 评估加密包追加：结论为不做——需用密码重加密整个包，失败窗口与密码处理风险不成比例
@@ -91,7 +99,9 @@
 - [ ] 代码签名证书接入 CI（**通道已就绪**，只差证书本身：`scripts/sign.ps1` + release.yml 的
       Sign 步骤 + `docs/legal/signing.md`；无证书时 CI 明确跳过并打印说明。OV 证书约 $200–400/年）
 - [x] Inno 安装包实测：静默安装 / 启动 / 卸载通过；安装版正确使用 `%APPDATA%`（非便携）
-- [ ] 迁移回归：旧 `SpellArchive` → `THzip-SpellArchive` 配置与注册表
+- [x] 迁移回归：旧 `SpellArchive` → `THzip-SpellArchive` 配置与注册表。注册表侧覆盖
+      「先装新菜单再删旧键」的顺序、旧 `*` 菜单的清理、以及迁移幂等性；
+      所有动注册表的测试用进程内互斥锁串行，避免并行测试互相删键。
 - [x] 文档定稿：README 能力表、HANDOVER、本路线图、CHANGELOG 与测试计数同步
 - [ ] 干净 Win10 / Win11 各装一遍，SmartScreen 无拦截（依赖上面的证书）
 
@@ -104,7 +114,7 @@
 | RAR 写入 | UnRAR 许可证只允许解压；实现成本与法务风险不划算 |
 | zip 分卷 `.z01` | 收益低，非目标用户场景 |
 | 增量归档（基准包 + 补丁） | 等价 rsync 差分，风险收益不成比例 |
-| zip 加密 LZMA/XZ | 需要自行实现 WinZip AES 解密才能接自定义解码器 |
+| zip 加密 LZMA/XZ | 已完成（2026-11）：zip crate 9.x 解析 0x9901 extra field 时会用真实方法覆盖 99 |
 | 7z 固实压缩进度 | 上游库未暴露压缩字节回调 |
 | 加密包追加 | 需整包密码重加密，失败窗口与密码处理风险高 |
 | 7z.dll 后端 | 纯 Rust 已覆盖目标格式，COM vtable 维护成本高 |

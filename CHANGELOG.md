@@ -7,6 +7,21 @@
 
 ### 新增
 
+- zip 加密条目现在支持**任意压缩方法组合**（含 AES+LZMA / AES+XZ）。
+  WinZip AES 规范把加密条目的 compression method 记作 99、真实方法放在
+  0x9901 extra field 里；zip crate 9.x 解析时已用真实方法覆盖 99 并按
+  「先解密、再按真实方法解压」走完，因此加密条目一律交给它处理即可。
+  原先的判断基于旧版 crate 的私有 API，前提已不成立。
+  未加密的 LZMA / XZ 仍走本项目自己的解码器——字典上限与进度策略由本项目掌握。
+  夹具 `aes-lzma.zip` / `aes-xz.zip` 按 AE-2 规范构造（7-Zip 与 pyzipper
+  都写不出这个组合），生成脚本在 `tests/fixtures/generate/`。
+- 流程冒烟测试：打开 → 预检 → 解压 → 取消。完整 egui_kittest 窗口测试需要
+  真实 wgpu 后端，无头环境跑不了；改为在 `app/tests.rs` 里走 core 的同一条
+  业务路径。
+- 迁移回归测试：旧菜单 → 新菜单的替换顺序、旧 `*` 菜单清理、迁移幂等性。
+  动注册表的测试用进程内互斥锁串行，避免并行测试互相删键。
+- 开源社区文件：`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、
+  issue / PR 模板。README 补上徽章、安装方式、许可边界与致谢。
 - Win11 右键菜单优化：
   - 菜单改为**按归档扩展名注册**（`.zip` / `.7z` / `.rar` / `.tar` 等 12 种），
     不再挂在 `*\shell` 下——之前右键任何一个 `.txt` 都会看到「解压到当前文件夹」。

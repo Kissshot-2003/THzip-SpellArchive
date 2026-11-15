@@ -1,12 +1,62 @@
 # THzip-SpellArchive
 
-东方 Project 同人主题归档管理器。当前为**zip / 7z / rar / tar 家族读写（RAR 只读）+ 单文件流读取**的阶段：
+[![CI](https://github.com/Kissshot-2003/THzip-SpellArchive/actions/workflows/ci.yml/badge.svg)](https://github.com/Kissshot-2003/THzip-SpellArchive/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](https://www.rust-lang.org)
+[![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows)](https://learn.microsoft.com/windows/)
 
-- `thzip-core`：零 UI 依赖的核心（类型、trait、安全解压、限额、任务线程池、zip/7z/rar/tar 读取与 zip/7z/tar 写入、单文件流读取）
-- `thzip-app`：egui 三栏界面（主题、i18n、自绘进度条、虚拟化列表、打开/预检/解压/测试/创建/设置）
-- `thzip-cli`：复用 core 的命令行入口（zip / 7z / rar / tar 的 list / test / extract / pack）
+东方 Project 同人主题的归档管理器。目标是做一个日常能替代 7-Zip 的工具：
+把 zip / 7z / rar / tar 全家桶的读取、解压、创建、测试都收进一个界面，
+并且在面对畸形包、恶意包、超大包时**不丢用户的数据**。
 
-## 运行
+```
+thzip-core   零 UI 依赖的核心：类型、trait、安全解压、限额、任务线程池、
+             zip / 7z / rar / tar 读写（RAR 只读）、单文件流读取
+thzip-app    egui 三栏界面：主题、i18n、自绘进度条、虚拟化列表、
+             打开 / 预检 / 解压 / 测试 / 创建 / 设置
+thzip-cli    复用 core 的命令行入口：sniff / list / test / extract / pack
+```
+
+## 能做什么
+
+| 能力 | 说明 |
+|---|---|
+| 读取 | zip / 7z / rar / tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4，以及 .gz / .bz2 / .xz / .zst / .lz4 单文件流 |
+| 写入 | zip（Store / Deflate / BZip2 / Zstd）、7z（LZMA2）、tar 全家族；目录递归、追加入现有包、zip64 |
+| 加密 | AES-256 创建与读取；**AES 可与任意读取方法组合**（含 AES+LZMA / AES+XZ）；密码用 DPAPI 本地保存 |
+| 完整性 | CRC-32 校验；7z / RAR 的固实包与多卷 |
+| 安全 | 路径净化、压缩炸弹熔断、TOCTOU 复核、原子写、9 项限额 + 三档预设 |
+| 集成 | 资源管理器右键菜单、托盘、单实例转交、拖拽多标签页、命令面板、中英全量界面 |
+
+完整能力表见下方「当前状态」。
+
+## 安装
+
+### 便携版
+
+从 [Releases](https://github.com/Kissshot-2003/THzip-SpellArchive/releases) 下载
+`THzip-SpellArchive-<版本>-setup.exe`（安装版）或便携 zip（解压即用）。
+
+便携版：exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式，
+配置与日志都写在 `<exe 目录>\config\`，不动 `%APPDATA%`。
+
+> Windows 可能提示「未知发布者」——本项目尚未购买代码签名证书。
+> 详见 [`docs/legal/signing.md`](docs/legal/signing.md)。
+
+### 从源码构建
+
+需要 Rust 1.93+（`rust-toolchain.toml` 锁 stable，edition 2024）。
+
+```powershell
+git clone https://github.com/Kissshot-2003/THzip-SpellArchive.git
+cd THzip-SpellArchive
+cargo build --release -p thzip-app -p thzip-cli
+```
+
+产物在 `target/release/`。`powershell -File scripts/package.ps1` 会做完整的
+发布打包（含便携目录、校验和、安装包，需要 Inno Setup）。
+
+## 使用
 
 ```powershell
 cargo run -p thzip-app                           # 启动 GUI
@@ -14,16 +64,17 @@ cargo run -p thzip-app -- <归档路径>              # 启动并直接打开归
 cargo run -p thzip-app -- --extract-here <归档>   # 打开并解压到当前文件夹
 cargo run -p thzip-app -- --extract-to <归档>     # 打开并解压到单独文件夹
 cargo run -p thzip-app -- --add <路径...>         # 打开“添加到 zip”对话框
+
 cargo run -p thzip-cli -- sniff <文件>            # 格式嗅探
-cargo run -p thzip-cli -- list <归档>            # 列出条目（zip / 7z / tar 家族）
+cargo run -p thzip-cli -- list <归档>            # 列出条目
 cargo run -p thzip-cli -- test <归档>            # CRC 完整性测试
 cargo run -p thzip-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
-cargo run -p thzip-cli -- pack <输出> <输入...>      # 格式由扩展名决定；7z 可加 --volume-size <MiB>
+cargo run -p thzip-cli -- pack <输出> <输入...>   # 格式由扩展名决定
 # sniff / list / test / extract / pack 都支持 --json，输出单行机读结果
-cargo test --workspace                           # 204 个单元 / 集成 / 归档格式用例
+
+cargo test --workspace                           # 212 个单元 / 集成 / 归档格式用例
 cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / 解压 / 7z 打包基准
 cargo build --release -p thzip-app --no-default-features   # 精简版：省掉屏幕阅读器与 SVG 文字
-powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
 ```
 
 ## 体积
@@ -73,7 +124,7 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 |---|---|
 | 格式嗅探（magic bytes） | 可用 |
 | 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护（覆盖整条祖先链） | 可用，含测试。限额 9 项可调 + 三档预设；写盘后用 `GetFinalPathNameByHandleW` 复核句柄真实路径（堵 TOCTOU）；解压前预检可用空间、FAT32 4 GiB 上限与套娃归档 |
-| zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA / XZ；不支持方法预检提示；同名自动 `~1` 改名 |
+| zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA / XZ；**AES 加密可与任意上述压缩方法组合**（含 AES+LZMA / AES+XZ）；不支持方法预检提示；同名自动 `~1` 改名 |
 | zip 写 | **可用**：Store / Deflate / BZip2 / Zstd、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
 | 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密、`.7z.001` 分卷拼接 |
 | 7z 写 | **可用**：LZMA2（级别 / 字典可调）/ COPY、AES-256 头加密、Windows 属性、分卷创建（`.7z.001`）、原子替换；未加密包支持追加（解包重建） |
@@ -119,8 +170,48 @@ README/CHANGELOG/LICENSE/NOTICE、third_party 许可证复制到 `dist/THzip-Spe
 - exe 名、单实例键、日志文件名已更新；升级期间若旧版仍在运行，新版会把启动参数交给旧版，待旧版退出后再启动新版。
 - 自定义主题包在旧安装目录时，请复制到新目录的 `themes/` 或重新导入。
 
-## 设计文档
+## 文档
 
-- `../SpellArchive 开发方案（Rust 版）v2.1.md`：产品设计与完整规范
-- `ROADMAP.md`：阶段路线图与验收标准
-- `CHANGELOG.md`：版本变更记录
+- [`HANDOVER.md`](HANDOVER.md)：交接文档——现状、架构、已知坑、每个决定的理由
+- [`ROADMAP.md`](ROADMAP.md)：阶段路线图与验收标准
+- [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)：怎么把改动送上来
+- [`SECURITY.md`](SECURITY.md)：安全政策与威胁模型
+- [`docs/theme_spec.md`](docs/theme_spec.md)：主题包 schema 与 ResKey
+- [`docs/legal/unrar-note.md`](docs/legal/unrar-note.md)：RAR 相关的许可边界
+- [`docs/legal/signing.md`](docs/legal/signing.md)：代码签名怎么配
+
+## 贡献
+
+欢迎 PR 与 issue。动手前请读 [`CONTRIBUTING.md`](CONTRIBUTING.md)，里面写了
+代码分层约束、提交前要跑的检查、以及哪些地方容易被改坏。
+
+安全问题请走 [`SECURITY.md`](SECURITY.md) 里的私有渠道，不要开公开 issue。
+
+行为准则见 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)。
+
+## 许可
+
+| 部分 | 许可 |
+|---|---|
+| 代码 | [MIT](LICENSE) —— 可商用 |
+| 内置像素素材 | CC BY-NC-SA 4.0 —— **禁止商用** |
+| 内嵌 Noto Sans SC 子集 | SIL OFL 1.1 |
+| RAR 解码引擎（`unrar-rs`） | Apache-2.0 + UnRAR 条件（允许解压，禁止开发 RAR 压缩器） |
+
+**商用前必须替换内置素材。** 完整边界见 [`NOTICE.md`](NOTICE.md)。
+
+本项目是东方 Project 二次同人作品，与上海爱丽丝幻乐团、ZUN 无任何关联，
+遵循「東方Project 二次創作ガイドライン」。**禁止商用。**
+
+## 致谢
+
+- [egui](https://github.com/emilk/egui) / [eframe](https://github.com/emilk/egui) —— 界面框架
+- [zip](https://github.com/zip-rs/zip2) —— zip 格式读写
+- [sevenz-rust2](https://github.com/ip7z/7z-rust) —— 7z 格式读写
+- [unrar-rs](https://github.com/scryer-media/rarpar) —— RAR 解码
+- [lzma-rust2](https://github.com/jonasbb/lzma-rust) —— LZMA / XZ 解码
+- [RustCrypto](https://github.com/RustCrypto) —— AES / HMAC / SHA-1 / PBKDF2
+- [egui_kittest](https://github.com/emilk/egui/tree/master/crates/egui_kittest) —— 无头 UI 测试
+- [7-Zip](https://www.7-zip.org/) —— 归档格式的事实标准，差分测试的对照实现
+

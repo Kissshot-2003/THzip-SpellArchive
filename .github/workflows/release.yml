@@ -52,7 +52,7 @@ jobs:
           Compress-Archive -Path dist/THzip-SpellArchive -DestinationPath dist/THzip-SpellArchive.zip -Force
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/THzip-SpellArchive-*-setup.exe

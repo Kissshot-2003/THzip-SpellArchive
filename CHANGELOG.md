@@ -23,7 +23,7 @@
 ### 变更
 
 - 最低 Rust 版本提升到 1.93。
-- `app.rs` 的状态类型拆分到 `app/state.rs`，为后续模块化铺路。
+- `app.rs` 拆分：状态 → `state.rs`、搜索 → `filter.rs`、打包 → `pack.rs`、改名 → `relocate.rs`、测试 → `tests.rs`，主文件约 1380 行。
 - `sevenz-rust2` 升级到 0.24.2。
 
 ### 修复

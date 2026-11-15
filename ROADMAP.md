@@ -76,8 +76,8 @@
 
 - [ ] 单文件流尺寸懒加载，去掉打开时双读（HANDOVER 24）
 - [ ] RAR 超大条目流式中转，替代整文件落盘
-- [x] 拆分 `app.rs` 第一批：类型与默认值移到 `app/state.rs`，主文件从 2627 降到约 2380 行
-- [ ] 继续拆分 `filter/`、`relocate/`、`pack/`，目标主文件 < 1500 行
+- [x] 拆分 `app.rs`：类型 → `app/state.rs`，搜索 → `filter.rs`，打包 → `pack.rs`，改名 → `relocate.rs`，测试 → `tests.rs`
+- [x] 主文件从 2627 行降到约 1380 行（目标 < 1500 已达成）
 - [ ] 单实例 handoff 轮询改 `WM_COPYDATA`（HANDOVER 28）
 - [x] 拆分后 138 个测试不做修改仍全绿
 

@@ -76,17 +76,17 @@
 
 - [x] 10k 条目 zip 打开 328 ms → 8 ms：≤ 8 MiB 包整包读入内存，避免逐条目 seek
 - [x] 单文件流尺寸：gz 读尾部 ISIZE、zstd/lz4 读帧头；bz2/xz 保留完整解码回退（HANDOVER 24）
-- [ ] RAR 超大条目流式中转，替代整文件落盘
+- [ ] RAR 超大条目流式中转（阻塞：unrar-ng 只提供整条 `read` 或 `extract_to` 文件，无流式回调）
 - [x] 拆分 `app.rs`：类型 → `app/state.rs`，搜索 → `filter.rs`，打包 → `pack.rs`，改名 → `relocate.rs`，测试 → `tests.rs`
 - [x] 主文件从 2627 行降到约 1380 行（目标 < 1500 已达成）
-- [ ] 单实例 handoff 轮询改 `WM_COPYDATA`（HANDOVER 28）
+- [ ] 单实例 handoff 轮询改 `WM_COPYDATA`（阻塞：winit 持有 WndProc，需要消息窗口 + 子类化与不安全代码；当前 250/500 ms 轮询成本可接受）
 - [x] 拆分后 138 个测试不做修改仍全绿
 
 **退出标准**：冷启动耗时与峰值内存有前后对比；`app.rs` 单文件低于 800 行。
 
 ## 7. Phase 5：发布 1.0
 
-- [ ] 代码签名证书接入 CI
+- [ ] 代码签名证书接入 CI（阻塞：没有可用的代码签名证书）
 - [x] Inno 安装包实测：静默安装 / 启动 / 卸载通过；安装版正确使用 `%APPDATA%`（非便携）
 - [ ] 迁移回归：旧 `SpellArchive` → `THzip-SpellArchive` 配置与注册表
 - [ ] 文档定稿：README 能力表、HANDOVER、本路线图

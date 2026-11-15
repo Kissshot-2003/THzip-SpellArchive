@@ -76,7 +76,10 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup failed"
         }
+        $installer = Join-Path $root "dist\THzip-SpellArchive-$Version-setup.exe"
+        $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-Host "Installer written to dist/THzip-SpellArchive-$Version-setup.exe"
+        Write-Host "Installer SHA-256: $installerHash"
     } else {
         Write-Host "Inno Setup (iscc) not found; only the portable folder was staged."
     }

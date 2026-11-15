@@ -80,7 +80,8 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 `scripts/package.ps1` 从 `Cargo.toml` 读取版本并执行 release 构建，把 GUI 与 CLI 两个 exe、themes、
 README/CHANGELOG/LICENSE/NOTICE、third_party 许可证复制到 `dist/THzip-SpellArchive/`，同时生成 `SHA256SUMS.txt`。
 版本号不一致会直接失败。若 PATH 或常见安装目录中有 Inno Setup 的 `iscc`，还会生成
-`dist/THzip-SpellArchive-<version>-setup.exe`（`packaging/THzip-SpellArchive.iss`，安装到用户目录，无需管理员）。
+`dist/THzip-SpellArchive-<version>-setup.exe`（`packaging/THzip-SpellArchive.iss`，安装到用户目录，无需管理员），
+并打印安装包 SHA-256。
 
 ## 交接与后续
 

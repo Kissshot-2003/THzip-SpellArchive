@@ -138,6 +138,9 @@ fn list(path: &Path, password: Option<SecretString>, json: bool) -> ExitCode {
                 reader.kind().label(),
                 reader.entries().len()
             );
+            if let Some(comment) = reader.comment() {
+                println!("注释: {comment}");
+            }
             for entry in reader.entries() {
                 let flag = if entry.encrypted { " 🔒" } else { "" };
                 let kind = if entry.kind.is_dir() { "d" } else { "-" };

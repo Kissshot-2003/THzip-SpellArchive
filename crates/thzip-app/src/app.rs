@@ -616,7 +616,7 @@ impl ThzipApp {
         self.status = self.tr.t(TextKey::ExportingTheme);
     }
 
-    /// 双击条目时读取该条目到内存，弹窗预览文本或 PNG。
+    /// 双击条目时读取该条目到内存，弹窗预览文本或常见图片。
     pub fn preview_entry(&mut self, index: usize) {
         let Some(reader) = self.reader.clone() else {
             return;
@@ -971,7 +971,7 @@ impl ThzipApp {
                 preview.failed = failed;
                 preview.data = data;
                 let lower = preview.name.to_ascii_lowercase();
-                if lower.ends_with(".png") {
+                if is_preview_image(&lower) {
                     if let Ok(image) = image::load_from_memory(&preview.data) {
                         let rgba = image.to_rgba8();
                         preview.image = Some((
@@ -1284,6 +1284,13 @@ impl eframe::App for ThzipApp {
         };
         ctx.request_repaint_after(delay);
     }
+}
+
+fn is_preview_image(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".bmp"]
+        .iter()
+        .any(|extension| name.ends_with(extension))
 }
 
 fn file_name(path: &std::path::Path) -> String {

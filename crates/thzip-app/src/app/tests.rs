@@ -272,3 +272,15 @@ fn regex_rename_moves_directory_children() {
         vec![(0, "第1季".to_owned()), (1, "第1季/a.txt".to_owned())]
     );
 }
+
+#[test]
+fn detects_preview_image_extensions() {
+    use super::is_preview_image;
+    assert!(is_preview_image("a.png"));
+    assert!(is_preview_image("a.JPG"));
+    assert!(is_preview_image("a.jpeg"));
+    assert!(is_preview_image("a.gif"));
+    assert!(is_preview_image("a.bmp"));
+    assert!(!is_preview_image("a.txt"));
+    assert!(!is_preview_image("png"));
+}

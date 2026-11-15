@@ -5,7 +5,7 @@ use crate::i18n::TextKey;
 use crate::theme::ResKey;
 
 pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let local_files = app.tr.t(TextKey::LocalFiles);
     let go_up = app.tr.t(TextKey::GoUp);
     let dir_label = app.dir.display().to_string();

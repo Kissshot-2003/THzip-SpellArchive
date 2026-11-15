@@ -72,7 +72,14 @@ impl ZipArchiveWriter {
                     if entry.encrypted() {
                         return Err(ArchiveError::Unsupported(FailReason::EncryptedRewrite));
                     }
-                    names.insert(entry.name().to_lowercase());
+                    // zip 9 的 `name()` 对非 UTF-8 名字返回 Err；这里只是去重，退回 lossy 即可。
+                    let name = entry
+                        .name()
+                        .map(|name| name.to_lowercase())
+                        .unwrap_or_else(|_| {
+                            String::from_utf8_lossy(entry.name_raw()).to_lowercase()
+                        });
+                    names.insert(name);
                 }
             }
         }
@@ -91,7 +98,9 @@ impl ZipArchiveWriter {
             }
             atomic.file_mut().write_all(&buffer[..read])?;
         }
-        atomic.reopen_rw()?;
+        // 复制完成后必须回到起点：zip 追加要从头解析中央目录，
+        // 句柄位置停在文件尾会直接读成「空归档」。
+        atomic.rewind()?;
         let mut inner = zip::ZipWriter::new_append(atomic).map_err(map_zip_error)?;
         inner.set_flush_on_finish_file(true);
         Ok(Self {
@@ -224,8 +233,8 @@ impl ArchiveWriter for ZipArchiveWriter {
     }
 
     fn set_comment(&mut self, text: &str) -> Result<(), ArchiveError> {
-        self.writer()?.set_comment(text);
-        Ok(())
+        // zip 9 起注释长度有硬上限（32 KiB），超了会返回错误，不能再当无返回值的 setter 用。
+        self.writer()?.set_comment(text).map_err(map_zip_error)
     }
 
     fn finish(mut self: Box<Self>) -> Result<FinishReport, ArchiveError> {

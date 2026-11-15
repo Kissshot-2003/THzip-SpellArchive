@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use thzip_core::limits::Limits;
 use thzip_core::safety::write_atomic;
 
+use crate::limit_fields::{LimitField, normalize};
+
 /// 当前配置 schema。新增字段时递增，并在 `load` 里补迁移。
-pub const CURRENT_SCHEMA: u32 = 5;
+pub const CURRENT_SCHEMA: u32 = 6;
 
 /// 打包任务模板：只保存格式与压缩参数，绝不保存密码。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15,6 +18,96 @@ pub struct PackTemplate {
     pub zip_method: String,
     pub sevenz_level: u32,
     pub sevenz_dict_mib: u32,
+}
+
+/// 限额的落盘形态。`Limits` 不带 serde，这里按字段镜像一份，
+/// 读写都走 `LimitField`，字段增减时不会漏项。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LimitPrefs {
+    pub max_total_bytes: u64,
+    pub max_entry_bytes: u64,
+    pub max_entries: u64,
+    pub max_ratio_streamed: u64,
+    pub max_path_depth: u64,
+    pub max_path_len: u64,
+    pub max_dict_size: u64,
+    /// 套娃层数上限。旧配置文件没有这一项，读出 0 时回落预设值。
+    pub max_nesting: u64,
+    /// 解压后要保留的可用空间。同上。
+    pub min_free_space: u64,
+}
+
+impl Default for LimitPrefs {
+    fn default() -> Self {
+        Self::from_limits(&Limits::default())
+    }
+}
+
+impl LimitPrefs {
+    pub fn from_limits(limits: &Limits) -> Self {
+        let mut prefs = Self {
+            max_total_bytes: 0,
+            max_entry_bytes: 0,
+            max_entries: 0,
+            max_ratio_streamed: 0,
+            max_path_depth: 0,
+            max_path_len: 0,
+            max_dict_size: 0,
+            max_nesting: 0,
+            min_free_space: 0,
+        };
+        for field in LimitField::ALL {
+            prefs.write(field, limits.get(field));
+        }
+        prefs
+    }
+
+    /// 还原成 core 的限额。
+    ///
+    /// 0 表示「这一项没配置」——旧版本写下的文件缺字段、或用户手改删掉了。
+    /// 这种情况必须保留预设值：把上限写成 0 会让所有解压都被限额拦住。
+    /// 非 0 但越界的值由 `set` 拒绝，同样保留预设值，不做静默截断。
+    pub fn to_limits(&self) -> Limits {
+        let mut limits = Limits::default();
+        for field in LimitField::ALL {
+            let value = self.read(field);
+            if value == 0 {
+                continue;
+            }
+            let _ = limits.set(field, value);
+        }
+        normalize(&mut limits);
+        limits
+    }
+
+    pub fn read(&self, field: LimitField) -> u64 {
+        match field {
+            LimitField::TotalBytes => self.max_total_bytes,
+            LimitField::EntryBytes => self.max_entry_bytes,
+            LimitField::Entries => self.max_entries,
+            LimitField::RatioStreamed => self.max_ratio_streamed,
+            LimitField::PathDepth => self.max_path_depth,
+            LimitField::PathLen => self.max_path_len,
+            LimitField::DictSize => self.max_dict_size,
+            LimitField::Nesting => self.max_nesting,
+            LimitField::MinFreeSpace => self.min_free_space,
+        }
+    }
+
+    pub fn write(&mut self, field: LimitField, value: u64) {
+        match field {
+            LimitField::TotalBytes => self.max_total_bytes = value,
+            LimitField::EntryBytes => self.max_entry_bytes = value,
+            LimitField::Entries => self.max_entries = value,
+            LimitField::RatioStreamed => self.max_ratio_streamed = value,
+            LimitField::PathDepth => self.max_path_depth = value,
+            LimitField::PathLen => self.max_path_len = value,
+            LimitField::DictSize => self.max_dict_size = value,
+            LimitField::Nesting => self.max_nesting = value,
+            LimitField::MinFreeSpace => self.min_free_space = value,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,10 +123,23 @@ pub struct Prefs {
     /// 归档表排序键：name / size / packed / ratio / method / time。
     pub sort_key: Option<String>,
     pub sort_asc: bool,
-    /// 主窗口内尺寸（逻辑点）；只恢复大小，不恢复位置，避免换显示器后跑出屏幕。
+    /// 主窗口内尺寸（逻辑点）。
     pub window_size: Option<[f32; 2]>,
+    /// 主窗口左上角（逻辑点）。启动时若不在任何显示器内会被拉回主屏。
+    pub window_pos: Option<[f32; 2]>,
+    /// 归档表各列宽度（名称/大小/压缩后/比率/方法/时间/CRC/标记）。
+    /// 存空或长度不足时按内置默认值补齐，旧配置无需迁移。
+    pub column_widths: Option<Vec<f32>>,
     /// 打包任务模板；密码永远不入库。
     pub pack_templates: Vec<PackTemplate>,
+    /// 安全限额；缺省时用 core 的默认档。
+    pub limits: LimitPrefs,
+    pub reduce_motion: bool,
+    pub high_contrast: bool,
+    /// 列表只看异常条目（失败/跳过/CRC 不符）。
+    pub only_anomalies: bool,
+    /// 用 DPAPI 加密保存最近一次输入的密码；默认关闭。
+    pub remember_password: bool,
 }
 
 impl Default for Prefs {
@@ -49,7 +155,14 @@ impl Default for Prefs {
             sort_key: None,
             sort_asc: true,
             window_size: None,
+            window_pos: None,
+            column_widths: None,
             pack_templates: Vec::new(),
+            limits: LimitPrefs::default(),
+            reduce_motion: false,
+            high_contrast: false,
+            only_anomalies: false,
+            remember_password: false,
         }
     }
 }
@@ -245,7 +358,50 @@ mod tests {
         assert!(prefs.sort_asc);
         assert_eq!(prefs.sort_key, None);
         assert_eq!(prefs.window_size, None);
+        assert_eq!(prefs.window_pos, None);
+        assert_eq!(prefs.column_widths, None);
+        assert!(!prefs.reduce_motion);
+        assert!(!prefs.high_contrast);
+        assert!(!prefs.only_anomalies);
+        assert!(!prefs.remember_password);
         assert_eq!(prefs.schema, super::CURRENT_SCHEMA);
+    }
+
+    #[test]
+    fn missing_limits_fall_back_to_core_defaults() {
+        let prefs: Prefs = toml::from_str("locale = \"en-US\"\n").unwrap();
+        let limits = prefs.limits.to_limits();
+        let default = thzip_core::limits::Limits::default();
+        for field in crate::limit_fields::LimitField::ALL {
+            assert_eq!(limits.get(field), default.get(field), "{field:?}");
+        }
+    }
+
+    #[test]
+    fn limits_survive_save_and_load() {
+        let mut limits = thzip_core::limits::Limits::default();
+        limits.set(crate::limit_fields::LimitField::Entries, 12_345);
+        limits.set(crate::limit_fields::LimitField::PathLen, 512);
+        let prefs = Prefs {
+            limits: super::LimitPrefs::from_limits(&limits),
+            ..Prefs::default()
+        };
+        let text = toml::to_string_pretty(&prefs).unwrap();
+        let parsed: Prefs = toml::from_str(&text).unwrap();
+        let restored = parsed.limits.to_limits();
+        assert_eq!(restored.max_entries, 12_345);
+        // normalize 会把过小的路径长度抬到 260，512 应原样保留。
+        assert_eq!(restored.max_path_len, 512);
+    }
+
+    #[test]
+    fn parses_window_geometry_and_column_widths() {
+        let prefs: Prefs = toml::from_str(
+            "window_pos = [-12.0, 40.0]\ncolumn_widths = [300.0, 90.0, 90.0, 60.0, 80.0, 120.0, 70.0, 40.0]\n",
+        )
+        .unwrap();
+        assert_eq!(prefs.window_pos, Some([-12.0, 40.0]));
+        assert_eq!(prefs.column_widths.map(|widths| widths.len()), Some(8));
     }
 
     #[test]

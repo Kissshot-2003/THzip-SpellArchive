@@ -70,7 +70,10 @@ pub fn rewrite_with_names(
     }
 
     let entries = reader.entries().to_vec();
-    let finals = final_names(&entries, remove, rename)?;
+    // 7z 的条目名由它自己的头记录，重命名后仍要靠原名定位，
+    // 因此不做自动去重（改名撞车直接报错）；zip / tar 允许自动加 ~n。
+    let dedupe = !matches!(kind, ArchiveKind::SevenZ);
+    let finals = final_names(&entries, remove, rename, dedupe)?;
     let keep: Vec<EntryId> = entries
         .iter()
         .filter(|entry| !remove.contains(&entry.id))
@@ -175,13 +178,34 @@ pub fn rewrite_with_names(
 ///
 /// 只有**改名引入**的重名才算错误：归档自带的重名条目（7z 允许）应当原样保留，
 /// 否则给无关条目改名也会被牵连失败。改名产生的名字若与其他任何条目重名则报错。
+/// 解析出每个保留条目的最终名字。
+///
+/// `dedupe` 为真时：不改名的条目也会过一遍 [`normalize_entry_name`]，
+/// 归一化后与已占用名字撞车就自动加 `~n`。这不只是「顺手清理」——
+/// 归档里同时存在 `a.txt` 和 `a.txt.`（或 `CON`、`x:y`）时，原样写回
+/// 会让目标文件系统把两个条目折叠成一个，静默丢数据。
 fn final_names(
     entries: &[ArchiveEntry],
     remove: &HashSet<EntryId>,
     rename: &HashMap<EntryId, String>,
+    dedupe: bool,
 ) -> Result<HashMap<EntryId, String>, ArchiveError> {
-    let mut finals = HashMap::with_capacity(entries.len());
+    let mut finals: HashMap<EntryId, String> = HashMap::with_capacity(entries.len());
     let mut renamed: HashSet<EntryId> = HashSet::new();
+    let mut used: HashSet<String> = HashSet::with_capacity(entries.len());
+
+    // 先收集所有「不改名条目」的归一化名字。改名条目必须避开这一整批，
+    // 否则改名结果会抢走别人的位置，而对方还没轮到处理。
+    let mut originals: HashSet<String> = HashSet::new();
+    if dedupe {
+        for entry in entries {
+            if remove.contains(&entry.id) || rename.contains_key(&entry.id) {
+                continue;
+            }
+            let name = normalize_entry_name(entry.display.trim_end_matches('/'))?;
+            originals.insert(name.to_lowercase());
+        }
+    }
 
     for entry in entries {
         if remove.contains(&entry.id) {
@@ -198,25 +222,32 @@ fn final_names(
                         }));
                     }
                 }
+                let key = name.to_lowercase();
+                // 改名撞车一律报错：用户给的名字没法自动「猜」出想要的替代。
+                if dedupe && (used.contains(&key) || originals.contains(&key)) {
+                    return Err(ArchiveError::Other(FailReason::RenameDuplicate {
+                        name: name.clone(),
+                    }));
+                }
                 renamed.insert(entry.id);
                 name
             }
+            None if dedupe => {
+                let base = normalize_entry_name(entry.display.trim_end_matches('/'))?;
+                let mut candidate = base.clone();
+                let mut n = 0u32;
+                while used.contains(&candidate.to_lowercase()) {
+                    n += 1;
+                    candidate = crate::plan::with_suffix(std::path::Path::new(&base), n)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                }
+                candidate
+            }
             None => entry.display.to_string(),
         };
+        used.insert(final_name.to_lowercase());
         finals.insert(entry.id, final_name);
-    }
-
-    // 统计最终名字的出现次数：改名得到的名字必须独占。
-    let mut counts: HashMap<String, usize> = HashMap::with_capacity(finals.len());
-    for name in finals.values() {
-        *counts.entry(name.to_lowercase()).or_insert(0) += 1;
-    }
-    for (id, name) in &finals {
-        if renamed.contains(id) && counts.get(&name.to_lowercase()).copied().unwrap_or(0) > 1 {
-            return Err(ArchiveError::Other(FailReason::RenameDuplicate {
-                name: name.clone(),
-            }));
-        }
     }
 
     Ok(finals)

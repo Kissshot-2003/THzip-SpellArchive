@@ -12,7 +12,7 @@ license = "MIT"
 authors = ["THzip-SpellArchive contributors"]
 
 [workspace.dependencies]
-thzip-core = { path = "crates/thzip-core" }
+thzip-core = { path = "crates/thzip-core", version = "0.2.0" }
 thiserror = "2"
 zeroize = "1"
 encoding_rs = "0.8"
@@ -38,7 +38,7 @@ resvg = { version = "0.45", default-features = false, features = [] }
 fontdb = "0.23"
 regex = "1"
 liblzma = { version = "0.4", features = ["static"] }
-zip = { version = "4.6", default-features = false, features = [
+zip = { version = "9.6", default-features = false, features = [
     "deflate",
     "deflate-flate2-zlib-rs",
     "deflate64",
@@ -61,6 +61,8 @@ unrar-ng = "0.7"
 single-instance = "0.3"
 tray-icon = "0.24"
 winreg = "0.56"
+libc = "0.2"
+proptest = "1"
 
 [profile.release]
 opt-level = 3

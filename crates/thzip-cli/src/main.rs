@@ -344,6 +344,19 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
             PlanWarning::UnsupportedMethod { id, method } => {
                 println!("  不支持的压缩方法（条目 {id}）: {}", method.label())
             }
+            PlanWarning::InsufficientSpace {
+                required,
+                reserved,
+                available,
+            } => println!(
+                "  目标盘空间不足: 需要 {required} 字节，需保留 {reserved} 字节，可用 {available} 字节"
+            ),
+            PlanWarning::NestedArchive { id, depth } => {
+                println!("  包含嵌套归档（条目 {id}，第 {depth} 层）")
+            }
+            PlanWarning::LargeFileOnFat32 { id, size } => {
+                println!("  单文件 {size} 字节超过 FAT32 的 4 GiB 上限（条目 {id}）")
+            }
         }
     }
 }
@@ -512,6 +525,7 @@ fn pack(args: &[String]) -> ExitCode {
     let sevenz = SevenZOptions {
         level: sevenz_level,
         dict_size: sevenz_dict_mib.saturating_mul(1024 * 1024),
+        threads: 0,
     };
     let detail = match kind {
         ArchiveKind::Zip => {

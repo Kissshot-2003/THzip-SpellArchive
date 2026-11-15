@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use eframe::egui;
-use thzip_core::plan::OverwritePolicy;
+use thzip_core::plan::{OverwritePolicy, PlanWarning};
 use thzip_core::secret::SecretString;
 use thzip_core::types::ArchiveKind;
 
@@ -21,7 +21,7 @@ fn preview_window(app: &mut ThzipApp, ctx: &egui::Context) {
     if app.preview.is_none() {
         return;
     }
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let title_prefix = app.tr.t(TextKey::Preview);
     let loading = app.tr.t(TextKey::PreviewLoading);
     let binary = app.tr.t(TextKey::PreviewBinary);
@@ -94,7 +94,7 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
         return;
     }
 
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let title = app.tr.t(TextKey::PackTitle);
     let add_files = app.tr.t(TextKey::AddFiles);
     let add_folder = app.tr.t(TextKey::AddFolder);
@@ -461,7 +461,7 @@ fn pack_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
 }
 
 fn relocate_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let Some(dialog) = app.relocate.as_mut() else {
         return;
     };
@@ -561,20 +561,35 @@ fn relocate_dialog(app: &mut ThzipApp, ctx: &egui::Context) {
 }
 
 fn password_prompt(app: &mut ThzipApp, ctx: &egui::Context) {
+    let remember_available = app.remember_password;
     let Some(prompt) = app.pending_password.as_mut() else {
         return;
     };
+
+    // 只在首次展示时尝试解密：之后用户清空输入不应被旧密码再次填回去。
+    if !prompt.prefilled {
+        prompt.prefilled = true;
+        if remember_available
+            && prompt.input.is_empty()
+            && let Some(saved) = crate::secret_store::load()
+        {
+            prompt.input = saved.expose().to_owned();
+        }
+    }
 
     let title = app.tr.t(TextKey::PasswordPrompt);
     let cancel_label = app.tr.t(TextKey::Cancel);
     let open_label = app.tr.t(TextKey::Open);
     let password_hint = app.tr.t(TextKey::Password);
+    let remember_label = app.tr.t(TextKey::RememberPassword);
+    let remember_note = app.tr.t(TextKey::RememberPasswordNote);
     let path = prompt.path.display().to_string();
+    let mut remember = remember_available;
     let mut confirmed = false;
     let mut cancelled = false;
     let mut open = true;
 
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     egui::Window::new(title)
         .open(&mut open)
         .resizable(true)
@@ -597,6 +612,15 @@ fn password_prompt(app: &mut ThzipApp, ctx: &egui::Context) {
             if let Some(error) = &prompt.error {
                 ui.label(egui::RichText::new(error).color(palette.error));
             }
+            ui.add_space(6.0);
+            ui.checkbox(&mut remember, remember_label);
+            if remember {
+                ui.label(
+                    egui::RichText::new(remember_note)
+                        .size(11.0)
+                        .color(palette.text_sub),
+                );
+            }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if crate::ui::primary_button(ui, &palette, open_label).clicked() {
@@ -610,6 +634,23 @@ fn password_prompt(app: &mut ThzipApp, ctx: &egui::Context) {
 
     if confirmed {
         if let Some(prompt) = app.pending_password.take() {
+            if remember && !prompt.input.is_empty() {
+                if let Err(err) =
+                    crate::secret_store::save(&SecretString::new(prompt.input.clone()))
+                {
+                    crate::logging::warn_fields(
+                        "secret",
+                        "remember failed",
+                        &[("error", &err.to_string())],
+                    );
+                }
+            } else if !remember {
+                crate::secret_store::clear();
+            }
+            if remember != app.remember_password {
+                app.remember_password = remember;
+                app.touch_settings();
+            }
             app.open_path(prompt.path, Some(SecretString::new(prompt.input)));
         }
     } else if cancelled || !open {
@@ -622,7 +663,7 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
         return;
     };
 
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let title = app.tr.t(TextKey::Precheck);
     let start_label = app.tr.t(TextKey::StartExtract);
     let cancel_label = app.tr.t(TextKey::Cancel);
@@ -663,6 +704,25 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
     let encrypted_notice = app.tr.t(TextKey::PrecheckEncrypted);
     let low_space_notice = app.tr.t(TextKey::PrecheckLowSpace);
     let conflict_policy = app.tr.t(TextKey::ConflictPolicy);
+    let risk_title = app.tr.t(TextKey::RiskTitle);
+    let risk_ack = app.tr.t(TextKey::RiskAck);
+    // 三类高风险条件在 app 侧归一化：core 只提供 BombSuspected 与 free_space，
+    // 空间与 FAT32 单文件上限由预检结果直接判断。
+    let mut risk_lines: Vec<String> = plan
+        .warnings
+        .iter()
+        .filter(|warning| matches!(warning, PlanWarning::BombSuspected { .. }))
+        .map(|warning| crate::i18n::warnings::warning(app.locale, warning))
+        .collect();
+    if let Some(free) = plan.free_space
+        && plan.total_bytes > free
+    {
+        risk_lines.push(app.tr.t(TextKey::PrecheckLowSpace));
+    }
+    if plan.largest_entry > FAT32_MAX_FILE && crate::volume::is_fat32(&pending.target) {
+        risk_lines.push(app.tr.t(TextKey::RiskFat32));
+    }
+    let risky = !risk_lines.is_empty();
 
     let mut start = false;
     let mut cancel = false;
@@ -752,6 +812,30 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(&low_space_notice).color(palette.error));
             }
 
+            if risky {
+                ui.add_space(6.0);
+                egui::Frame::default()
+                    .fill(palette.error.gamma_multiply(0.16))
+                    .stroke(egui::Stroke::new(1.0, palette.error))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::same(10))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(&risk_title)
+                                .strong()
+                                .color(palette.error),
+                        );
+                        for line in risk_lines.iter().take(crate::i18n::warnings::MAX_LINES) {
+                            ui.label(egui::RichText::new(line).size(12.0).color(palette.error));
+                        }
+                        if risk_lines.len() > crate::i18n::warnings::MAX_LINES {
+                            ui.label("…");
+                        }
+                        ui.add_space(4.0);
+                        ui.checkbox(&mut pending.risk_acknowledged, &risk_ack);
+                    });
+            }
+
             ui.add_space(10.0);
             ui.label(
                 egui::RichText::new(&conflict_policy)
@@ -774,9 +858,13 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
 
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if crate::ui::primary_button(ui, &palette, start_label).clicked() {
-                    start = true;
-                }
+                // 高风险时按钮禁用而不是直接隐藏：用户能看到"为什么不能点"。
+                let ready = !risky || pending.risk_acknowledged;
+                ui.add_enabled_ui(ready, |ui| {
+                    if crate::ui::primary_button(ui, &palette, start_label).clicked() {
+                        start = true;
+                    }
+                });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(cancel_label).clicked() {
                         cancel = true;
@@ -791,3 +879,6 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
         app.pending_extract = None;
     }
 }
+
+/// FAT32 单文件上限：4 GiB - 1。
+const FAT32_MAX_FILE: u64 = 4 * 1024 * 1024 * 1024 - 1;

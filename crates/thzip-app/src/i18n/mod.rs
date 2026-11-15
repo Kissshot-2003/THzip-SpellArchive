@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use thzip_core::limits::LimitProfile;
+
+use crate::limit_fields::LimitField;
 use crate::theme::Theme;
 
 pub mod errors;
@@ -69,6 +72,8 @@ pub enum TextKey {
     StatusReady,
     About,
     Cancel,
+    Pause,
+    Resume,
     StartExtract,
     Precheck,
     ExtractTo,
@@ -132,6 +137,8 @@ pub enum TextKey {
     ColRatio,
     ColMethod,
     ColTime,
+    ColCrc,
+    CrcMismatch,
     ColFlags,
     FlagLocked,
     FlagSpoofed,
@@ -268,6 +275,24 @@ pub enum TextKey {
     ShellExtractHere,
     ShellExtractTo,
     ShellAddToZip,
+    NoMatches,
+    OnlyAnomalies,
+    SuspiciousName,
+    CommandPalette,
+    CommandPaletteHint,
+    CommandNoMatch,
+    CmdToggleTheme,
+    CmdToggleLanguage,
+    ReduceMotion,
+    HighContrast,
+    LimitsTitle,
+    LimitsPreset,
+    LimitsInvalid,
+    RiskTitle,
+    RiskAck,
+    RiskFat32,
+    RememberPassword,
+    RememberPasswordNote,
 }
 
 impl TextKey {
@@ -298,6 +323,8 @@ impl TextKey {
         TextKey::StatusReady,
         TextKey::About,
         TextKey::Cancel,
+        TextKey::Pause,
+        TextKey::Resume,
         TextKey::StartExtract,
         TextKey::Precheck,
         TextKey::ExtractTo,
@@ -361,6 +388,8 @@ impl TextKey {
         TextKey::ColRatio,
         TextKey::ColMethod,
         TextKey::ColTime,
+        TextKey::ColCrc,
+        TextKey::CrcMismatch,
         TextKey::ColFlags,
         TextKey::FlagLocked,
         TextKey::FlagSpoofed,
@@ -497,6 +526,24 @@ impl TextKey {
         TextKey::ShellExtractHere,
         TextKey::ShellExtractTo,
         TextKey::ShellAddToZip,
+        TextKey::NoMatches,
+        TextKey::OnlyAnomalies,
+        TextKey::SuspiciousName,
+        TextKey::CommandPalette,
+        TextKey::CommandPaletteHint,
+        TextKey::CommandNoMatch,
+        TextKey::CmdToggleTheme,
+        TextKey::CmdToggleLanguage,
+        TextKey::ReduceMotion,
+        TextKey::HighContrast,
+        TextKey::LimitsTitle,
+        TextKey::LimitsPreset,
+        TextKey::LimitsInvalid,
+        TextKey::RiskTitle,
+        TextKey::RiskAck,
+        TextKey::RiskFat32,
+        TextKey::RememberPassword,
+        TextKey::RememberPasswordNote,
     ];
 
     /// 与 theme.toml `[text_map]` 的 key 一一对应。
@@ -526,6 +573,8 @@ impl TextKey {
             TextKey::StatusReady => "status_ready",
             TextKey::About => "about",
             TextKey::Cancel => "cancel",
+            TextKey::Pause => "pause",
+            TextKey::Resume => "resume",
             TextKey::StartExtract => "start_extract",
             TextKey::Precheck => "precheck",
             TextKey::ExtractTo => "extract_to",
@@ -589,6 +638,8 @@ impl TextKey {
             TextKey::ColRatio => "col_ratio",
             TextKey::ColMethod => "col_method",
             TextKey::ColTime => "col_time",
+            TextKey::ColCrc => "col_crc",
+            TextKey::CrcMismatch => "crc_mismatch",
             TextKey::ColFlags => "col_flags",
             TextKey::FlagLocked => "flag_locked",
             TextKey::FlagSpoofed => "flag_spoofed",
@@ -725,6 +776,24 @@ impl TextKey {
             TextKey::ShellExtractHere => "shell_extract_here",
             TextKey::ShellExtractTo => "shell_extract_to",
             TextKey::ShellAddToZip => "shell_add_to_zip",
+            TextKey::NoMatches => "no_matches",
+            TextKey::OnlyAnomalies => "only_anomalies",
+            TextKey::SuspiciousName => "suspicious_name",
+            TextKey::CommandPalette => "command_palette",
+            TextKey::CommandPaletteHint => "command_palette_hint",
+            TextKey::CommandNoMatch => "command_no_match",
+            TextKey::CmdToggleTheme => "cmd_toggle_theme",
+            TextKey::CmdToggleLanguage => "cmd_toggle_language",
+            TextKey::ReduceMotion => "reduce_motion",
+            TextKey::HighContrast => "high_contrast",
+            TextKey::LimitsTitle => "limits_title",
+            TextKey::LimitsPreset => "limits_preset",
+            TextKey::LimitsInvalid => "limits_invalid",
+            TextKey::RiskTitle => "risk_title",
+            TextKey::RiskAck => "risk_ack",
+            TextKey::RiskFat32 => "risk_fat32",
+            TextKey::RememberPassword => "remember_password",
+            TextKey::RememberPasswordNote => "remember_password_note",
         }
     }
 }
@@ -758,6 +827,8 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::StatusReady => "就绪",
             TextKey::About => "关于",
             TextKey::Cancel => "取消",
+            TextKey::Pause => "暂停",
+            TextKey::Resume => "继续",
             TextKey::StartExtract => "开始解压",
             TextKey::Precheck => "解压预检",
             TextKey::ExtractTo => "解压到",
@@ -823,6 +894,8 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ColRatio => "比率",
             TextKey::ColMethod => "方法",
             TextKey::ColTime => "修改时间",
+            TextKey::ColCrc => "CRC32",
+            TextKey::CrcMismatch => "CRC 不符：解出的内容与目录记录的校验值不一致，文件可能已损坏",
             TextKey::ColFlags => "标记",
             TextKey::FlagLocked => "锁",
             TextKey::FlagSpoofed => "伪装",
@@ -967,6 +1040,28 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ShellExtractHere => "解压到当前文件夹",
             TextKey::ShellExtractTo => "解压到单独文件夹",
             TextKey::ShellAddToZip => "添加到 zip 压缩包",
+            TextKey::NoMatches => "没有匹配的条目",
+            TextKey::OnlyAnomalies => "只看异常项",
+            TextKey::SuspiciousName => "可疑文件名：{detail}",
+            TextKey::CommandPalette => "命令面板",
+            TextKey::CommandPaletteHint => "输入命令过滤，回车执行，Esc 关闭",
+            TextKey::CommandNoMatch => "没有匹配的命令",
+            TextKey::CmdToggleTheme => "切换主题",
+            TextKey::CmdToggleLanguage => "切换语言",
+            TextKey::ReduceMotion => "减少动效（关闭过渡动画与粒子）",
+            TextKey::HighContrast => "高对比度模式（正文对比度 ≥ 7:1）",
+            TextKey::LimitsTitle => "安全限额",
+            TextKey::LimitsPreset => "预设",
+            TextKey::LimitsInvalid => "数值超出可表示范围，未写入",
+            TextKey::RiskTitle => "高风险操作，需要二次确认",
+            TextKey::RiskAck => "我已了解上述风险，仍要继续",
+            TextKey::RiskFat32 => {
+                "存在超过 4 GiB 的条目，而目标盘是 FAT32：写入会失败，建议改用 NTFS/exFAT"
+            }
+            TextKey::RememberPassword => "记住密码（本机本用户）",
+            TextKey::RememberPasswordNote => {
+                "密码用 Windows DPAPI 加密后存盘，只能在本机当前用户下解密；换机、重装或换用户都会失效。"
+            }
         },
         Locale::EnUs => match key {
             TextKey::AppTitle => "THzip-SpellArchive",
@@ -995,6 +1090,8 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::StatusReady => "Ready",
             TextKey::About => "About",
             TextKey::Cancel => "Cancel",
+            TextKey::Pause => "Pause",
+            TextKey::Resume => "Resume",
             TextKey::StartExtract => "Start extraction",
             TextKey::Precheck => "Extraction precheck",
             TextKey::ExtractTo => "Extract to",
@@ -1064,6 +1161,10 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ColRatio => "Ratio",
             TextKey::ColMethod => "Method",
             TextKey::ColTime => "Modified",
+            TextKey::ColCrc => "CRC32",
+            TextKey::CrcMismatch => {
+                "CRC mismatch: extracted data does not match the recorded checksum; the file may be corrupt"
+            }
             TextKey::ColFlags => "Flags",
             TextKey::FlagLocked => "Locked",
             TextKey::FlagSpoofed => "Spoofed",
@@ -1228,14 +1329,142 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ShellExtractHere => "Extract here",
             TextKey::ShellExtractTo => "Extract to folder",
             TextKey::ShellAddToZip => "Add to zip",
+            TextKey::NoMatches => "No matching entries",
+            TextKey::OnlyAnomalies => "Only anomalies",
+            TextKey::SuspiciousName => "Suspicious name: {detail}",
+            TextKey::CommandPalette => "Command palette",
+            TextKey::CommandPaletteHint => "Type to filter, Enter to run, Esc to close",
+            TextKey::CommandNoMatch => "No matching command",
+            TextKey::CmdToggleTheme => "Switch theme",
+            TextKey::CmdToggleLanguage => "Switch language",
+            TextKey::ReduceMotion => "Reduce motion (no transitions or particles)",
+            TextKey::HighContrast => "High contrast mode (body text ≥ 7:1)",
+            TextKey::LimitsTitle => "Safety limits",
+            TextKey::LimitsPreset => "Presets",
+            TextKey::LimitsInvalid => "Value out of range; not applied",
+            TextKey::RiskTitle => "High-risk operation, confirmation required",
+            TextKey::RiskAck => "I understand the risks and want to continue",
+            TextKey::RiskFat32 => {
+                "An entry exceeds 4 GiB while the target is FAT32: the write will fail; use NTFS/exFAT"
+            }
+            TextKey::RememberPassword => "Remember password (this machine, this user)",
+            TextKey::RememberPasswordNote => {
+                "The password is encrypted with Windows DPAPI and can only be decrypted by the current user on this machine; moving to another machine, reinstalling or switching users invalidates it."
+            }
         },
     }
+}
+
+/// 限额字段的本地化名。
+pub fn limit_field_label(locale: Locale, field: LimitField) -> &'static str {
+    match locale {
+        Locale::ZhCn => match field {
+            LimitField::TotalBytes => "解压总量上限",
+            LimitField::EntryBytes => "单条目大小上限",
+            LimitField::Entries => "条目数上限",
+            LimitField::RatioStreamed => "膨胀倍率上限",
+            LimitField::PathDepth => "路径层级上限",
+            LimitField::PathLen => "路径长度上限",
+            LimitField::DictSize => "压缩字典上限",
+            LimitField::Nesting => "套娃层数上限",
+            LimitField::MinFreeSpace => "保留可用空间",
+        },
+        Locale::EnUs => match field {
+            LimitField::TotalBytes => "Max extracted size",
+            LimitField::EntryBytes => "Max entry size",
+            LimitField::Entries => "Max entry count",
+            LimitField::RatioStreamed => "Max expansion ratio",
+            LimitField::PathDepth => "Max path depth",
+            LimitField::PathLen => "Max path length",
+            LimitField::DictSize => "Max dictionary size",
+            LimitField::Nesting => "Max nesting depth",
+            LimitField::MinFreeSpace => "Free space to keep",
+        },
+    }
+}
+
+/// 三档限额预设的名称。
+pub fn limit_profile_label(locale: Locale, profile: LimitProfile) -> &'static str {
+    match locale {
+        Locale::ZhCn => match profile {
+            LimitProfile::Strict => "严格",
+            LimitProfile::Default => "默认",
+            LimitProfile::Relaxed => "宽松",
+        },
+        Locale::EnUs => match profile {
+            LimitProfile::Strict => "Strict",
+            LimitProfile::Default => "Default",
+            LimitProfile::Relaxed => "Relaxed",
+        },
+    }
+}
+
+impl Translator {
+    /// 伪本地化：把文案包进 ⟦ ⟧ 并把每个字母换成带重音的等价字符，
+    /// 同时按固定比例拉长。用于在真实界面里一眼看出「哪些字符串没走 i18n」
+    /// （裸 ASCII 一眼就露出来）和「哪些控件会被译文撑破」。
+    ///
+    /// 通过环境变量 `THZIP_PSEUDO_LOCALE=1` 开启，只在开发排障时用。
+    pub fn pseudo_enabled() -> bool {
+        std::env::var("THZIP_PSEUDO_LOCALE")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    }
+}
+
+/// 伪本地化单个字符串。占位符 `{name}` 原样保留，否则参数会替换失败。
+///
+/// 标记字符只用 ASCII（`[!!` / `!!]`）：egui 对缺字形会直接 panic，
+/// 而内置比例字体只保证基础拉丁与 CJK，装饰性括号（⟦⟧、«»）不保险。
+fn pseudo_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2 + 6);
+    out.push_str("[!!");
+    let mut rest = text;
+    while let Some(start) = rest.find('{') {
+        push_pseudo(&mut out, &rest[..start]);
+        match rest[start..].find('}') {
+            Some(end) => {
+                out.push_str(&rest[start..start + end + 1]);
+                rest = &rest[start + end + 1..];
+            }
+            None => {
+                push_pseudo(&mut out, &rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    push_pseudo(&mut out, rest);
+    out.push_str("!!]");
+    out
+}
+
+fn push_pseudo(out: &mut String, text: &str) {
+    for ch in text.chars() {
+        match ch {
+            'a' => out.push('á'),
+            'e' => out.push('é'),
+            'i' => out.push('í'),
+            'o' => out.push('ó'),
+            'u' => out.push('ú'),
+            'A' => out.push('Á'),
+            'E' => out.push('É'),
+            'I' => out.push('Í'),
+            'O' => out.push('Ó'),
+            'U' => out.push('Ú'),
+            _ => out.push(ch),
+        }
+    }
+    // 日语假名与汉字的宽度和拉丁字母差别大，统一再补 4 个占位字符，
+    // 模拟「德语 / 俄语译文普遍长三成」的最坏情况。
+    out.push_str("···");
 }
 
 pub struct Translator {
     pub locale: Locale,
     /// true = 直接用标准术语（可发现性开关）。
     pub prefer_standard: bool,
+    /// 是否输出伪本地化文本（见 [`Translator::pseudo_enabled`]）。
+    pub pseudo: bool,
     overrides: BTreeMap<String, String>,
 }
 
@@ -1244,6 +1473,7 @@ impl Default for Translator {
         Self {
             locale: Locale::ZhCn,
             prefer_standard: false,
+            pseudo: Self::pseudo_enabled(),
             overrides: BTreeMap::new(),
         }
     }
@@ -1258,14 +1488,19 @@ impl Translator {
         self.overrides = theme.text_map.clone();
     }
 
-    /// 三层回退：主题覆盖 → 内置语言包。
+    /// 三层回退：主题覆盖 → 内置语言包。开启伪本地化时再包一层。
     pub fn t(&self, key: TextKey) -> String {
-        if !self.prefer_standard
+        let text = if !self.prefer_standard
             && let Some(value) = self.overrides.get(key.key())
         {
-            return value.clone();
+            value.clone()
+        } else {
+            builtin(self.locale, key).to_owned()
+        };
+        if self.pseudo {
+            return pseudo_text(&text);
         }
-        builtin(self.locale, key).to_owned()
+        text
     }
 
     /// 在文案中替换 `{name}` 形式的占位符。
@@ -1326,6 +1561,55 @@ mod tests {
             let en = placeholders(builtin(Locale::EnUs, key));
             assert_eq!(zh, en, "placeholder mismatch for {}", key.key());
         }
+    }
+
+    /// 伪本地化必须保留占位符原文，否则参数替换会静默失效；
+    /// 同时必须真的变长，才能压出被截断的控件。
+    #[test]
+    fn pseudo_locale_keeps_placeholders_and_grows() {
+        for &key in TextKey::ALL {
+            let original = builtin(Locale::ZhCn, key);
+            let pseudo = super::pseudo_text(original);
+            assert!(
+                pseudo.chars().count() > original.chars().count(),
+                "{} 没有变长",
+                key.key()
+            );
+            assert_eq!(
+                placeholders(&pseudo),
+                placeholders(original),
+                "{} 的占位符被破坏",
+                key.key()
+            );
+            assert!(pseudo.starts_with("[!!") && pseudo.ends_with("!!]"));
+        }
+    }
+
+    /// 译文与原文完全相同，通常意味着漏翻。
+    ///
+    /// 产品名、缩写、纯符号（`CRC32`、`THzip-SpellArchive`、`×`）两种写法本就
+    /// 一致，用「不含小写 ASCII 字母」把它们排除掉：真正需要翻译的散文一定
+    /// 含小写单词。这样白名单不必手工维护，新增技术名词不会误报。
+    #[test]
+    fn translations_are_not_pure_copies() {
+        // 产品名两种语言都不翻译，且含小写字母，只能显式列出。
+        const PRODUCT_NAMES: &[&str] = &["app_name", "app_title"];
+        let mut offenders = Vec::new();
+        for &key in TextKey::ALL {
+            if PRODUCT_NAMES.contains(&key.key()) {
+                continue;
+            }
+            let zh = builtin(Locale::ZhCn, key);
+            let en = builtin(Locale::EnUs, key);
+            if zh != en {
+                continue;
+            }
+            if !zh.chars().any(|ch| ch.is_ascii_lowercase()) {
+                continue;
+            }
+            offenders.push(key.key());
+        }
+        assert!(offenders.is_empty(), "疑似漏翻: {offenders:?}");
     }
 
     #[test]

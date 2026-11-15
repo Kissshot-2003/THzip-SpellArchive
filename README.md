@@ -20,7 +20,7 @@ cargo run -p thzip-cli -- test <归档>            # CRC 完整性测试
 cargo run -p thzip-cli -- extract <归档> <目录>   # 安全解压（--force 覆盖）
 cargo run -p thzip-cli -- pack <输出> <输入...>      # 格式由扩展名决定；7z 可加 --volume-size <MiB>
 # sniff / list / test / extract / pack 都支持 --json，输出单行机读结果
-cargo test --workspace                           # 154 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 199 个单元 / 集成 / 归档格式用例
 cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / 解压 / 7z 打包基准
 cargo build --release -p thzip-app --no-default-features   # 精简版：省掉屏幕阅读器与 SVG 文字
 powershell -File scripts/package.ps1             # release + 便携目录（有 iscc 时出安装包）
@@ -30,25 +30,34 @@ powershell -File scripts/package.ps1             # release + 便携目录（有 
 
 | 版本 | 体积 | 7z 压缩后 |
 |---|---|---|
-| GUI（默认，含屏幕阅读器与 SVG 文字） | 20.53 MiB | 6.71 MiB |
-| GUI（`--no-default-features`） | 19.26 MiB | 6.35 MiB |
-| CLI | 4.46 MiB | 1.46 MiB |
+| GUI（默认，含屏幕阅读器与 SVG 文字） | 21.13 MiB | 6.50 MiB |
+| GUI（`--no-default-features`） | 19.87 MiB | 6.17 MiB |
+| CLI | 4.75 MiB | 1.46 MiB |
+
+MSVC 运行库已静态链接（`.cargo/config.toml` 给两个 Windows 目标开 `+crt-static`），
+exe 不再依赖 `VCRUNTIME140.dll` / `MSVCP140.dll`——代价是各自增大 1 MiB 左右，
+换掉「精简系统上没装 VC++ 运行库就双击闪退」这一整类问题。
+`scripts/check-size.ps1` 在 CI 里守着上限（GUI ≤ 23 MiB、CLI ≤ 6 MiB）。
 
 渲染后端只保留 D3D12；Vulkan / Metal / GLES / WebGPU 未编入。需要兜底老显卡或虚拟机时，
 在 `crates/thzip-app/Cargo.toml` 的 `wgpu` features 里补 `"vulkan"`。
 
-## 性能基线（本机，`cargo bench --quick`）
+## 性能基线（本机，`cargo bench -p thzip-core`）
 
 | 场景 | 耗时 |
 |---|---|
-| `classify_600b`（17 组样本） | ~5 µs |
-| 打开并列出 10k 条目 zip（≤ 8 MiB 包） | ~8 ms |
-| 仅解析 10k 条目中央目录（文件 seek） | ~100 ms |
-| 解压 16 MiB zip 到计数 sink | ~1.7 ms |
-| 打包 4 MiB 随机数据为 7z（LZMA2 L6） | ~950 ms |
+| `classify_600b`（17 组样本） | ~6 µs |
+| 打开并列出 10k 条目 zip（≤ 8 MiB 包） | ~9 ms |
+| 仅解析 10k 条目中央目录（文件 seek） | ~120 ms |
+| 解压 16 MiB zip 到计数 sink | ~1.8 ms |
+| 打包 4 MiB 随机数据为 7z（LZMA2 L6） | ~1.05 s |
 
 数字只用于前后对比。8 MiB 以内的 zip 会整包读入内存，避免逐条目 seek；更大的包仍走文件流。
-此前 10k 列表约 340 ms，优化后约 8 ms。
+此前 10k 列表约 340 ms，优化后约 9 ms。
+
+与 7-Zip 26.04 的横向对比（24.2 MiB / 204 条目，三次取最小）用 `cargo bench -p thzip-core --bench vs_7zip`：
+创建 zip 0.58 s ↔ 0.58 s，解压 zip 0.40 s ↔ 0.42 s，创建 7z 3.46 s ↔ 0.88 s。
+第三方 7z 明显更快是纯 Rust LZMA2 编码器与手写汇编的差距，取舍见 `HANDOVER.md` §13 / §16.6。
 
 ## 便携模式
 
@@ -61,7 +70,7 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 | 模块 | 状态 |
 |---|---|
 | 格式嗅探（magic bytes） | 可用 |
-| 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护（覆盖整条祖先链） | 可用，含测试 |
+| 路径净化 / 显示名防护 / 限额计数 / 原子覆盖 / junction 防护（覆盖整条祖先链） | 可用，含测试。限额 9 项可调 + 三档预设；写盘后用 `GetFinalPathNameByHandleW` 复核句柄真实路径（堵 TOCTOU）；解压前预检可用空间、FAT32 4 GiB 上限与套娃归档 |
 | zip 读 | **可用**：列目录、预检、安全解压、CRC 校验、AES 解压；Store / Deflate / Deflate64 / BZip2 / Zstd / PPMd / LZMA / XZ；不支持方法预检提示；同名自动 `~1` 改名 |
 | zip 写 | **可用**：Store / Deflate / BZip2 / Zstd、AES-256、目录递归、归档名净化、重名拒绝、追加入现有包、原子替换、zip64 大文件 |
 | 7z 读 | **可用**：LZMA/LZMA2/PPMd/BZip2/Deflate/Zstd/LZ4、固实包、单条提取、AES-256 头加密与数据加密、`.7z.001` 分卷拼接 |
@@ -71,9 +80,9 @@ exe 同目录存在 `portable.flag` 或 `themes/` 时自动进入便携模式：
 | 单文件流读 | **可用**：`.gz` / `.bz2` / `.xz` / `.zst` / `.lz4`，自动去掉压缩扩展名作为文件名 |
 | tar 家族写 | **可用**：tar / tar.gz / tar.bz2 / tar.xz / tar.zst / tar.lz4，原子替换；追加为解包重建 |
 | CLI | `sniff` / `list` / `test` / `extract`（含 --force/--rename/--number）、`pack`（zip 可选 --method bzip2/zstd；7z 可选 --7z-level/--7z-dict；--append 支持 zip / 7z / tar 家族）；全部支持 `--json` 机读输出 |
-| 任务线程池 | **可用**：2 条后台 worker、`crossbeam-channel` 事件、进度节流、取消、panic 兜底 |
+| 任务线程池 | **可用**：2 条后台 worker、`crossbeam-channel` 有界操作队列（1024，提交超时 5 s）、同路径写操作自动串行、进度节流、取消、暂停/继续、panic 兜底 |
 | GUI | **可用**：多标签页、打开任意支持格式、后台预检、解压/测试/取消、创建 zip/7z/tar（zip 可选 BZip2/Zstd 与归档注释、7z 可选级别/字典）、追加 zip / 7z / tar 家族、AES-256、打包任务模板、后台主题包导入与导出、预览（双击或工具栏按钮；文本 / PNG / JPEG / GIF / BMP）、多选与表头排序、删除选中条目、重命名/移动/批量改名模板与正则替换改名（目录自动带上子项）、冲突跳过/覆盖/改名/自动编号；中英文全量界面（含对话框、状态栏、任务与右键菜单） |
-| 桌面集成 | **可用**：设置持久化（schema 5，含排序键、窗口大小与打包模板）、便携模式、关闭到托盘开关、多文件拖拽多标签页、单实例转交、本地化托盘菜单、资源管理器右键菜单（打开/解压到当前文件夹/解压到单独文件夹/添加到 zip，启动自检 exe 路径）、主题热重载、常用快捷键（Ctrl+O/E/P/T/F、Delete、F2、F5） |
+| 桌面集成 | **可用**：设置持久化（schema 5，含排序键、窗口大小与打包模板）、便携模式、关闭到托盘开关、多文件拖拽多标签页、单实例转交、本地化托盘菜单、资源管理器右键菜单（打开/解压到当前文件夹/解压到单独文件夹/添加到 zip，启动自检 exe 路径）、主题热重载、常用快捷键（Ctrl+O/E/P/T/F、Delete、F2、F5）、命令面板、窗口位置记忆（离屏回落主屏）、DPAPI 记住密码、动效与高对比度开关 |
 | 日志 | `%APPDATA%\THzip-SpellArchive\thzip-spellarchive.log`（便携模式为 `<exe>\config\`；级别/模块 + `key=value` 结构化字段，5 MiB 轮转）+ panic hook |
 | 主题引擎 | 可扫描 `themes/*/theme.toml`，按需载入 PNG/SVG 纹理与配色、九宫格背景、主题粒子；缺资源回退内置主题 |
 | 字体 | 内嵌 Noto Sans SC 子集（OFL，约 2.3 MiB）；生僻字回退系统 CJK 字体 |

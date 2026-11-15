@@ -1,4 +1,5 @@
-﻿use std::path::PathBuf;
+﻿use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -64,6 +65,32 @@ pub struct ArchiveTab {
     pub selected: std::collections::BTreeSet<usize>,
     pub last_selected: Option<usize>,
     pub comment: Option<String>,
+    pub outcomes: EntryOutcomes,
+}
+
+/// 最近一次解压/测试的结果分布，供列表着色与"只看异常项"使用。
+/// 与标签页绑定，避免 A 包的错误标记跑到 B 包的条目上。
+#[derive(Default, Clone)]
+pub struct EntryOutcomes {
+    pub failed: BTreeSet<EntryId>,
+    pub skipped: BTreeSet<EntryId>,
+    pub crc_mismatch: BTreeSet<EntryId>,
+    /// 预检判定为可疑文件名的条目及其原因（双向控制字符等）。
+    pub suspicious: BTreeMap<EntryId, String>,
+}
+
+impl EntryOutcomes {
+    pub fn is_anomaly(&self, id: EntryId) -> bool {
+        self.failed.contains(&id) || self.skipped.contains(&id) || self.crc_mismatch.contains(&id)
+    }
+
+    /// 打开新归档时整体失效；旧结果对新条目没有意义。
+    pub fn clear(&mut self) {
+        self.failed.clear();
+        self.skipped.clear();
+        self.crc_mismatch.clear();
+        self.suspicious.clear();
+    }
 }
 
 pub struct DirItem {
@@ -117,6 +144,8 @@ pub struct PendingPassword {
     pub path: PathBuf,
     pub input: String,
     pub error: Option<String>,
+    /// 是否已经尝试过用 DPAPI 保存的密码预填；避免用户清空后被反复填回。
+    pub prefilled: bool,
 }
 
 pub struct PendingExtract {
@@ -125,6 +154,15 @@ pub struct PendingExtract {
     pub policy: OverwritePolicy,
     /// 预检对应的归档；即使用户切换了标签页也不能换错。
     pub reader: SharedReader,
+    /// 出现炸弹/空间不足/FAT32 超大文件时，用户必须显式勾选后才能开始。
+    pub risk_acknowledged: bool,
+}
+
+/// 命令面板状态：只保存是否打开与过滤词，命令清单由 UI 每帧生成。
+#[derive(Default)]
+pub struct CommandPaletteState {
+    pub open: bool,
+    pub filter: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

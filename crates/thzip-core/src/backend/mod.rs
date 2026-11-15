@@ -1,4 +1,4 @@
-mod common;
+pub(crate) mod common;
 mod decoder;
 pub mod name_codec;
 pub mod rar;

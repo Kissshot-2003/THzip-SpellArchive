@@ -173,6 +173,8 @@ impl ThzipApp {
         let sevenz = SevenZOptions {
             level: self.pack_state.sevenz_level.min(9),
             dict_size: self.pack_state.sevenz_dict_mib.saturating_mul(1024 * 1024),
+            // 自动按 CPU 核数并行分块：7z 创建慢主要慢在单线程 LZMA2 上。
+            threads: 0,
         };
         let comment = if kind == ArchiveKind::Zip && !append {
             let text = self.pack_state.comment.trim();

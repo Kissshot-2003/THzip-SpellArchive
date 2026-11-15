@@ -101,13 +101,13 @@ pub fn sanitize_and_resolve(
     resolve_under(root, &rel, limits)
 }
 
-fn find_illegal(segment: &str) -> Option<char> {
+pub(crate) fn find_illegal(segment: &str) -> Option<char> {
     segment
         .chars()
         .find(|c| matches!(c, ':' | '*' | '?' | '<' | '>' | '|' | '"') || (*c as u32) < 0x20)
 }
 
-fn is_reserved_name(segment: &str) -> bool {
+pub(crate) fn is_reserved_name(segment: &str) -> bool {
     let base = segment.split('.').next().unwrap_or(segment);
     let upper = base.to_ascii_uppercase();
 

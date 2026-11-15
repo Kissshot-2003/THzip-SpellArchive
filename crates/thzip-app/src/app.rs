@@ -33,6 +33,10 @@ pub struct ThzipApp {
     pub show_settings: bool,
     pub show_first_run_hint: bool,
     pub close_to_tray: bool,
+    pub remember_password: bool,
+    pub reduce_motion: bool,
+    pub high_contrast: bool,
+    pub only_anomalies: bool,
     pub pack_templates: Vec<crate::prefs::PackTemplate>,
 
     pub dir: PathBuf,
@@ -51,12 +55,17 @@ pub struct ThzipApp {
     pub last_selected: Option<usize>,
     pub sort_key: SortKey,
     pub sort_asc: bool,
+    /// 最近一次解压/测试的异常条目，与当前标签页同步。
+    pub outcomes: EntryOutcomes,
+    /// 用户拖动后的列宽（名称/大小/压缩后/比率/方法/时间/CRC/标记）。
+    pub column_widths: Option<Vec<f32>>,
     /// 非活动标签页的快照；`tabs[active_tab]` 是空占位，活动数据在字段里。
     pub tabs: Vec<ArchiveTab>,
     pub active_tab: usize,
     pub particles: Vec<Particle>,
     pub particle_seed: u32,
     pub particle_accum: f32,
+    pub commands: CommandPaletteState,
     /// 打开成功后要自动执行的启动动作（解压到当前目录等）。
     startup: Option<StartupRequest>,
     /// 归档重写任务：完成后需要重新打开该路径。
@@ -79,6 +88,9 @@ pub struct ThzipApp {
     theme_signature: Option<(u64, SystemTime)>,
     next_theme_check: Instant,
     window_size: Option<[f32; 2]>,
+    window_pos: Option<[f32; 2]>,
+    /// 首帧才拿得到显示器信息，用它保证只做一次"窗口是否还在屏幕内"的校验。
+    window_checked: bool,
     tray: Option<Tray>,
     quitting: bool,
 }
@@ -92,6 +104,9 @@ impl ThzipApp {
         if let Some(theme) = prefs.theme.as_deref() {
             themes.select_by_id(theme);
         }
+        // 显示层开关必须在首次 apply 之前生效，否则启动会闪一下默认配色。
+        themes.set_high_contrast(prefs.high_contrast);
+        themes.set_reduce_motion(prefs.reduce_motion);
         themes.ensure_loaded(&cc.egui_ctx);
         let locale = Locale::from_code(&prefs.locale).unwrap_or(Locale::ZhCn);
         let mut tr = Translator::new();
@@ -116,6 +131,10 @@ impl ThzipApp {
             show_settings: false,
             show_first_run_hint: prefs.show_hint,
             close_to_tray: prefs.close_to_tray,
+            remember_password: prefs.remember_password,
+            reduce_motion: prefs.reduce_motion,
+            high_contrast: prefs.high_contrast,
+            only_anomalies: prefs.only_anomalies,
             pack_templates: prefs.pack_templates.clone(),
             dir,
             dir_items: Vec::new(),
@@ -136,6 +155,8 @@ impl ThzipApp {
                 .and_then(SortKey::from_str)
                 .unwrap_or(SortKey::Name),
             sort_asc: prefs.sort_asc,
+            outcomes: EntryOutcomes::default(),
+            column_widths: prefs.column_widths.clone(),
             tabs: vec![ArchiveTab::default()],
             active_tab: 0,
             particles: Vec::new(),
@@ -144,6 +165,7 @@ impl ThzipApp {
                 .map(|duration| duration.subsec_nanos() ^ duration.as_secs() as u32)
                 .unwrap_or(0x9E37_79B9),
             particle_accum: 0.0,
+            commands: CommandPaletteState::default(),
             startup: None,
             pending_rewrite: None,
             runner: TaskRunner::new(2),
@@ -154,13 +176,15 @@ impl ThzipApp {
             show_pack: false,
             pack_state: PackState::default(),
             status: status_ready,
-            limits: thzip_core::Limits::default(),
+            limits: prefs.limits.to_limits(),
             settings_dirty: false,
             last_settings_save: Instant::now(),
             next_handoff_check: Instant::now(),
             theme_signature,
             next_theme_check: Instant::now() + Duration::from_secs(1),
             window_size: prefs.window_size,
+            window_pos: prefs.window_pos,
+            window_checked: false,
             tray,
             quitting: false,
         };
@@ -231,6 +255,45 @@ impl ThzipApp {
         }
     }
 
+    /// 下一个主题；命令面板与工具栏的"切换主题"共用。
+    pub fn cycle_theme(&mut self, ctx: &egui::Context) {
+        let count = self.themes.names().len();
+        if count == 0 {
+            return;
+        }
+        let next = (self.themes.current_index() + 1) % count;
+        self.set_theme(next, ctx);
+    }
+
+    pub fn set_reduce_motion(&mut self, enabled: bool, ctx: &egui::Context) {
+        if self.reduce_motion == enabled {
+            return;
+        }
+        self.reduce_motion = enabled;
+        self.themes.set_reduce_motion(enabled);
+        self.themes.apply(ctx);
+        // 关闭动效时立即清掉已有粒子，否则它们还会按旧速度飘完。
+        if enabled {
+            self.particles.clear();
+        }
+        self.touch_settings();
+    }
+
+    pub fn set_high_contrast(&mut self, enabled: bool, ctx: &egui::Context) {
+        if self.high_contrast == enabled {
+            return;
+        }
+        self.high_contrast = enabled;
+        self.themes.set_high_contrast(enabled);
+        self.themes.apply(ctx);
+        self.touch_settings();
+    }
+
+    pub fn open_command_palette(&mut self) {
+        self.commands.open = true;
+        self.commands.filter.clear();
+    }
+
     /// 语言切换后重建托盘菜单，避免托盘一直显示旧语言。
     pub fn rebuild_tray(&mut self) {
         if let Some(tray) = Tray::new(&self.tr) {
@@ -269,6 +332,7 @@ impl ThzipApp {
             selected: std::mem::take(&mut self.selected),
             last_selected: self.last_selected.take(),
             comment: self.comment.take(),
+            outcomes: std::mem::take(&mut self.outcomes),
         }
     }
 
@@ -282,6 +346,7 @@ impl ThzipApp {
         self.selected = tab.selected;
         self.last_selected = tab.last_selected;
         self.comment = tab.comment;
+        self.outcomes = tab.outcomes;
     }
 
     pub fn tab_count(&self) -> usize {
@@ -336,6 +401,7 @@ impl ThzipApp {
             self.search.clear();
             self.selected.clear();
             self.last_selected = None;
+            self.outcomes.clear();
             self.status = self.tr.t(TextKey::StatusReady).to_owned();
             return;
         }
@@ -459,15 +525,8 @@ impl ThzipApp {
         self.status = self.tr.t(TextKey::ThemeReloaded);
     }
 
-    fn maybe_save_settings(&mut self) {
-        if !self.settings_dirty {
-            return;
-        }
-        if self.last_settings_save.elapsed() < Duration::from_millis(400) {
-            return;
-        }
-
-        let prefs = crate::prefs::Prefs {
+    fn build_prefs(&self) -> crate::prefs::Prefs {
+        crate::prefs::Prefs {
             schema: crate::prefs::CURRENT_SCHEMA,
             theme: Some(self.themes.current_id().to_owned()),
             locale: self.locale.code().to_owned(),
@@ -478,13 +537,34 @@ impl ThzipApp {
             sort_key: Some(self.sort_key.as_str().to_owned()),
             sort_asc: self.sort_asc,
             window_size: self.window_size,
+            window_pos: self.window_pos,
+            column_widths: self.column_widths.clone(),
             pack_templates: self.pack_templates.clone(),
-        };
-        if let Err(err) = prefs.save() {
+            limits: crate::prefs::LimitPrefs::from_limits(&self.limits),
+            reduce_motion: self.reduce_motion,
+            high_contrast: self.high_contrast,
+            only_anomalies: self.only_anomalies,
+            remember_password: self.remember_password,
+        }
+    }
+
+    /// 立即落盘。退出路径必须走这里，不能依赖 400ms 防抖。
+    fn save_prefs(&mut self) {
+        if let Err(err) = self.build_prefs().save() {
             crate::logging::warn_fields("prefs", "save failed", &[("error", &err.to_string())]);
         }
         self.settings_dirty = false;
         self.last_settings_save = Instant::now();
+    }
+
+    fn maybe_save_settings(&mut self) {
+        if !self.settings_dirty {
+            return;
+        }
+        if self.last_settings_save.elapsed() < Duration::from_millis(400) {
+            return;
+        }
+        self.save_prefs();
     }
 
     pub fn refresh_dir(&mut self) {
@@ -827,6 +907,7 @@ impl ThzipApp {
                 self.search.clear();
                 self.selected.clear();
                 self.last_selected = None;
+                self.outcomes.clear();
                 let count = self.entries.len();
                 let count_text = count.to_string();
                 let name = self.archive_name.clone();
@@ -863,6 +944,7 @@ impl ThzipApp {
                     path,
                     input: String::new(),
                     error: None,
+                    prefilled: false,
                 });
             }
             TaskEvent::PhaseChanged { task, phase } => {
@@ -923,6 +1005,22 @@ impl ThzipApp {
                         view.written = report.bytes_written;
                     }
                 }
+                // 结果落到当前标签页：CRC 列标红、异常过滤与"只看异常项"都依赖它。
+                self.outcomes.failed = report
+                    .failed
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<std::collections::BTreeSet<_>>();
+                self.outcomes.skipped = report
+                    .skipped
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<std::collections::BTreeSet<_>>();
+                self.outcomes.crc_mismatch = report
+                    .crc_mismatch
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>();
                 self.status = self.tr.tf(TextKey::TaskFinished, &[("summary", &summary)]);
             }
             TaskEvent::PackFinished {
@@ -1040,11 +1138,20 @@ impl ThzipApp {
                 if let Some(view) = self.task_mut(task) {
                     view.detail = Some(detail);
                 }
+                // 预检已经知道哪些条目的名字带双向控制字符，列表据此显示 ⚠。
+                for warning in &plan.warnings {
+                    if let thzip_core::plan::PlanWarning::SuspiciousDisplayName { id, detail } =
+                        warning
+                    {
+                        self.outcomes.suspicious.insert(*id, detail.clone());
+                    }
+                }
                 self.pending_extract = Some(PendingExtract {
                     plan: (*plan).clone(),
                     target,
                     policy: OverwritePolicy::Skip,
                     reader,
+                    risk_acknowledged: false,
                 });
             }
             TaskEvent::ThemeInstalled {
@@ -1105,6 +1212,7 @@ impl ThzipApp {
                         path,
                         input: String::new(),
                         error: Some(text.clone()),
+                        prefilled: false,
                     });
                 }
                 if let Some(path) = self
@@ -1128,6 +1236,7 @@ impl ThzipApp {
             || self.pending_password.is_some()
             || self.pending_extract.is_some()
             || self.relocate.is_some()
+            || self.commands.open
         {
             return;
         }
@@ -1135,12 +1244,15 @@ impl ThzipApp {
         let (mut open, mut extract, mut pack, mut test, mut search) =
             (false, false, false, false, false);
         let (mut select_all, mut delete, mut rename, mut refresh) = (false, false, false, false);
+        let mut palette = false;
         ctx.input_mut(|input| {
             open = input.consume_key(egui::Modifiers::COMMAND, egui::Key::O);
             extract = input.consume_key(egui::Modifiers::COMMAND, egui::Key::E);
             pack = input.consume_key(egui::Modifiers::COMMAND, egui::Key::P);
             test = input.consume_key(egui::Modifiers::COMMAND, egui::Key::T);
             search = input.consume_key(egui::Modifiers::COMMAND, egui::Key::F);
+            // Ctrl+K 即使焦点在搜索框里也要能打开：它是键盘用户的唯一入口。
+            palette = input.consume_key(egui::Modifiers::COMMAND, egui::Key::K);
             if !typing {
                 select_all = input.consume_key(egui::Modifiers::COMMAND, egui::Key::A);
                 delete = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete);
@@ -1149,6 +1261,10 @@ impl ThzipApp {
             }
         });
 
+        if palette {
+            self.open_command_palette();
+            return;
+        }
         if open {
             self.open_archive_dialog();
             return;
@@ -1209,15 +1325,50 @@ impl eframe::App for ThzipApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // 记住主窗口大小；只记录逻辑尺寸，位置不持久化，避免换显示器后跑出屏幕。
-        if let Some(rect) = ctx.input(|input| input.viewport().inner_rect) {
-            let size = [rect.width().round(), rect.height().round()];
-            if size[0] >= 640.0 && size[1] >= 480.0 {
-                let changed = self.window_size.is_none_or(|old| {
-                    (old[0] - size[0]).abs() >= 1.0 || (old[1] - size[1]).abs() >= 1.0
+        // 记住窗口大小与位置；最大化/最小化时几何值不是用户意图，跳过以免覆盖。
+        let (outer, inner, skip_geometry) = ctx.input(|input| {
+            let viewport = input.viewport();
+            (
+                viewport.outer_rect,
+                viewport.inner_rect,
+                viewport.maximized.unwrap_or(false) || viewport.minimized.unwrap_or(false),
+            )
+        });
+        if !skip_geometry {
+            if let Some(rect) = inner {
+                let size = [rect.width().round(), rect.height().round()];
+                if size[0] >= 640.0 && size[1] >= 480.0 {
+                    let changed = self.window_size.is_none_or(|old| {
+                        (old[0] - size[0]).abs() >= 1.0 || (old[1] - size[1]).abs() >= 1.0
+                    });
+                    if changed {
+                        self.window_size = Some(size);
+                        self.settings_dirty = true;
+                    }
+                }
+            }
+            if let Some(rect) = outer {
+                let pos = [rect.min.x.round(), rect.min.y.round()];
+                let changed = self.window_pos.is_none_or(|old| {
+                    (old[0] - pos[0]).abs() >= 1.0 || (old[1] - pos[1]).abs() >= 1.0
                 });
                 if changed {
-                    self.window_size = Some(size);
+                    self.window_pos = Some(pos);
+                    self.settings_dirty = true;
+                }
+            }
+            // 显示器被拔掉后，保存的坐标可能落在不存在的屏幕上；首帧检查一次并拉回可见区域。
+            if !self.window_checked
+                && let Some(rect) = outer
+            {
+                self.window_checked = true;
+                let size = [rect.width(), rect.height()];
+                let pos = [rect.min.x, rect.min.y];
+                if let Some(fixed) = crate::window_place::rescue_position(pos, size) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+                        fixed[0], fixed[1],
+                    )));
+                    self.window_pos = Some(fixed);
                     self.settings_dirty = true;
                 }
             }
@@ -1271,6 +1422,7 @@ impl eframe::App for ThzipApp {
         crate::ui::archive_view::show(self, ui);
         crate::ui::dialogs::show(self, &ctx);
         crate::ui::settings::show(self, ui);
+        crate::ui::commands::show(self, &ctx);
         crate::ui::drag_overlay(self, &ctx);
         crate::ui::particles::draw(self, &ctx);
 
@@ -1283,6 +1435,11 @@ impl eframe::App for ThzipApp {
             Duration::from_millis(500)
         };
         ctx.request_repaint_after(delay);
+    }
+
+    fn on_exit(&mut self) {
+        // 关闭窗口时可能还在 400ms 防抖窗口内，退出必须强制写一次。
+        self.save_prefs();
     }
 }
 

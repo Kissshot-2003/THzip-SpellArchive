@@ -26,6 +26,12 @@ pub struct SevenZOptions {
     pub level: u32,
     /// 字典大小（字节）；0 = 自动。
     pub dict_size: u32,
+    /// LZMA2 并行分块使用的线程数；0 = 自动（按 CPU 核数，上限 8）。
+    ///
+    /// LZMA2 原生支持「独立分块 + 多流」，每块可独立编解码，因此并行是
+    /// 无损的正确性前提下最快的手段。代价是块边界会切断跨块匹配，压缩率
+    /// 略降——把块大小设成字典的几倍即可把这个损失压到很低。
+    pub threads: u32,
 }
 
 impl Default for SevenZOptions {
@@ -33,6 +39,7 @@ impl Default for SevenZOptions {
         Self {
             level: 6,
             dict_size: 0,
+            threads: 0,
         }
     }
 }
@@ -66,7 +73,34 @@ pub fn normalize_entry_name(name: &str) -> Result<String, ArchiveError> {
         if segment.contains('\0') {
             return Err(ArchiveError::Other(FailReason::InvalidName(NameIssue::Nul)));
         }
-        parts.push(segment);
+
+        // L-4：写入侧必须不弱于读取侧，否则「打得进去、解不出来」。
+        // 之前只查了绝对路径 / `..` / 盘符 / NUL，保留设备名、非法字符、
+        // 段尾句点空格、段长全部漏检，产物在 Windows 上根本落不了盘。
+        if let Some(bad) = crate::safety::path_sanitize::find_illegal(segment) {
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::IllegalChar(bad),
+            )));
+        }
+        // Win32 会静默截断段尾的句点与空格，两端统一按截断后的结果记录，
+        // 保证「写入 → 解出」得到同一个名字。
+        let trimmed = segment.trim_end_matches([' ', '.']);
+        if trimmed.is_empty() {
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::Empty,
+            )));
+        }
+        if crate::safety::path_sanitize::is_reserved_name(trimmed) {
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::Reserved,
+            )));
+        }
+        if trimmed.len() > 255 {
+            return Err(ArchiveError::Other(FailReason::InvalidName(
+                NameIssue::NameTooLong,
+            )));
+        }
+        parts.push(trimmed);
     }
 
     if parts.is_empty() {

@@ -8,6 +8,7 @@ use thzip_core::task::TaskPhase;
 const SPEED_W: f32 = 92.0;
 const STATUS_W: f32 = 116.0;
 const CANCEL_W: f32 = 30.0;
+const PAUSE_W: f32 = 30.0;
 
 pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     // 空闲时把空间留给文件列表；出现任务后再展开队列。
@@ -15,7 +16,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
         return;
     }
     let theme = app.themes.current();
-    let palette = theme.palette;
+    let palette = app.themes.palette();
     let title = app.tr.t(TextKey::TaskQueue);
     let clear_label = app.tr.t(TextKey::ClearFinished);
     let count = app.tasks.len();
@@ -24,6 +25,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
         .tf(TextKey::TaskCount, &[("count", &count.to_string())]);
     let mut clear_finished = false;
     let mut cancel_id = None;
+    let mut toggle_pause_id = None;
 
     egui::Panel::bottom("task_panel")
         .resizable(true)
@@ -68,7 +70,8 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                         - SPEED_W
                         - STATUS_W
                         - CANCEL_W
-                        - spacing * 4.0)
+                        - PAUSE_W
+                        - spacing * 5.0)
                         .max(100.0);
 
                     for task in &app.tasks {
@@ -102,6 +105,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                                         task.progress,
                                         task.failed(),
                                         theme,
+                                        &palette,
                                     );
 
                                     ui.add_sized(
@@ -126,6 +130,28 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                                         status.on_hover_text(detail);
                                     }
 
+                                    // 暂停只对「正在跑」和「已暂停」有意义：
+                                    // 排队中的任务还没开始，完成的也没东西可停。
+                                    let pausable = matches!(
+                                        task.phase,
+                                        TaskPhase::Running | TaskPhase::Paused
+                                    );
+                                    let paused = task.cancel.is_paused();
+                                    let (glyph, hint) = if paused {
+                                        ("▶", app.tr.t(TextKey::Resume))
+                                    } else {
+                                        ("❚❚", app.tr.t(TextKey::Pause))
+                                    };
+                                    ui.add_enabled_ui(pausable, |ui| {
+                                        if ui
+                                            .add_sized([PAUSE_W, 24.0], egui::Button::new(glyph))
+                                            .on_hover_text(hint)
+                                            .clicked()
+                                        {
+                                            toggle_pause_id = Some(task.id);
+                                        }
+                                    });
+
                                     let can_cancel = task.active();
                                     ui.add_enabled_ui(can_cancel, |ui| {
                                         if ui
@@ -143,6 +169,20 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 });
         });
 
+    if let Some(id) = toggle_pause_id
+        && let Some(task) = app.tasks.iter_mut().find(|task| task.id == id)
+    {
+        if task.cancel.is_paused() {
+            task.cancel.resume();
+            task.phase = TaskPhase::Running;
+        } else {
+            task.cancel.pause();
+            // 界面立刻反映「已暂停」，不必等 worker 走到下一个批次边界。
+            // worker 在暂停期间不会上报 PhaseChanged，所以这里不会被立刻覆盖。
+            task.phase = TaskPhase::Paused;
+        }
+    }
+
     if let Some(id) = cancel_id
         && let Some(task) = app.tasks.iter().find(|task| task.id == id)
     {
@@ -155,7 +195,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
 }
 
 fn status_text(app: &ThzipApp, task: &TaskView) -> (String, egui::Color32) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let color = match task.phase {
         TaskPhase::Failed => palette.error,
         TaskPhase::Done => palette.success,

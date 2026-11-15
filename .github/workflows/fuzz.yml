@@ -1,0 +1,52 @@
+name: Fuzz
+
+# 定时模糊测试。设计文档的退出标准是「连续 72 小时无崩溃」，
+# GitHub 单 job 上限 6 小时，故这里每次跑 15 分钟 × 6 个目标作为回归网；
+# 72 小时的长跑需要在自有机器上执行（见 README「模糊测试」）。
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - classify
+          - zip_central_directory
+          - sevenz_header
+          - tar_header
+          - fuzz_path_sanitize
+    env:
+      # 顶层 .cargo/config.toml 给 MSVC 目标开了 crt-static，libfuzzer 需要动态 CRT；
+      # CARGO_ENCODED_RUSTFLAGS 优先级最高，这里清空以覆盖 config。
+      CARGO_ENCODED_RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz ${{ matrix.target }}
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=900 -rss_limit_mb=4096
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

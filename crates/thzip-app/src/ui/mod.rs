@@ -1,9 +1,12 @@
 pub mod archive_view;
+pub mod commands;
 pub mod dialogs;
 pub mod file_browser;
 pub mod nine_patch;
 pub mod particles;
 pub mod settings;
+#[cfg(test)]
+mod smoke;
 pub mod task_panel;
 pub mod thzip_progress;
 
@@ -73,7 +76,7 @@ fn styled_action_button(
     text: impl Into<egui::WidgetText>,
     primary: bool,
 ) -> egui::Response {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let mut text = text.into();
     if primary {
         text = text.color(palette.on_accent());
@@ -104,7 +107,7 @@ pub fn hint_banner(app: &mut ThzipApp, root: &mut egui::Ui) {
     }
     let text = app.tr.t(TextKey::FirstRunHint);
     let dismiss = app.tr.t(TextKey::Dismiss);
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
 
     egui::Panel::top("first_run_hint")
         .frame(
@@ -165,7 +168,7 @@ pub fn tab_bar(app: &mut ThzipApp, root: &mut egui::Ui) {
 }
 
 pub fn top_bar(app: &mut ThzipApp, root: &mut egui::Ui) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
 
     egui::Panel::top("toolbar")
         .frame(
@@ -203,7 +206,7 @@ pub fn top_bar(app: &mut ThzipApp, root: &mut egui::Ui) {
 }
 
 fn brand(ui: &mut egui::Ui, app: &ThzipApp) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     egui::Frame::default()
         .fill(palette.bg_panel)
         .stroke(egui::Stroke::new(1.0, palette.border))
@@ -309,7 +312,7 @@ fn window_actions(ui: &mut egui::Ui, app: &mut ThzipApp) {
 }
 
 pub fn status_bar(app: &mut ThzipApp, root: &mut egui::Ui) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let status = app.status.clone();
     let theme_name = app.themes.current().name.clone();
     let locale = app.locale.label();
@@ -432,7 +435,7 @@ pub fn drag_overlay(app: &ThzipApp, ctx: &egui::Context) {
         return;
     }
 
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let rect = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,

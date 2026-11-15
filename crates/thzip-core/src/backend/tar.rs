@@ -179,6 +179,14 @@ impl ArchiveReader for TarReader {
             plan.items.push(item);
         }
 
+        plan.warnings
+            .extend(crate::backend::common::plan_safety_warnings(
+                target,
+                &plan.items,
+                plan.total_bytes,
+                std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0),
+                limits,
+            ));
         Ok(plan)
     }
 

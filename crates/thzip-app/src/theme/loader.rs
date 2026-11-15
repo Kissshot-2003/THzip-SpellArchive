@@ -429,4 +429,49 @@ mod tests {
             themes.display()
         );
     }
+
+    /// 主题包是用户从外部拿来的，`theme.toml` 属于不可信输入。
+    fn resolve_fixture() -> &'static Path {
+        static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        ROOT.get_or_init(|| {
+            let base = std::env::temp_dir().join(format!("thzip-resolve-{}", std::process::id()));
+            let root = base.join("theme");
+            std::fs::create_dir_all(root.join("sub")).unwrap();
+            std::fs::write(root.join("ok.png"), b"x").unwrap();
+            std::fs::write(root.join("sub/file.png"), b"x").unwrap();
+            std::fs::write(base.join("outside.png"), b"x").unwrap();
+            std::fs::canonicalize(root).unwrap()
+        })
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig { cases: 256, ..Default::default() })]
+
+        /// 任意文本解析只能返回 `Err`，不能 panic：`toml` 里的深层嵌套、超长数字、
+        /// 畸形转义都不能把主题加载拖崩。
+        #[test]
+        fn manifest_parsing_never_panics(text in ".{0,4096}") {
+            let _: Result<Manifest, _> = toml::from_str(&text);
+        }
+
+        /// 资源路径来自不可信主题包：`resolve` 要么拒绝，要么给出主题目录**之内**的真实路径。
+        #[test]
+        fn resolve_never_escapes_root(segments in proptest::collection::vec(
+            proptest::sample::select(vec![
+                "ok.png", "sub", "nested", "file.png", "..", ".", "", "C:", "//server/share",
+            ]),
+            1..5,
+        )) {
+            let root = resolve_fixture();
+            let rel = segments.join("/");
+            if let Some(path) = resolve(root, &rel) {
+                proptest::prop_assert!(
+                    path.starts_with(root),
+                    "资源路径逃出主题目录: {} -> {}",
+                    rel,
+                    path.display()
+                );
+            }
+        }
+    }
 }

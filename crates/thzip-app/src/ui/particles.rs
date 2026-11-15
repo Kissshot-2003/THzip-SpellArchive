@@ -5,6 +5,11 @@ use crate::theme::ResKey;
 
 /// 主题粒子：花瓣/星屑从窗口顶部飘落，不拦截鼠标事件。
 pub fn draw(app: &mut ThzipApp, ctx: &egui::Context) {
+    // 减少动效时整块关闭：粒子是纯装饰，也是最明显的运动来源。
+    if app.reduce_motion {
+        app.particles.clear();
+        return;
+    }
     let (texture, enabled, content) = {
         let theme = app.themes.current();
         let texture = theme

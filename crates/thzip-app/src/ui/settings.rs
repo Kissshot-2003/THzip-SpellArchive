@@ -1,7 +1,8 @@
 use eframe::egui;
 
 use crate::app::ThzipApp;
-use crate::i18n::{Locale, TextKey};
+use crate::i18n::{Locale, TextKey, limit_field_label, limit_profile_label};
+use crate::limit_fields::{LimitField, PROFILES, normalize};
 use crate::theme::ResKey;
 
 pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
@@ -12,6 +13,9 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let ctx = root.ctx().clone();
     let prev_standard = app.tr.prefer_standard;
     let prev_close_to_tray = app.close_to_tray;
+    let mut reduce_motion = app.reduce_motion;
+    let mut high_contrast = app.high_contrast;
+    let mut remember_password = app.remember_password;
     let shell_installed = crate::shell_menu::is_installed();
     let mut shell_want = shell_installed;
     let mut import_theme = false;
@@ -23,6 +27,13 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let standard_terms = app.tr.t(TextKey::StandardTerms);
     let close_to_tray_label = app.tr.t(TextKey::CloseToTray);
     let shell_menu_label = app.tr.t(TextKey::ShellMenu);
+    let reduce_motion_label = app.tr.t(TextKey::ReduceMotion);
+    let high_contrast_label = app.tr.t(TextKey::HighContrast);
+    let remember_label = app.tr.t(TextKey::RememberPassword);
+    let remember_note = app.tr.t(TextKey::RememberPasswordNote);
+    let limits_title = app.tr.t(TextKey::LimitsTitle);
+    let limits_preset = app.tr.t(TextKey::LimitsPreset);
+    let locale = app.locale;
     let import_theme_label = app.tr.t(TextKey::ImportTheme);
     let export_theme_label = app.tr.t(TextKey::ExportTheme);
     let feature_summary = app.tr.t(TextKey::FeatureSummary);
@@ -32,7 +43,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let avatar = theme
         .texture(ResKey::AvatarMain)
         .map(|texture| texture.id());
-    let palette = theme.palette;
+    let palette = app.themes.palette();
     let theme_name = theme.name.clone();
     let theme_author = theme.author.clone();
     let theme_version = theme.version.clone();
@@ -165,6 +176,52 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 ui.checkbox(&mut shell_want, shell_menu_label);
             }
             ui.add_space(8.0);
+            ui.checkbox(&mut reduce_motion, reduce_motion_label);
+            ui.checkbox(&mut high_contrast, high_contrast_label);
+            ui.checkbox(&mut remember_password, remember_label);
+            if remember_password {
+                ui.label(
+                    egui::RichText::new(&remember_note)
+                        .size(11.0)
+                        .color(palette.text_sub),
+                );
+            }
+
+            ui.add_space(12.0);
+            ui.separator();
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(&limits_title)
+                    .size(14.0)
+                    .strong()
+                    .color(palette.accent),
+            );
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(&limits_preset)
+                        .size(12.0)
+                        .color(palette.text_sub),
+                );
+                for profile in PROFILES {
+                    if ui.button(limit_profile_label(locale, profile)).clicked() {
+                        app.limits = profile.preset();
+                        app.touch_settings();
+                    }
+                }
+            });
+            egui::Grid::new("limits_grid")
+                .num_columns(2)
+                .spacing([16.0, 6.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for field in LimitField::ALL {
+                        ui.label(limit_field_label(locale, field));
+                        limit_editor(app, ui, field);
+                        ui.end_row();
+                    }
+                });
+
+            ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if crate::ui::primary_button(ui, &palette, import_theme_label).clicked() {
                     import_theme = true;
@@ -210,6 +267,16 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     if selected != app.themes.current_index() {
         app.set_theme(selected, &ctx);
     }
+    app.set_reduce_motion(reduce_motion, &ctx);
+    app.set_high_contrast(high_contrast, &ctx);
+    if remember_password != app.remember_password {
+        app.remember_password = remember_password;
+        // 关掉时立刻删掉密文，避免"开关已关但文件还在"造成误解。
+        if !remember_password {
+            crate::secret_store::clear();
+        }
+        app.touch_settings();
+    }
     app.sync_locale();
     if app.tr.prefer_standard != prev_standard || app.close_to_tray != prev_close_to_tray {
         app.touch_settings();
@@ -247,4 +314,41 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     }
 
     app.show_settings = open;
+}
+
+/// 字节类字段按 MiB 编辑：直接填字节数既难读也容易越界。
+/// 非法值（超出 u32/usize 可表示范围）由 `Limits::set` 拒绝，界面不写回。
+fn limit_editor(app: &mut ThzipApp, ui: &mut egui::Ui, field: LimitField) {
+    const MIB: u64 = 1024 * 1024;
+    let raw = app.limits.get(field);
+    let bytes = field.is_bytes();
+    let mut shown = if bytes { raw / MIB } else { raw };
+    let (max, speed) = if bytes {
+        (1_048_576u64, 16.0)
+    } else {
+        (u64::from(u32::MAX), 1.0)
+    };
+
+    let mut drag = egui::DragValue::new(&mut shown).speed(speed).range(0..=max);
+    if bytes {
+        drag = drag.suffix(" MiB");
+    }
+    if !ui.add(drag).changed() {
+        return;
+    }
+
+    let value = if bytes {
+        shown.saturating_mul(MIB)
+    } else {
+        shown
+    };
+    let mut limits = app.limits;
+    if limits.set(field, value) {
+        // normalize 保证单条目不超过总量、路径长度有下限，避免保存出互相矛盾的组合。
+        normalize(&mut limits);
+        app.limits = limits;
+        app.touch_settings();
+    } else {
+        app.status = app.tr.t(TextKey::LimitsInvalid);
+    }
 }

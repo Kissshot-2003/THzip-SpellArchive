@@ -25,9 +25,14 @@ liblzma.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Time"] }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+proptest.workspace = true
 zip.workspace = true
+crc32fast.workspace = true
 
 [[bench]]
 name = "classify"
@@ -43,4 +48,8 @@ harness = false
 
 [[bench]]
 name = "pack_sevenz"
+harness = false
+
+[[bench]]
+name = "vs_7zip"
 harness = false

@@ -18,6 +18,7 @@ accesskit = ["eframe/accesskit"]
 # 自定义 SVG 主题里的文字渲染。需要 usvg 的字体栈（rustybuzz / ttf-parser），
 # 关掉约省 1 MiB。内置主题全是 PNG，不受影响。
 svg-text = ["resvg/text"]
+dhat = ["dep:dhat"]
 
 [dependencies]
 thzip-core.workspace = true
@@ -42,10 +43,24 @@ regex.workspace = true
 rfd.workspace = true
 single-instance.workspace = true
 tray-icon.workspace = true
+dhat = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    # DPAPI：记住密码
+    "Win32_Security_Cryptography",
+    # 多显示器可见性校验
+    "Win32_Graphics_Gdi",
+    # 目标卷文件系统判断（FAT32 单文件上限）
+    "Win32_Storage_FileSystem",
+] }
 winreg.workspace = true
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", default-features = false }
+proptest.workspace = true

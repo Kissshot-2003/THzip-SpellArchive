@@ -194,6 +194,14 @@ impl ArchiveReader for SevenZReader {
             .iter()
             .any(|item| self.entries[item.id as usize].encrypted);
 
+        plan.warnings
+            .extend(crate::backend::common::plan_safety_warnings(
+                target,
+                &plan.items,
+                plan.total_bytes,
+                std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0),
+                limits,
+            ));
         Ok(plan)
     }
 

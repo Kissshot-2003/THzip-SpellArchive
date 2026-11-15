@@ -1,16 +1,18 @@
 use eframe::egui;
 
-use crate::theme::{ResKey, Theme};
+use crate::theme::{Palette, ResKey, Theme};
 
 /// 符阵进度条：底图 + 按百分比裁剪的填充贴图（UV 裁剪，不拉伸贴图）。
 ///
 /// 主题缺贴图时退回 10 段纯色块，因此 plain 主题也能正常工作。
+/// `palette` 由调用方传入，高对比度模式下贴图缺失时的兜底色也一起生效。
 pub fn show(
     ui: &mut egui::Ui,
     width: f32,
     ratio: f32,
     failed: bool,
     theme: &Theme,
+    palette: &Palette,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::hover());
     // 贴图坐标吸附到物理像素，避免像素素材被半像素拉伸。
@@ -37,7 +39,7 @@ pub fn show(
                 ));
             }
             None => {
-                painter.rect_filled(rect, egui::CornerRadius::same(3), theme.palette.progress_bg);
+                painter.rect_filled(rect, egui::CornerRadius::same(3), palette.progress_bg);
             }
         },
     }
@@ -75,9 +77,9 @@ pub fn show(
                     ((inner.width() - gap * (segments as f32 - 1.0)) / segments as f32).max(1.0);
                 let lit_segments = (ratio * segments as f32).round() as usize;
                 let color = if failed {
-                    theme.palette.error
+                    palette.error
                 } else {
-                    theme.palette.accent
+                    palette.accent
                 };
                 for index in 0..lit_segments {
                     let x = inner.left() + index as f32 * (seg_width + gap);
@@ -96,7 +98,7 @@ pub fn show(
         egui::Align2::CENTER_CENTER,
         format!("{:.0}%", ratio * 100.0),
         egui::FontId::proportional(10.0),
-        theme.palette.text_normal,
+        palette.text_normal,
     );
 
     response

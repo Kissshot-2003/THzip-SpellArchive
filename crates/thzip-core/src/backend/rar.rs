@@ -22,7 +22,11 @@ use crate::types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
 
 const READ_BUF: usize = 64 * 1024;
 /// 超过此大小的条目改用临时文件中转，避免整条读进内存。
-const MAX_IN_MEMORY: u64 = 512 * 1024 * 1024;
+///
+/// 原值 512 MiB 意味着一份 500 MiB 的 RAR 条目会被整条缓存在内存里，
+/// 同时开两个这样的预览就足以把 32 位机器打爆，64 位也白白吃掉大量 RSS。
+/// 预览只需要开头几 MB，中转文件足以胜任，因此降到 16 MiB。
+const MAX_IN_MEMORY: u64 = 16 * 1024 * 1024;
 
 pub struct RarReader {
     path: PathBuf,
@@ -241,6 +245,14 @@ impl ArchiveReader for RarReader {
             .iter()
             .any(|item| self.entries[item.id as usize].encrypted);
 
+        plan.warnings
+            .extend(crate::backend::common::plan_safety_warnings(
+                target,
+                &plan.items,
+                plan.total_bytes,
+                std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0),
+                limits,
+            ));
         Ok(plan)
     }
 

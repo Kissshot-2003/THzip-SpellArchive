@@ -13,6 +13,10 @@ pub enum LimitHit {
     EntryNameLength,
     ScanDepth,
     ScanEntries,
+    /// 套娃解压层数超过上限。
+    Nesting,
+    /// 目标盘可用空间低于保留水位。
+    FreeSpace,
 }
 
 impl LimitHit {
@@ -27,6 +31,8 @@ impl LimitHit {
             LimitHit::EntryNameLength => "归档内名字过长",
             LimitHit::ScanDepth => "打包路径层级超过上限",
             LimitHit::ScanEntries => "打包条目数超过上限",
+            LimitHit::Nesting => "归档套娃层数超过上限",
+            LimitHit::FreeSpace => "目标盘可用空间低于保留水位",
         }
     }
 }

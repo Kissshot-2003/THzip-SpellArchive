@@ -123,6 +123,7 @@ fn sevenz_custom_level_and_dictionary_roundtrip() {
     let options = SevenZOptions {
         level: 9,
         dict_size: 16 * 1024 * 1024,
+        threads: 0,
     };
     let mut writer = backend::create_writer_with_options(
         &archive,

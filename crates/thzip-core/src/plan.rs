@@ -42,11 +42,40 @@ pub struct Conflict {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanWarning {
-    BombSuspected { hit: LimitHit },
-    SymlinkSkipped { id: EntryId },
-    SuspiciousDisplayName { id: EntryId, detail: String },
-    UnsupportedMethod { id: EntryId, method: Method },
-    UnsafePath { id: EntryId, issue: SanitizeError },
+    BombSuspected {
+        hit: LimitHit,
+    },
+    SymlinkSkipped {
+        id: EntryId,
+    },
+    SuspiciousDisplayName {
+        id: EntryId,
+        detail: String,
+    },
+    UnsupportedMethod {
+        id: EntryId,
+        method: Method,
+    },
+    UnsafePath {
+        id: EntryId,
+        issue: SanitizeError,
+    },
+    /// 目标盘可用空间不足以容纳解压结果（或落盘后会吃掉保留水位）。
+    InsufficientSpace {
+        required: u64,
+        reserved: u64,
+        available: u64,
+    },
+    /// 归档里含有另一个归档：解压后需要用户注意套娃风险。
+    NestedArchive {
+        id: EntryId,
+        depth: usize,
+    },
+    /// 单条目超过 FAT32 的 4 GiB 上限，写到这类盘上必然失败。
+    LargeFileOnFat32 {
+        id: EntryId,
+        size: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +109,57 @@ impl ExtractPlan {
 
     pub fn item(&self, id: EntryId) -> Option<&PlannedItem> {
         self.items.iter().find(|item| item.id == id)
+    }
+
+    /// 空间是否够用。`free_space` 未知时一律按「够用」处理，
+    /// 不能因为探测失败就拦住用户。
+    pub fn space_ok(&self) -> bool {
+        match self.free_space {
+            Some(available) => {
+                available >= self.total_bytes.saturating_add(self.limits.min_free_space)
+            }
+            None => true,
+        }
+    }
+
+    /// 空间不足时返回结构化的 `InsufficientSpace`，供 UI 直接展示三个数。
+    pub fn ensure_space(&self) -> Result<(), FailReason> {
+        if self.space_ok() {
+            return Ok(());
+        }
+        Err(FailReason::InsufficientSpace {
+            required: self.total_bytes,
+            reserved: self.limits.min_free_space,
+            available: self.free_space.unwrap_or(0),
+        })
+    }
+
+    /// 包内仅大小写不同的路径对。Windows 上它们会互相覆盖，
+    /// 而 ZIP 规范允许这种命名，属于必须提示的隐患。
+    pub fn case_collisions(&self) -> Vec<(EntryId, EntryId)> {
+        let mut seen: HashMap<String, EntryId> = HashMap::new();
+        let mut found = Vec::new();
+        for item in &self.items {
+            let key = collision_key(&item.rel_path);
+            match seen.get(&key) {
+                Some(&first) if first != item.id => found.push((first, item.id)),
+                None => {
+                    seen.insert(key, item.id);
+                }
+                _ => {}
+            }
+        }
+        found
+    }
+
+    /// 归档里本身还是归档的条目 id 列表（套娃）。
+    pub fn nested_archives(&self) -> Vec<EntryId> {
+        self.items
+            .iter()
+            .filter(|item| !item.kind.is_dir())
+            .filter(|item| crate::backend::common::is_archive_name(&item.rel_path))
+            .map(|item| item.id)
+            .collect()
     }
 }
 
@@ -131,7 +211,24 @@ pub fn resolve_all(
             PlanAction::Reject(reason) => ResolvedAction::Reject(reason.clone()),
             PlanAction::Skip => ResolvedAction::Skip,
             PlanAction::Create | PlanAction::Overwrite | PlanAction::Rename(_) => {
-                let mut path = item.rel_path.clone();
+                // 改名条目带着「新名字」。旧实现直接丢掉载荷、退回原始路径，
+                // 等于把改名请求变成静默覆盖；这里必须按新名字重新净化并拼到根下。
+                let mut path = match &item.action {
+                    PlanAction::Rename(target) if !target.trim().is_empty() => {
+                        match crate::safety::path_sanitize::sanitize_rel(target, &plan.limits) {
+                            Ok(rel) => {
+                                if plan.root.as_os_str().is_empty() {
+                                    rel
+                                } else {
+                                    plan.root.join(rel)
+                                }
+                            }
+                            // 净化不通过就退回原路径：宁可写原名，也不写到非法位置。
+                            Err(_) => item.rel_path.clone(),
+                        }
+                    }
+                    _ => item.rel_path.clone(),
+                };
                 let mut overwrite = item.action == PlanAction::Overwrite;
                 let mut rename_conflict = false;
                 let mut style = SuffixStyle::Tilde;

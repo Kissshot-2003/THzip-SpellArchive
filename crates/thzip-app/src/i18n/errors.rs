@@ -28,6 +28,8 @@ pub(crate) fn limit_en(hit: LimitHit) -> &'static str {
         LimitHit::EntryNameLength => "archive entry name length",
         LimitHit::ScanDepth => "input path depth",
         LimitHit::ScanEntries => "input entry count",
+        LimitHit::Nesting => "archive nesting depth",
+        LimitHit::FreeSpace => "free space on the target drive",
     }
 }
 
@@ -55,6 +57,9 @@ fn name_issue_en(issue: NameIssue) -> &'static str {
             "Archive entry name must not contain a drive letter or NTFS alternate data stream"
         }
         NameIssue::Nul => "Archive entry name must not contain NUL",
+        NameIssue::Reserved => "Archive entry name is a Windows reserved device name",
+        NameIssue::IllegalChar(_) => "Archive entry name contains an illegal character",
+        NameIssue::NameTooLong => "Archive entry name exceeds the file system limit",
     }
 }
 
@@ -64,6 +69,13 @@ fn reason_en(reason: &FailReason) -> String {
         FailReason::PasswordRequired => "Password required".to_owned(),
         FailReason::BadPassword => "Incorrect password".to_owned(),
         FailReason::OutOfSpace => "Not enough disk space".to_owned(),
+        FailReason::InsufficientSpace {
+            required,
+            reserved,
+            available,
+        } => format!(
+            "Not enough space on the target drive: need {required} bytes, {reserved} bytes must stay free, {available} bytes available"
+        ),
         FailReason::Cancelled => "Cancelled".to_owned(),
         FailReason::Io { detail } => detail.clone(),
         FailReason::Limit(hit) => format!("Security limit reached: {}", limit_en(*hit)),

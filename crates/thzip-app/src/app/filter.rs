@@ -8,6 +8,8 @@ impl ThzipApp {
             .iter()
             .enumerate()
             .filter(|(_, entry)| search_matches(&needle, &entry.display))
+            // "只看异常项"要跟搜索结果叠加：先按名字筛，再按结果筛。
+            .filter(|(_, entry)| !self.only_anomalies || self.outcomes.is_anomaly(entry.id))
             .map(|(index, _)| index)
             .collect();
 

@@ -9,13 +9,13 @@ pub mod safe_extract;
 pub mod temp;
 pub mod verify_sink;
 
-pub use atomic_fs::{AtomicFile, is_reparse_point, write_atomic};
+pub use atomic_fs::{AtomicFile, Durability, is_reparse_point, resolved_dir_path, write_atomic};
 pub use bomb::{Budget, LimitHit};
-pub use disk::available_space;
+pub use disk::{FileSystem, available_space, filesystem_of};
 pub use display_guard::{DisplayGuard, guard_display};
 pub use file_time::set_mtime;
 pub use memory_sink::MemorySink;
 pub use path_sanitize::{SanitizeError, resolve_under, sanitize_and_resolve, sanitize_rel};
 pub use safe_extract::ExtractDirSink;
-pub use temp::TempDir;
+pub use temp::{TempDir, sweep_stale_temp};
 pub use verify_sink::VerifySink;

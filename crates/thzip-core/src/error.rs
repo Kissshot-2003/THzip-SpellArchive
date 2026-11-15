@@ -12,16 +12,25 @@ pub enum NameIssue {
     Parent,
     DriveOrAds,
     Nul,
+    /// Windows 保留设备名（CON / PRN / AUX / NUL / COM1-9 / LPT1-9，含带扩展名形式）。
+    Reserved,
+    /// 文件系统不接受的控制字符或非法字符。
+    IllegalChar(char),
+    /// 单个路径段超出文件系统上限（Windows 255 个 UTF-16 码元）。
+    NameTooLong,
 }
 
 impl NameIssue {
-    pub fn zh(self) -> &'static str {
+    pub fn zh(self) -> String {
         match self {
-            NameIssue::Empty => "归档内名字为空",
-            NameIssue::Absolute => "归档内名字不能是绝对路径",
-            NameIssue::Parent => "归档内名字不能包含 ..",
-            NameIssue::DriveOrAds => "归档内名字不能包含盘符或 NTFS 交换数据流",
-            NameIssue::Nul => "归档内名字不能包含 NUL",
+            NameIssue::Empty => "归档内名字为空".to_owned(),
+            NameIssue::Absolute => "归档内名字不能是绝对路径".to_owned(),
+            NameIssue::Parent => "归档内名字不能包含 ..".to_owned(),
+            NameIssue::DriveOrAds => "归档内名字不能包含盘符或 NTFS 交换数据流".to_owned(),
+            NameIssue::Nul => "归档内名字不能包含 NUL".to_owned(),
+            NameIssue::Reserved => "归档内名字是 Windows 保留设备名".to_owned(),
+            NameIssue::IllegalChar(ch) => format!("归档内名字包含非法字符 {ch:?}"),
+            NameIssue::NameTooLong => "归档内名字单段长度超出文件系统上限".to_owned(),
         }
     }
 }
@@ -37,6 +46,12 @@ pub enum FailReason {
     PasswordRequired,
     BadPassword,
     OutOfSpace,
+    /// 目标盘可用空间不足以容纳解压结果（预检阶段发现）。
+    InsufficientSpace {
+        required: u64,
+        reserved: u64,
+        available: u64,
+    },
     Cancelled,
     /// IO 错误；`detail` 是系统原始信息。
     Io {
@@ -220,6 +235,14 @@ impl FailReason {
             FailReason::PasswordRequired => "需要密码".to_owned(),
             FailReason::BadPassword => "密码错误".to_owned(),
             FailReason::OutOfSpace => "磁盘空间不足".to_owned(),
+            FailReason::InsufficientSpace {
+                required,
+                reserved,
+                available,
+            } => format!(
+                "目标盘空间不足: 需要 {} 字节，解压后保留 {} 字节，可用 {} 字节",
+                required, reserved, available
+            ),
             FailReason::Cancelled => "已取消".to_owned(),
             FailReason::Io { detail } => detail.clone(),
             FailReason::Limit(hit) => format!("触发安全限制: {hit}"),
@@ -295,7 +318,7 @@ impl FailReason {
             FailReason::ReparsePointOverwrite { path } => {
                 format!("{path} 已存在且是重解析点，拒绝覆盖")
             }
-            FailReason::InvalidName(issue) => issue.zh().to_owned(),
+            FailReason::InvalidName(issue) => issue.zh(),
             FailReason::AppendPasswordUnsupported => "追加模式暂不支持设置新密码".to_owned(),
             FailReason::AppendUnsupportedEntries { count } => {
                 format!("归档包含 {count} 个无法保留的条目，已取消追加")

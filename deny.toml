@@ -1,0 +1,62 @@
+# 供应链门禁：许可白名单 + 已知漏洞 + 来源限制。
+#
+# 重点盯 unrar-ng / unrar-ng-sys：它们是 C++ UnRAR 源码的 Rust 封装，
+# crate 的 license 字段写的是 MIT OR Apache-2.0，但捆绑的 UnRAR 源码适用
+# UnRAR 许可（禁止用其逆向 RAR 压缩算法）。声明式检查看不到这一层，
+# 交付前需人工确认法务边界，见 docs/legal/unrar-note.md。
+
+[graph]
+targets = [
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
+[advisories]
+version = 2
+yanked = "warn"
+ignore = [
+    # 字体栈：resvg 的 SVG 文字光栅化依赖 rustybuzz / ttf-parser，二者已标记 unmaintained。
+    # 我们只是把主题里的少量 SVG 图标转成位图，不解析外部字体（fontdb 只找系统字体名），
+    # 输入来自用户自己的主题包；升级路径被 resvg 0.45 卡住，等上游换实现再跟进。
+    "RUSTSEC-2026-0206", # rustybuzz unmaintained
+    "RUSTSEC-2026-0192", # ttf-parser unmaintained
+]
+
+[licenses]
+version = 2
+# 只允许常见宽松 / 弱著佐许可。遇到新依赖报错时先确认许可，再决定加白名单。
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Unlicense",
+    "BSL-1.0",
+    "NCSA",
+    "OpenSSL",
+    "MPL-2.0",
+    # 字体：egui 默认字体集自带 OFL-1.1 与 Ubuntu 字体许可；
+    # 本项目内嵌的 Noto Sans SC 子集同样是 OFL-1.1（见 NOTICE.md）。
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    # bzip2 1.0.6 许可（libbz2-rs-sys 纯 Rust 实现，Julian Seward 的原始条款，允许商用）。
+    "bzip2-1.0.6",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# 明确禁止的高风险依赖：证书校验关掉的 HTTP 客户端、unsound 的旧版本等。
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -21,7 +21,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt --check --all
+        run: |
+          cargo fmt --check --all
+          cargo fmt --manifest-path fuzz/Cargo.toml --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -32,8 +34,58 @@ jobs:
       - name: Build CLI
         run: cargo build -p thzip-cli --release
 
+      - name: Build GUI (for size gate)
+        run: cargo build -p thzip-app --release
+
+      - name: Size gate
+        shell: pwsh
+        run: ./scripts/check-size.ps1
+
       - name: Check fuzz targets
         run: cargo check --manifest-path fuzz/Cargo.toml
+
+      # 可选特性各自都要能单独编译，否则发布裁剪版时才会发现某个
+      # feature 组合早就坏了。
+      - name: Feature matrix
+        run: |
+          cargo check -p thzip-app --no-default-features
+          cargo check -p thzip-app --no-default-features --features svg-text
+          cargo check -p thzip-app --features dhat
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # 许可白名单 + 已知漏洞 + 依赖来源。配置见 deny.toml。
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  # 长路径回归：windows-latest 默认不开启 LongPathsEnabled，因此这个 job
+  # 本身就是最严格的环境。实现给超过 240 字符的路径统一补 \\?\ 前缀，
+  # 靠的就是「系统开关关着也能跑」这个前提。
+  long-path:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Report long path policy
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+          $value = (Get-ItemProperty -Path $key -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
+          "LongPathsEnabled = $value"
+          if ($value -eq 1) {
+            "::warning::长路径开关已开启，本 job 无法覆盖开关关闭的场景"
+          }
+
+      - name: Long path regression
+        run: cargo test -p thzip-core --test long_path -- --nocapture
 
   differential:
     runs-on: windows-latest

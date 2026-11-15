@@ -28,7 +28,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（154）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（199）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
@@ -65,7 +65,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 
 ### 1.3 代码规模与提交状态
 
-- Rust 约 21900 行（含测试）。
+- Rust 约 26700 行（含测试；fuzz 目标另计约 100 行）。
 - 最新提交：以 `git log -1` 为准（本文件不再记录哈希，避免文档漂移）。
 - 初始提交：`36842a2 feat: 初始化 SpellArchive Rust 工程骨架与主题系统`
 - 工作区干净；近期已提交：项目改名并迁移旧配置、结构化错误码、正则改名、结构化日志、预检/失败详情、快捷键、窗口大小持久化、7z/tar 家族追加。
@@ -87,7 +87,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
 
-cargo test --workspace                 # 154 个测试
+cargo test --workspace                 # 199 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -142,7 +142,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 154 通过；clippy 无告警。
+12. `cargo test --workspace` 199 通过；clippy 无告警。
 
 ---
 
@@ -788,14 +788,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **154** 个测试。
+当前共 **199** 个测试（core 143 + app 52 + cli 4）。
 
 ### 9.2 测试分布
 
 | 位置 | 数量 | 覆盖 |
 |---|---|---:|---|
-| `thzip-core` 单元测试 | 47 | path_sanitize、display_guard、bomb、atomic_fs、TempDir、mtime、worker、plan（含改名/自动编号）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
-| `thzip-app` 单元测试 | 37 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符 3、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2 |
+| `thzip-core` 单元测试 | 67 | path_sanitize、display_guard、bomb、atomic_fs（含直写模式 3 项）、TempDir（含陈旧临时文件清扫）、mtime、worker、plan（含改名/自动编号/空间预检/套娃/FAT32）、limits（9 字段往返与预设）、name_codec、volume（缺卷/顺序）、sevenz、stream、RAR 时间/符号链接/临时文件中转、重写删除/改名/移动/重名拒绝 |
+| `thzip-app` 单元测试 | 52 | theme loader 5（含 SVG、ResKey 唯一性/往返、仓库主题资源 key 与文件自检）、prefs 解析/排序/窗口大小/迁移 5、自然排序 1、通配/正则搜索 2、日志格式/结构化字段/引号转义 3、启动参数解析 3、i18n 完整性/占位符/伪本地化/漏翻检测 5、重命名/移动/批量模板映射 4、正则改名 3、错误翻译/密码标记 3、警告/冲突翻译 2、**egui_kittest 无头冒烟 3**（数值越界、连续多帧、窄容器长文本）、**主题清单 proptest 2**（解析不 panic、资源路径不越界） |
 | `thzip-cli` 单元测试 | 1 | JSON 转义 |
 | `thzip-cli/tests/cli.rs` | 3 | CLI `--json` 打包/列出/测试/解压往返、注释、7z 分卷创建与回读、版本号 |
 | `tests/zip_backend.rs` | 13 | zip 往返、穿越、绝对路径、大小写冲突、Skip/Overwrite、条目上限、CRC、BZip2/Zstd/PPMd 往返、LZMA/Deflate64/XZ fixtures、mtime、压缩比预检 |
@@ -808,6 +808,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `tests/sevenz_write.rs` | 7 | 7z 普通往返、加密往返、分卷拼接、级别/字典参数往返、追加/加密拒绝、重名条目、追加取消 |
 | `tests/fuzz_smoke.rs` | 1 | 6 个 fixture × 48 次确定性变异 + 512 个随机头，保证不 panic |
 | `tests/differential.rs` | 5 | 与固定版 7-Zip 双向列出/解压、AES zip、AES 7z、7z 分卷；未设置 `THZIP_7Z` 时跳过 |
+| `tests/extract_safety.rs` | 3 | junction 祖先链、bidi 显示名、压缩比熔断 |
+| `tests/property.rs` | 10 | proptest：路径净化幂等/不含分隔符、写侧不弱于读侧、限额单调、改名不引入新冲突等 |
+| `tests/long_path.rs` | 3 | 超过 260 字符的路径写入/替换、CRC 失配时不留残骸 |
+| `tests/file_sharing.rs` | 3 | 其他句柄以写方式占用时仍可打开与解压；缺包错误信息明确 |
 
 ### 9.3 手工验收（每次改格式/任务层都跑）
 
@@ -848,7 +852,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 19 | 已修复 | zip / 7z 检测到加密包时直接拒绝追加，避免新条目以明文写入；追加仍不能设置新密码 | 加密追加需密码重加密，暂不做 |
 | 20 | 7z 固实包单条提取进度按写出字节算 | 跳过前序数据时进度停滞/跳变 | 通过解码字节回调上报压缩进度 |
 | 21 | 已修复（部分） | 未加密 7z 支持追加（解包重建）；加密包拒绝追加 | 加密追加需要密码重加密，暂不做 |
-| 22 | 部分修复 | 7z 已可调 LZMA2 级别/字典；固实块仍未暴露（库的逐条 API 只能非固实） | 换 `push_archive_entries` 或等库暴露固实配置 |
+| 22 | 已修复 | 7z 可调 LZMA2 级别/字典；写盘改为**固态块批量提交**（`push_archive_entries`，64 MiB / 512 条目一块），编码器不再按条目重建；LZMA2 并行分块（`from_level_mt`，块=字典，线程≤8）已启用，创建 7z 从 6.6s 降到 3.5s（24 MiB 数据集） | 仍慢于 7-Zip 的 C 实现，见 §16 性能红线 |
 | 23 | 已修复 | 缺卷时错误信息列出缺失卷号 |
 | 24 | 部分修复 | gz 读尾部 ISIZE、zstd/lz4 读帧头 Content Size，常见文件不再预先解压；bz2/xz 仍完整读一遍；多成员/多帧时显示首/末成员大小 | 需要精确总长时再完整解码 |
 | 25 | 已修复 | 解压收尾阶段按深度倒序恢复目录 mtime；tar 写入按只读属性生成 444/644、目录 555/755 |
@@ -906,6 +910,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 15. **AES CRC**：AES 条目 CRC 字段为 0，不能参与 CRC 比较；依赖 AE-2 认证码。
 16. **语言切换**：同时更新 `app.locale` 与 `app.tr.locale`，否则只有按钮文字变。
 17. **设置保存**：变更后 400ms 防抖写 `prefs.toml`；不要在每帧直接写盘。
+18. **`zip` 9.x 的两处签名**：`ZipFile::name()` 返回 `Result<Cow<str>, ZipError>`（非 UTF-8 名字），
+    `ZipWriter::set_comment()` 返回 `Result`（注释上限 32 KiB）。升级时不要按老签名写。
+19. **`cargo deny check` 要能本地跑通**：改依赖后先跑一遍，别等 CI 红。
+    `deny.toml` 里每条 `ignore` 都写了理由，加新的必须同样写清「为什么不能升、影响面多大」。
 
 ---
 
@@ -938,7 +946,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（154 通过）
+- [ ] `cargo test --workspace`（199 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示
@@ -993,3 +1001,121 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `docs/theme_spec.md` | 主题 schema、ResKey、回退、可发现性 |
 | `NOTICE.md` | 许可证边界、同人声明 |
 | `LICENSE` | MIT 全文 |
+
+---
+
+## 16. v2.1 方案 → 实施状态对照
+
+本轮把「代码审查报告」与「优化清单」里的全部条目一次性收口。下表逐条给出落点，
+便于后续接手时区分「已做且有测试守着」与「明确不做，原因在此」。
+
+### 16.1 安全章
+
+| 项 | 状态 | 落点 / 说明 |
+|---|---|---|
+| 路径净化 11 步 | 已实现 | `safety/path_sanitize.rs`；读盘侧 `sanitize_rel`、写盘侧 `normalize_entry_name` 现在**同规则**（见 L-4） |
+| 祖先链 reparse 校验（H-1） | 已修复 | `ExtractDirSink::ensure_dirs`：逐级 `is_reparse_point` + 逐级 `create_dir`，不用 `create_dir_all` |
+| TOCTOU 窗口（M-4） | 已修复 | 文件句柄打开后取 `GetFinalPathNameByHandleW` 真实路径，必须落在 `root_resolved` 之下，否则按 `ReparsePointWrite` 拒绝 |
+| 压缩炸弹 | 已加固 | 逐条比例 + **整包比例兜底**（L-1），`/limits.rs` 9 个字段 |
+| 原子写 | 已实现 | `create_new` 临时文件 → `Durability` → `ReplaceFileW`；`Durability::Flush` 用于解压、`Sync` 用于归档产出 |
+| CRC 不符不落盘（M-1） | 已修复 | `on_entry_end` 校验失败直接丢弃 `AtomicFile`，目标位置保持原样 |
+| 符号链接 / bidi 显示名 | 已实现 | 链接条目跳过并告警；`display_guard` 拦截 RTL 覆盖 |
+
+### 16.2 资源章
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| 限额逐项可调 + 三档预设 | 已实现 | `limits.rs`：`LimitField::ALL` 9 项、`Limits::get/set/normalize`、`LimitProfile::{Strict,Default,Relaxed}` |
+| 空间预检 | 已实现 | `plan.rs::space_ok/ensure_space` + `PlanWarning::InsufficientSpace`；`min_free_space` 保留水位；FAT32 4 GiB 上限（`LargeFileOnFat32`） |
+| 套娃深度 | 已实现 | `max_nesting` + `PlanWarning::NestedArchive` + `LimitHit::Nesting` |
+| 取消 / 暂停 | 已实现 | `CancelToken` 内含 `cancelled` / `paused` 两个原子位；`checkpoint()` 批量边界轮询 20 ms，1 小时自愈 |
+| 任务模型 | 已实现 | 操作队列 `bounded(1024)` + `send_timeout(5s)`；同路径写操作按 `canonicalize` 键串行化（`TaskRunner::prune_locks` 回收） |
+| 预览路径记忆上限 | 已实现 | `MemorySink::with_limits` 接入 `Budget` 与 CRC（L-3） |
+| RAR 内存峰值 | 已修复 | `MAX_IN_MEMORY` 512 MiB → 16 MiB（L-9） |
+
+### 16.3 L-1 ~ L-10
+
+| 编号 | 原问题 | 处置 |
+|---|---|---|
+| L-1 | 压缩比检测对 tar/rar/固实 7z 完全不触发 | `backend/common.rs::ratio_suspicious_totals` 补整包口径（解压总量 / 归档体积），四个后端统一接入 `plan_safety_warnings` |
+| L-2 | `max_dict_size` 只对 zip 生效 | 保持现状并在 `limits.rs` 注明：7z/tar/rar 的字典由后端库自行决定，无法在解码前拦截；改用整包总量 + 压缩比兜底 |
+| L-3 | `MemorySink` 无 `Budget`、不报 CRC | 已接入 `Budget` 与 `crc32fast`，`into_parts` 返回 `ok` 标志 |
+| L-4 | 写盘侧校验弱于读盘侧 | `normalize_entry_name` 补齐设备名 / 非法字符 / 段尾点空格 / 段长 255；`tests/property.rs` 用属性测试钉住「写侧不弱于读侧」 |
+| L-5 | `reopen_rw` 不用 `create_new` | 改为 `rewind()` 复用同一句柄，不再按路径重开 |
+| L-6 | `PlanAction::Rename` 目标名被丢弃；`CaseCollision` 死代码 | `resolve_all` 用 `sanitize_rel` 重新净化目标名并拼到 root 下；`ExtractPlan::case_collisions()` 供 UI 提示 |
+| L-7 | Unix 降级 | `set_mtime` 用 `utimensat` + `UTIME_OMIT`；`available_space` 用 `statvfs` |
+| L-8 | `free_space` 只显示不拒绝 | `ensure_space()` 返回 `FailReason::InsufficientSpace`，CLI 与 GUI 都据此拦 |
+| L-9 | RAR 512 MiB 整条入内存 | 降到 16 MiB |
+| L-10 | `raw_name` 注释与实际用途不符 | 注释改为「原始字节，仅供诊断；落盘用 `display`」 |
+
+### 16.4 UI / 平台章
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| CRC 列 / 列宽记忆 / 异常过滤 / 可疑图标 / Player 多选 | 已实现 | `ui/archive_view.rs`、`prefs.rs::column_widths`、`app/filter.rs` |
+| 设置页可编辑限额（9 项） | 已实现 | `ui/settings.rs` + `limit_fields.rs`（字段定义权交回 core，避免两处漂移） |
+| 动效 / 高对比度开关 | 已实现 | `app.rs::set_reduce_motion / set_high_contrast` |
+| 命令面板 | 已实现 | `ui/commands.rs` |
+| 窗口位置记忆 + 离屏兜底 | 已实现 | `window_place.rs`（`MonitorFromRect` 判定，离屏回落到主屏） |
+| 高风险二次确认 | 已实现 | `ui/dialogs.rs`：策略为「全部覆盖」、目标是 FAT32、含套娃归档、删除条目 |
+| DPAPI 记住密码 | 已实现 | `secret_store.rs`（`CryptProtectData`，本机本用户） |
+| 规格 7-6 共享读标志 | 已实现 | 归档用 `File::open`（`FILE_SHARE_READ|WRITE|DELETE`）；`tests/file_sharing.rs` 用真实句柄钉住行为 |
+| OpenWithProgids 注册 | 已实现 | `shell_menu.rs`：只写 `OpenWithProgids`，不改扩展名默认关联 |
+| 启动清理临时文件 | 已实现 | `safety/temp.rs::sweep_stale_temp`（前缀 + 后缀 + 最小年龄三重条件），`main.rs` 启动调用 |
+
+### 16.5 测试与基建
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| 属性测试 | 已实现 | `crates/thzip-core/tests/property.rs`（10 项，proptest） |
+| fuzz 目标 | 已实现 | `fuzz/fuzz_targets/` 5 个（4 个格式 + `fuzz_path_sanitize`）；`.github/workflows/fuzz.yml` 每周一 03:00 + 手动触发；主题清单改用 app 侧 proptest（解析代码耦合 eframe，链进 fuzz 不划算） |
+| 供应链门禁 | 已实现并本地跑通 | `deny.toml` + CI `cargo-deny-action`；`cargo deny check` 四类检查全绿。`zip` 4.6.1 → 9.6.0 修掉 RUSTSEC-2026-0367/0368/0369/0429；字体栈两条 unmaintained 公告（RUSTSEC-2026-0206 / 0192）附理由忽略——resvg 0.45 卡住升级路径，且只用于把本机主题里的少量 SVG 图标转位图 |
+| 体积门禁 | 已实现 | `scripts/check-size.ps1`（GUI ≤ 23 MiB、CLI ≤ 6 MiB） |
+| 无头 UI 冒烟 | 已实现 | `crates/thzip-app/src/ui/smoke.rs`（egui_kittest，3 项：数值越界、连续多帧、窄容器长文本） |
+| 长路径回归 | 已实现 | `crates/thzip-core/tests/long_path.rs`（3 项）+ CI `long-path` job（`windows-latest` 默认关着长路径开关） |
+| 伪本地化 | 已实现 | `i18n::pseudo_text`，`THZIP_PSEUDO_LOCALE=1` 开启；另有「漏翻」检测测试 |
+| 堆分析 | 已实现（可选） | `cargo run -p thzip-app --features dhat`，产出 `dhat-heap.json` |
+| 特性矩阵编译 | 已实现 | CI 分别编译 `--no-default-features` / `svg-text` / `dhat` |
+
+### 16.6 性能红线（与 7-Zip 26.04 对比）
+
+`cargo bench -p thzip-core --bench vs_7zip`，数据集 24.2 MiB / 204 条目，同一台机、空闲状态、取三次最小值。
+
+| 场景 | 本项目 | 7-Zip | 比值 | 红线 | 结论 |
+|---|---|---|---|---|---|
+| 创建 zip | 0.58 s | 0.58 s | 1.01x | ≥ 0.90x | 达标 |
+| 解压 zip | 0.40 s | 0.42 s | 1.05x | ≥ 0.80x | 达标 |
+| 创建 7z | 3.46 s | 0.88 s | 0.25x | ≥ 0.50x | 未达标（见下） |
+
+解压从最初的 0.41x 提到 1.05x，靠三处改动：
+
+1. 逐文件 `fsync` 改为 `Durability::Flush`——原子性不变，只放弃「断电也不丢」这层额外保证。
+2. 目录链校验加缓存：200 个文件通常只落在几十个目录里，同一目录不再反复 `symlink_metadata`。
+3. **直写新建文件**：目标不存在时不建临时文件、不改名，直接 `create_new` 到最终路径。
+   覆盖已有文件时仍走完整的原子替换，因此「绝不破坏用户原有文件」这条不变；
+   CRC 失败或中途出错时直写文件会被主动删除，所以「落盘的必然完整」也仍然成立。
+
+创建 7z 仍未达标，原因明确：
+
+- 瓶颈是纯 Rust 的 LZMA2 编码器（`lzma-rust2`）与 7-Zip 手写汇编的差距，不是调用方式问题。
+  本轮先把两处结构性浪费修掉——编码器按条目重建（改固态块批量提交 `push_archive_entries`）
+  与单线程编码（改并行分块 `from_level_mt`），6.6 s → 3.46 s。
+- 要再过线只能换 C 实现的编码器（`liblzma`），与「纯 Rust、静态链接、零 C 依赖」的取舍冲突。
+  这个取舍写在 §13 ADR 里，暂不改。
+
+红线开关：`THZIP_ENFORCE_REDLINE=1` 时未达标会让基准进程以非零码退出，可用于定期巡检而不阻塞 CI。
+
+### 16.7 发布体积（crt-static 后实测）
+
+| 版本 | exe | 7z `-mx=9` 单文件压缩 |
+|---|---|---|
+| GUI 默认（含屏幕阅读器 + SVG 文字） | 21.13 MiB（22,161,408 B） | 6.50 MiB |
+| GUI `--no-default-features` | 19.87 MiB（20,830,720 B） | 6.17 MiB |
+| CLI | 4.75 MiB（4,977,664 B） | 1.46 MiB |
+
+- 比上一轮的 20.53 MiB **没有继续下降**，两笔支出抵掉了优化收益：
+  1. crt-static 把 MSVC 运行库静态链了进来（约 1 MiB）——有意换的，Windows 10/11 不自带
+     VC++ 运行库，便携包落到精简系统上会双击闪退；
+  2. `zip` 4.6.1 → 9.6.0 修 RUSTSEC（GUI +0.13 MiB、CLI +0.14 MiB）——依赖带洞不能留。
+- 门禁：`scripts/check-size.ps1`（GUI ≤ 23 MiB、CLI ≤ 6 MiB），CI 在打包前跑。
+- 口径：单个 exe；「7z」列是 `7z a -t7z -mx=9` 压这单个 exe 的结果，不含主题与文档。

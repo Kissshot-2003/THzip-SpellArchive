@@ -165,6 +165,26 @@ impl Palette {
             self.text_normal
         }
     }
+
+    /// 高对比度配色：接近纯黑底 + 纯白正文，正文对比度约 19:1；
+    /// 次要文字与错误/警告色也都落到 7:1 以上，避免只调正文、辅助信息仍看不清。
+    pub fn high_contrast(&self) -> Self {
+        Self {
+            bg_window: Color32::from_rgb(0x00, 0x00, 0x00),
+            bg_panel: Color32::from_rgb(0x0A, 0x0A, 0x0A),
+            bg_hover: Color32::from_rgb(0x22, 0x22, 0x22),
+            border: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            text_normal: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            text_sub: Color32::from_rgb(0xD6, 0xD6, 0xD6),
+            // 亮黄在纯黑上约 15:1，同时保留可辨认的强调色。
+            accent: Color32::from_rgb(0xFF, 0xE0, 0x3B),
+            accent_soft: Color32::from_rgb(0x3A, 0x33, 0x00),
+            success: Color32::from_rgb(0x6B, 0xFF, 0x9E),
+            warning: Color32::from_rgb(0xFF, 0xD8, 0x4D),
+            error: Color32::from_rgb(0xFF, 0x9A, 0xA2),
+            progress_bg: Color32::from_rgb(0x00, 0x00, 0x00),
+        }
+    }
 }
 
 fn rgb(value: u32) -> Color32 {
@@ -231,6 +251,10 @@ impl Theme {
 pub struct ThemeStore {
     themes: Vec<Theme>,
     current: usize,
+    /// 高对比度与减少动效是"显示层"开关：不写进主题本身，
+    /// 换主题时也不会被主题的配色覆盖。
+    high_contrast: bool,
+    reduce_motion: bool,
 }
 
 impl ThemeStore {
@@ -242,7 +266,30 @@ impl ThemeStore {
         } else {
             themes.push(plain_theme());
         }
-        Self { themes, current: 0 }
+        Self {
+            themes,
+            current: 0,
+            high_contrast: false,
+            reduce_motion: false,
+        }
+    }
+
+    pub fn set_high_contrast(&mut self, enabled: bool) {
+        self.high_contrast = enabled;
+    }
+
+    pub fn set_reduce_motion(&mut self, enabled: bool) {
+        self.reduce_motion = enabled;
+    }
+
+    /// 当前实际生效的配色（已应用高对比度覆盖）。
+    pub fn palette(&self) -> Palette {
+        let palette = self.current().palette;
+        if self.high_contrast {
+            palette.high_contrast()
+        } else {
+            palette
+        }
     }
 
     /// 解码当前主题的纹理。切换主题后调用；已加载则直接返回。
@@ -306,10 +353,14 @@ impl ThemeStore {
     }
 
     pub fn apply(&self, ctx: &egui::Context) {
-        let palette = self.current().palette;
+        let palette = self.palette();
+        // 高对比度用 2px 描边，普通模式维持 1px。
+        let border_width = if self.high_contrast { 2.0 } else { 1.0 };
+        let animation_time = if self.reduce_motion { 0.0 } else { 0.2 };
 
         ctx.set_theme(egui::ThemePreference::Dark);
         ctx.all_styles_mut(|style| {
+            style.animation_time = animation_time;
             style.visuals = egui::Visuals::dark();
             style.visuals.panel_fill = palette.bg_panel;
             style.visuals.window_fill = palette.bg_window;
@@ -321,22 +372,27 @@ impl ThemeStore {
             style.visuals.warn_fg_color = palette.warning;
             style.visuals.error_fg_color = palette.error;
             style.visuals.selection.bg_fill = palette.accent_soft;
-            style.visuals.selection.stroke = egui::Stroke::new(1.0, palette.text_normal);
+            style.visuals.selection.stroke = egui::Stroke::new(border_width, palette.text_normal);
             style.visuals.window_corner_radius = egui::CornerRadius::same(10);
-            style.visuals.window_stroke = egui::Stroke::new(1.0, palette.border);
+            style.visuals.window_stroke = egui::Stroke::new(border_width, palette.border);
             style.visuals.menu_corner_radius = egui::CornerRadius::same(7);
 
-            let subtle_border = egui::Stroke::new(1.0, palette.border.gamma_multiply(0.75));
+            let subtle_border = egui::Stroke::new(
+                border_width,
+                palette
+                    .border
+                    .gamma_multiply(if self.high_contrast { 1.0 } else { 0.75 }),
+            );
             style.visuals.widgets.noninteractive.bg_stroke = subtle_border;
             style.visuals.widgets.noninteractive.fg_stroke =
-                egui::Stroke::new(1.0, palette.text_normal);
+                egui::Stroke::new(border_width, palette.text_normal);
             style.visuals.widgets.inactive.bg_fill = palette.bg_hover;
             style.visuals.widgets.inactive.weak_bg_fill = palette.bg_hover;
             style.visuals.widgets.inactive.bg_stroke = subtle_border;
             style.visuals.widgets.hovered.bg_fill = palette.accent_soft;
             style.visuals.widgets.hovered.weak_bg_fill = palette.accent_soft;
             style.visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.0, palette.accent.gamma_multiply(0.8));
+                egui::Stroke::new(border_width, palette.accent.gamma_multiply(0.8));
             style.visuals.widgets.active.bg_fill = palette.accent_soft;
             style.visuals.widgets.active.weak_bg_fill = palette.accent_soft;
             for visuals in [

@@ -28,3 +28,15 @@ fn open_and_list(path: &Path) {
         std::hint::black_box(&entry.display);
     }
 }
+
+/// 归档内名字可以是任意字符串（甚至是任意字节的 lossy 结果）。净化函数要么拒绝，
+/// 要么给出一个「不含分隔符、不含上跳段、非绝对路径」的相对路径，且再净化一次结果不变。
+pub fn sanitize_name(raw: &str) {
+    let limits = thzip_core::limits::Limits::default();
+    let Ok(rel) = thzip_core::safety::sanitize_rel(raw, &limits) else {
+        return;
+    };
+    std::hint::black_box(&rel);
+    let again = thzip_core::safety::sanitize_rel(&rel.to_string_lossy(), &limits);
+    std::hint::black_box(again.ok().map(|path| path == rel));
+}

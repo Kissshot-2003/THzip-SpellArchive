@@ -14,9 +14,10 @@ const PACKED_W: f32 = 92.0;
 const RATIO_W: f32 = 68.0;
 const METHOD_W: f32 = 80.0;
 const TIME_W: f32 = 126.0;
+const CRC_W: f32 = 82.0;
 
 pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
-    let palette = app.themes.current().palette;
+    let palette = app.themes.palette();
     let title = if app.archive_name.is_empty() {
         app.tr.t(TextKey::EmptyArchive)
     } else {
@@ -46,7 +47,11 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let col_ratio = app.tr.t(TextKey::ColRatio);
     let col_method = app.tr.t(TextKey::ColMethod);
     let col_time = app.tr.t(TextKey::ColTime);
+    let col_crc = app.tr.t(TextKey::ColCrc);
     let col_flags = app.tr.t(TextKey::ColFlags);
+    let only_anomalies_label = app.tr.t(TextKey::OnlyAnomalies);
+    let no_matches = app.tr.t(TextKey::NoMatches);
+    let crc_mismatch_hint = app.tr.t(TextKey::CrcMismatch);
     let sort_hint = app.tr.t(TextKey::SortHint);
     let flag_locked = app.tr.t(TextKey::FlagLocked);
     let flag_spoofed = app.tr.t(TextKey::FlagSpoofed);
@@ -119,9 +124,17 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                         }
                     });
                 });
-                if !rows.is_empty() {
+                if !app.entries.is_empty() {
                     ui.add_space(10.0);
                     ui.horizontal_wrapped(|ui| {
+                        // 过滤可能把当前页清空，工具条必须常驻，否则开关本身会消失。
+                        if ui
+                            .toggle_value(&mut app.only_anomalies, &only_anomalies_label)
+                            .changed()
+                        {
+                            app.touch_settings();
+                        }
+                        ui.separator();
                         if ui.button(&select_all).clicked() {
                             app.select_all_filtered();
                         }
@@ -158,6 +171,18 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
             }
 
             if rows.is_empty() {
+                // 有归档但被搜索/异常过滤清空：给一句明确解释，不要伪装成"未打开归档"。
+                if !app.entries.is_empty() {
+                    ui.add_space(28.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(no_matches)
+                                .size(14.0)
+                                .color(palette.text_sub),
+                        );
+                    });
+                    return;
+                }
                 let top_space = (ui.available_height() - 250.0).max(24.0) * 0.32;
                 ui.add_space(top_space);
                 ui.vertical_centered(|ui| {
@@ -254,18 +279,37 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
             let mut clicked = None;
             let mut preview_index = None;
             let mut header_click = None;
-            let modifiers = ui.input(|input| input.modifiers);
-            let additive = modifiers.command || modifiers.ctrl;
-            let range = modifiers.shift;
 
             // TableBuilder 让表头与数据行共用同一套列宽，不会再出现列错位。
             let compact = ui.available_width() < 800.0;
-            let (name_w, size_w, packed_w, ratio_w, method_w, time_w) = if compact {
-                (190.0, 72.0, 72.0, 52.0, 60.0, 96.0)
+            let default_widths = if compact {
+                [
+                    190.0, 72.0, 72.0, 52.0, 60.0, 96.0, 68.0,
+                ]
             } else {
-                (NAME_W, SIZE_W, PACKED_W, RATIO_W, METHOD_W, TIME_W)
+                [
+                    NAME_W, SIZE_W, PACKED_W, RATIO_W, METHOD_W, TIME_W, CRC_W,
+                ]
             };
-            TableBuilder::new(ui)
+            // 只接受"看着像列宽"的历史值：长度对、有限、不是 0 或负数。
+            let widths = if compact {
+                default_widths
+            } else {
+                app.column_widths
+                    .as_ref()
+                    .filter(|widths| widths.len() >= 7)
+                    .map(|widths| {
+                        let mut out = default_widths;
+                        for (slot, value) in out.iter_mut().zip(widths.iter()) {
+                            if value.is_finite() && *value >= 32.0 {
+                                *slot = *value;
+                            }
+                        }
+                        out
+                    })
+                    .unwrap_or(default_widths)
+            };
+            let mut builder = TableBuilder::new(ui)
                 .id_salt(if compact {
                     "archive_table_compact"
                 } else {
@@ -275,17 +319,16 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                 .resizable(true)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(
-                    Column::initial(name_w)
+                    Column::initial(widths[0])
                         .at_least(if compact { 150.0 } else { 160.0 })
                         .clip(true),
-                )
-                .column(Column::initial(size_w).clip(true))
-                .column(Column::initial(packed_w).clip(true))
-                .column(Column::initial(ratio_w).clip(true))
-                .column(Column::initial(method_w).clip(true))
-                .column(Column::initial(time_w).clip(true))
-                .column(Column::remainder().clip(true))
-                .header(32.0, |mut header| {
+                );
+            for width in &widths[1..] {
+                builder = builder.column(Column::initial(*width).clip(true));
+            }
+            let table = builder.column(Column::remainder().clip(true)).header(
+                32.0,
+                |mut header| {
                     header.col(|ui| {
                         sort_header(
                             ui,
@@ -347,10 +390,18 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                         );
                     });
                     header.col(|ui| {
+                        // CRC 不参与排序：它是校验值，排序没有语义。
+                        ui.strong(&col_crc);
+                    });
+                    header.col(|ui| {
                         ui.strong(&col_flags);
                     });
-                })
-                .body(|body| {
+                },
+            );
+            // 用户拖动列宽后回写设置；表头与行共用 widths，这里读到的就是最终值。
+            let mut measured: Vec<f32> = Vec::new();
+            table.body(|body| {
+                measured = body.widths().to_vec();
                     body.rows(ROW_H, rows.len(), |mut row| {
                         let index = rows[row.index()];
                         let entry = &entries[index];
@@ -394,6 +445,16 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                                     );
                                 }
                             }
+                            // 预检或显式防护发现的可疑名字：用 ⚠ 把风险前置到名称旁边，
+                            // 不依赖用户去"标记"列里找。
+                            let plan_reason = app.outcomes.suspicious.get(&entry.id);
+                            if guard.suspicious || plan_reason.is_some() {
+                                let reason = plan_reason
+                                    .cloned()
+                                    .unwrap_or_else(|| spoofed_hint.clone());
+                                ui.label(egui::RichText::new("⚠").color(palette.warning))
+                                    .on_hover_text(reason);
+                            }
                             let response = ui.selectable_label(selected, guard.text.clone());
                             if response.clicked() {
                                 row_clicked = true;
@@ -436,6 +497,22 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                             ui.label(crate::ui::format_time(entry.mtime));
                         });
                         row.col(|ui| {
+                            let text = entry
+                                .crc32
+                                .map(|crc| format!("{crc:08X}"))
+                                .unwrap_or_else(|| "—".to_owned());
+                            let mismatch = app.outcomes.crc_mismatch.contains(&entry.id);
+                            let color = if mismatch {
+                                palette.error
+                            } else {
+                                palette.text_sub
+                            };
+                            let response = ui.label(egui::RichText::new(text).color(color));
+                            if mismatch {
+                                response.on_hover_text(&crc_mismatch_hint);
+                            }
+                        });
+                        row.col(|ui| {
                             if entry.encrypted && lock_icon.is_none() {
                                 ui.label(egui::RichText::new(&flag_locked).color(palette.warning));
                             }
@@ -447,36 +524,28 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                     });
                 });
 
-            if let Some((index, clicked_row)) = clicked {
-                if range {
-                    if let Some(anchor_row) = app
-                        .last_selected
-                        .and_then(|anchor| rows.iter().position(|&index| index == anchor))
-                    {
-                        if !additive {
-                            app.selected.clear();
-                        }
-                        let (low, high) = if anchor_row <= clicked_row {
-                            (anchor_row, clicked_row)
-                        } else {
-                            (clicked_row, anchor_row)
-                        };
-                        for &entry_index in &rows[low..=high] {
-                            app.selected.insert(entry_index);
-                        }
-                    } else {
-                        app.selected.clear();
-                        app.selected.insert(index);
-                    }
-                } else if additive {
-                    if !app.selected.remove(&index) {
-                        app.selected.insert(index);
-                    }
-                } else {
-                    app.selected.clear();
+            if let Some((index, _)) = clicked {
+                // Player 模型：单击即切换该行，不区分 Ctrl/Shift。
+                if !app.selected.remove(&index) {
                     app.selected.insert(index);
                 }
                 app.last_selected = Some(index);
+            }
+
+            // 列宽只在非紧凑布局下持久化；紧凑布局是按窗口宽度算出来的临时值。
+            if !compact && measured.len() >= 7 {
+                let widths = measured;
+                let changed = app.column_widths.as_ref().is_none_or(|old| {
+                    old.len() != widths.len()
+                        || old
+                            .iter()
+                            .zip(widths.iter())
+                            .any(|(a, b)| (a - b).abs() >= 0.5)
+                });
+                if changed {
+                    app.column_widths = Some(widths);
+                    app.touch_settings();
+                }
             }
 
             if let Some(index) = preview_index {

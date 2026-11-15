@@ -63,7 +63,45 @@ fn to_filetime(time: SystemTime) -> Option<windows_sys::Win32::Foundation::FILET
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+#[allow(unsafe_code)]
+pub fn set_mtime(path: &Path, time: SystemTime) -> std::io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(duration) = time.duration_since(UNIX_EPOCH) else {
+        // 早于 1970 的时间戳无法用 timespec 表达，静默跳过。
+        return Ok(());
+    };
+    let Ok(text) = CString::new(path.as_os_str().as_bytes()) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path contains NUL",
+        ));
+    };
+
+    let stamp = libc::timespec {
+        tv_sec: duration.as_secs() as libc::time_t,
+        tv_nsec: duration.subsec_nanos() as _,
+    };
+    // UTIME_OMIT 表示「这一项不改」；数组顺序是 [atime, mtime]，
+    // 因此第一项设为 OMIT，只改 mtime。
+    let times = [
+        libc::timespec {
+            tv_sec: 0,
+            tv_nsec: libc::UTIME_OMIT,
+        },
+        stamp,
+    ];
+    // SAFETY: 路径为有效的 NUL 结尾 C 字符串，times 是长度 2 的有效数组。
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, text.as_ptr(), times.as_ptr(), 0) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(windows, unix)))]
 pub fn set_mtime(_path: &Path, _time: SystemTime) -> std::io::Result<()> {
     Ok(())
 }

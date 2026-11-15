@@ -36,6 +36,62 @@ pub fn warning(locale: Locale, warning: &PlanWarning) -> String {
         (Locale::EnUs, PlanWarning::UnsafePath { id, issue }) => {
             format!("Unsafe path (entry {id}): {}", issue_en(*issue))
         }
+        (
+            Locale::ZhCn,
+            PlanWarning::InsufficientSpace {
+                required,
+                reserved,
+                available,
+            },
+        ) => format!(
+            "目标盘空间不足：需要 {}，需保留 {}，当前可用 {}",
+            human_size(*required),
+            human_size(*reserved),
+            human_size(*available)
+        ),
+        (
+            Locale::EnUs,
+            PlanWarning::InsufficientSpace {
+                required,
+                reserved,
+                available,
+            },
+        ) => format!(
+            "Not enough space: need {}, {} must stay free, {} available",
+            human_size(*required),
+            human_size(*reserved),
+            human_size(*available)
+        ),
+        (Locale::ZhCn, PlanWarning::NestedArchive { id, depth }) => {
+            format!("包含嵌套归档（条目 {id}，第 {depth} 层）")
+        }
+        (Locale::EnUs, PlanWarning::NestedArchive { id, depth }) => {
+            format!("Nested archive inside (entry {id}, level {depth})")
+        }
+        (Locale::ZhCn, PlanWarning::LargeFileOnFat32 { id, size }) => format!(
+            "单文件 {} 超过 FAT32 的 4 GiB 上限（条目 {id}）",
+            human_size(*size)
+        ),
+        (Locale::EnUs, PlanWarning::LargeFileOnFat32 { id, size }) => format!(
+            "{} exceeds the 4 GiB FAT32 limit (entry {id})",
+            human_size(*size)
+        ),
+    }
+}
+
+/// 人类可读的字节数。core 里的同类函数不对外公开，界面层自带一份。
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[0])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 

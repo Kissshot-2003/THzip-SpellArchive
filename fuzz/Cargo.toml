@@ -39,4 +39,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_path_sanitize"
+path = "fuzz_targets/fuzz_path_sanitize.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

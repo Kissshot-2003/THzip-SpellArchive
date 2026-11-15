@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use std::time::Duration;
+
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
 use crate::backend;
 use crate::error::{ArchiveError, FailReason};
@@ -77,46 +79,111 @@ pub enum TaskOp {
     },
 }
 
-/// `submit` 返回的句柄：UI 用它显示任务并按需取消。
+impl TaskOp {
+    /// 该操作会独占写的磁盘路径。同一路径上的两个写操作必须串行，
+    /// 否则「一边打包一边重写同一个归档」会把文件写成半截。
+    /// 只读操作（Open / Plan / Test / Preview）返回 None，可以并发。
+    fn exclusive_path(&self) -> Option<&PathBuf> {
+        match self {
+            TaskOp::Pack { output, .. } => Some(output),
+            TaskOp::Rewrite { path, .. } => Some(path),
+            TaskOp::InstallTheme { target, .. } => Some(target),
+            TaskOp::Extract { plan, .. } => Some(&plan.root),
+            _ => None,
+        }
+    }
+}
+
+/// `submit` 返回的句柄：UI 用它显示任务、取消或暂停。
 #[derive(Clone)]
 pub struct TaskHandle {
     pub id: TaskId,
     pub cancel: CancelToken,
 }
 
+impl TaskHandle {
+    /// 请求暂停。已经进入下一个批次边界时才会真正停下，
+    /// 当前这一块数据仍会写完，不会留下半截文件。
+    pub fn pause(&self) {
+        self.cancel.pause();
+    }
+
+    pub fn resume(&self) {
+        self.cancel.resume();
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.cancel.is_paused()
+    }
+
+    pub fn cancel_task(&self) {
+        self.cancel.cancel();
+    }
+}
+
+/// 待处理操作队列的容量。无界队列在用户狂点「解压」时会把内存吃光，
+/// 而且 `submit` 永不阻塞，UI 也得不到「排队已满」的反馈。
+const QUEUE_CAPACITY: usize = 1024;
+
+/// 提交时最长等待时间。队列满到这个程度说明后台已经严重积压，
+/// 与其一直卡住 UI，不如直接失败让用户知道。
+const SUBMIT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// 固定数量后台线程 + 双向通道。事件由 UI 侧 `try_recv` 批量取走。
+/// 按路径分片的互斥锁表，用于把同路径的写操作串行化。
+type PathLocks = Arc<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>>;
+
 pub struct TaskRunner {
     op_tx: Sender<(TaskId, CancelToken, TaskOp)>,
     ev_rx: Receiver<TaskEvent>,
     next_id: TaskId,
+    path_locks: PathLocks,
 }
 
 impl TaskRunner {
     pub fn new(workers: usize) -> Self {
-        let (op_tx, op_rx) = unbounded::<(TaskId, CancelToken, TaskOp)>();
+        let (op_tx, op_rx) = bounded::<(TaskId, CancelToken, TaskOp)>(QUEUE_CAPACITY);
+        // 事件通道保持无界：它是 worker 唯一的上报途径，一旦阻塞在这里
+        // 就等于把整个后台卡死（UI 线程卡住时尤其致命）。事件本身很小，
+        // 上游操作队列又已有界，堆积量天然被限制住。
         let (ev_tx, ev_rx) = unbounded::<TaskEvent>();
+        let path_locks: PathLocks = Arc::new(Mutex::new(HashMap::new()));
 
         for index in 0..workers.max(1) {
             let op_rx = op_rx.clone();
             let ev_tx = ev_tx.clone();
+            let locks = Arc::clone(&path_locks);
             let _ = std::thread::Builder::new()
                 .name(format!("spell-worker-{index}"))
-                .spawn(move || worker_loop(op_rx, ev_tx));
+                .spawn(move || worker_loop(op_rx, ev_tx, locks));
         }
 
         Self {
             op_tx,
             ev_rx,
             next_id: 1,
+            path_locks,
         }
     }
 
+    /// 提交一个操作。队列满时最多等 [`SUBMIT_TIMEOUT`]。
+    ///
+    /// 等待超时也照样返回句柄：操作没进队列，`cancel` 之后 worker 不会执行它，
+    /// 调用方可以从 `try_recv` 里看不到任何事件来判断这一点。
     pub fn submit(&mut self, op: TaskOp) -> TaskHandle {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         let cancel = CancelToken::new();
-        let _ = self.op_tx.send((id, cancel.clone(), op));
+        let _ = self
+            .op_tx
+            .send_timeout((id, cancel.clone(), op), SUBMIT_TIMEOUT);
         TaskHandle { id, cancel }
+    }
+
+    /// 清掉已经没人持有的路径锁，避免长会话里锁表无限增长。
+    pub fn prune_locks(&self) {
+        let mut guard = lock_map(&self.path_locks);
+        guard.retain(|_, lock| Arc::strong_count(lock) > 1);
     }
 
     /// 非阻塞取一条事件。UI 每帧循环调用直到返回 `None`。
@@ -125,8 +192,48 @@ impl TaskRunner {
     }
 }
 
-fn worker_loop(op_rx: Receiver<(TaskId, CancelToken, TaskOp)>, ev_tx: Sender<TaskEvent>) {
+/// 取锁表，忽略毒化：某个 worker panic 不该让其余 worker 再也拿不到锁。
+fn lock_map(
+    locks: &Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+) -> std::sync::MutexGuard<'_, HashMap<PathBuf, Arc<Mutex<()>>>> {
+    locks.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// 路径的加锁键：真实路径优先，取不到就退回「父目录真实路径 + 文件名」。
+fn lock_key(path: &std::path::Path) -> PathBuf {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical;
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let name = path.file_name().map(|name| name.to_os_string());
+    match (std::fs::canonicalize(parent), name) {
+        (Ok(base), Some(name)) => base.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
+fn archive_lock(locks: &PathLocks, path: &std::path::Path) -> Arc<Mutex<()>> {
+    let key = lock_key(path);
+    let mut guard = lock_map(locks);
+    Arc::clone(guard.entry(key).or_default())
+}
+
+fn worker_loop(
+    op_rx: Receiver<(TaskId, CancelToken, TaskOp)>,
+    ev_tx: Sender<TaskEvent>,
+    locks: PathLocks,
+) {
     while let Ok((task, cancel, op)) = op_rx.recv() {
+        // 同路径的写操作串行执行。先取锁再进 run_task，
+        // 保证「打包 / 重写 / 解压到同一目录」不会交错。
+        let lock = op.exclusive_path().map(|path| archive_lock(&locks, path));
+        let _guard = lock
+            .as_ref()
+            .map(|lock| lock.lock().unwrap_or_else(|err| err.into_inner()));
+
         let tx = ev_tx.clone();
         let result = worker::guarded(|| run_task(task, &cancel, op, &tx));
         if let Err(message) = result {
@@ -261,7 +368,8 @@ fn run_task(
                 },
             );
 
-            let sink = ExtractDirSink::new(&plan, &decisions, limits);
+            let sink =
+                ExtractDirSink::with_control(&plan, &decisions, limits, Some(cancel.clone()));
             let mut sink = ProgressSink::new(sink, tx.clone(), task);
             let mut guard = lock_reader(&reader);
             match guard.extract(&plan, &decisions, cancel, &mut sink) {
@@ -405,7 +513,7 @@ fn run_task(
                 default: OverwritePolicy::Skip,
                 ..Default::default()
             };
-            let mut sink = MemorySink::new(max_bytes);
+            let mut sink = MemorySink::with_limits(max_bytes, limits);
             let report = match guard.extract(&plan, &decisions, cancel, &mut sink) {
                 Ok(report) => report,
                 Err(err) => {
@@ -754,7 +862,8 @@ fn run_task(
                 default: OverwritePolicy::Skip,
                 ..Default::default()
             };
-            let sink = ExtractDirSink::new(&plan, &decisions, limits);
+            let sink =
+                ExtractDirSink::with_control(&plan, &decisions, limits, Some(cancel.clone()));
             let mut sink = ProgressSink::new(sink, tx.clone(), task);
             match reader.extract(&plan, &decisions, cancel, &mut sink) {
                 Ok(report) => {

@@ -1,0 +1,8 @@
+# 静态链接 MSVC 运行库：exe 不再依赖 MSVCP140.dll / VCRUNTIME140.dll。
+# Windows 10/11 不自带 VC++ 运行库，便携包一旦落到精简系统上就会双击闪退。
+# 代价是 exe 增大约 1 MiB，换掉「用户没装运行库就启动失败」这个整类问题。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

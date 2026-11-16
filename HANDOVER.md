@@ -26,7 +26,7 @@
 | `LICENSE` | MIT 全文 |
 
 工程路径：仓库根目录（本文件所在处）
-素材目录：`../assets/`（与工程同级；仓库内已包含 `themes/` 的成品素材）
+素材目录：原始像素画 `assets/` 不在版本控制内；仓库内已包含同步后的 `themes/` 成品素材
 
 ### 0.1 30 秒摘要
 
@@ -38,6 +38,9 @@
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读（UnRAR 许可限制）；exe 未签名；7z 固实包无压缩字节级进度（上游库未暴露回调）。
 - **工作区状态**：工作区干净；远端见 `git remote -v`；最新提交见 `git log -1`。
+- **提交方式**：`main` 已开分支保护——改动必须走 PR，且 `check` / `supply-chain` /
+  `differential` / `long-path` 四个检查全绿才能合。强推与删分支被禁。
+  也就是说 `git push origin main` 不再可行，流程见 `CONTRIBUTING.md` 的「提交流程」。
 - **下一步建议**：代码签名（需证书，见 `docs/legal/signing.md`）；handoff IPC 改 WM_COPYDATA 与
   7z 固实进度均为上游或风险阻塞，详见 `ROADMAP.md`。
 
@@ -745,7 +748,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 8.1 数据流
 
 ```text
-../assets/  (原始素材)
+assets/  (原始素材，不在仓库内)
    └─ scripts/sync-themes.ps1
         └─ themes/<skin>/png/       (运行时读取)
              └─ theme.toml [resource] key → 路径
@@ -754,6 +757,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ```
 
 素材源与主题目录是两份：改素材后跑一次 `.\scripts\sync-themes.ps1`，`theme.toml` 不会被覆盖。
+仓库只包含同步后的 `themes/`，原始素材 `assets/` 不在版本控制内。
 
 注意：`assets/tokens/tokens.json` 里的文件名多数不存在；实际可用的是
 `icons/icon-*.png`、`avatars/*-256.png`、`progress/*.png`。

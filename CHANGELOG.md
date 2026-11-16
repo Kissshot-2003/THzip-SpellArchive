@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-16
+
 ### 新增
 
 - `main` 分支保护：改动必须走 pull request，`check` / `supply-chain` /
@@ -91,12 +93,19 @@
   `ZipFile::name()` 返回 `Result`（非 UTF-8 名字），`ZipWriter::set_comment()` 返回 `Result`（注释上限 32 KiB）。
 - `app.rs` 拆分：状态 → `state.rs`、搜索 → `filter.rs`、打包 → `pack.rs`、改名 → `relocate.rs`、测试 → `tests.rs`，主文件约 1380 行。
 - `sevenz-rust2` 升级到 0.24.2。
+- 依赖例行升级（Dependabot 7 个 PR 一次性收口）：`zstd` 0.13 → 0.14、`lz4_flex` 0.12 → 0.14、
+  `toml` 1.1.8 → 1.2.0、`fontdb` 0.23 → 0.24、`encoding_rs` 0.8.35 → 0.8.44、
+  `flate2` 1.1.10 → 1.1.11、`crc32fast` 1.5.4 → 1.5.5；四个 CI 检查（含与 7-Zip 的差分测试）全绿。
+  `dependabot.yml` 补上 `zstd` / `lz4_flex` 的 0.x 小版本 ignore，与其余解压后端同策略：
+  这类升级走手动迁移 + 差分测试，不再自动开 PR。
 
 ### 性能
 
-- **主程序体积 23.17 MiB → 21.13 MiB（−8.8%）**，精简构建 19.87 MiB，7z 压缩分发后 6.50 MiB；
-  CLI 4.75 MiB（7z 后 1.46 MiB）。两笔支出抵掉了部分收益：crt-static 静态链接 MSVC 运行库（各约 +1 MiB）、
-  以及 zip 升到 9.6 修安全公告（+0.13 MiB）；刨掉这两笔，实际下降约 2.2 MiB。
+- 主程序体积 23.17 MiB → 21.13 MiB（−8.8%）后，因 RAR 后端换成纯 Rust 的 `unrar-rs`
+  （纠错 / 并行 / CRC 加速代码随项目静态链入，约 +3.8 MiB）最终为 **24.92 MiB**，
+  精简构建 23.65 MiB，7z 压缩分发后 10.74 MiB；CLI 7.18 MiB（7z 后 3.32 MiB）。
+  中途的两笔支出：crt-static 静态链接 MSVC 运行库（各约 +1 MiB）、
+  以及 zip 升到 9.6 修安全公告（+0.13 MiB）。
   - release profile 改为 `strip = "symbols"` + `lto = "fat"`。
   - `eframe` 关掉 `wayland` / `x11` / `web_screen_reader` / `system_fonts`（项目已自建完整 CJK 字体方案：内嵌 Noto Sans SC 子集 + Windows 字体 + fontdb 兜底）。
   - `wgpu` 只保留 D3D12 后端，去掉 Vulkan / Metal / GLES / WebGPU（Vulkan 的 `ash` 绑定单独就占 68 MB rlib）。

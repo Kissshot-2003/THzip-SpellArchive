@@ -5,14 +5,13 @@ default-members = ["crates/thzip-app"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"
-authors = ["THzip-SpellArchive contributors"]
 
 [workspace.dependencies]
-thzip-core = { path = "crates/thzip-core", version = "0.2.0" }
+thzip-core = { path = "crates/thzip-core", version = "0.2.1" }
 thiserror = "2"
 zeroize = "1"
 encoding_rs = "0.8"
@@ -25,12 +24,6 @@ eframe = { version = "0.37", default-features = false, features = [
 ] }
 egui = "0.37"
 egui_extras = { version = "0.37", default-features = false }
-wgpu = { version = "30", default-features = false, features = [
-    "std",
-    "wgsl",
-    "dx12",
-    "parking_lot",
-] }
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }

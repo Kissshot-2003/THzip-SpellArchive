@@ -19,6 +19,14 @@ updates:
         update-types:
           - version-update:semver-major
           - version-update:semver-minor
+      - dependency-name: zstd
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+      - dependency-name: lz4_flex
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
       - dependency-name: resvg
         update-types:
           - version-update:semver-major

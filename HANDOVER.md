@@ -3,11 +3,13 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（本次：Win11 右键菜单按扩展名收敛 + 多选 + 经典菜单开关、
+> 最后更新：2026-11（本次：7 个依赖升级 PR 收口（zstd 0.14 / lz4_flex 0.14 / toml 1.2 /
+> fontdb 0.24 / encoding_rs 0.8.44 / flate2 / crc32fast patch），体积门禁与实测数字对齐
+> check-size.ps1；此前：Win11 右键菜单按扩展名收敛 + 多选 + 经典菜单开关、
 > RAR 后端换 unrar-rs 实现真流式、代码签名通道、文档漂移修正；
-> 此前：私有远端 + CI、fuzz/差分/基准、便携模式与 CLI JSON、归档注释、主题导出、
+> 再此前：私有远端 + CI、fuzz/差分/基准、便携模式与 CLI JSON、归档注释、主题导出、
 > 任务模板、文本/图片预览、7z 分卷创建、设置 schema 5、`app.rs` 拆分、
-> 10k zip 打开 328→8 ms、安装包实测；再此前：项目改名、7z/tar 追加、RAR 读取、
+> 10k zip 打开 328→8 ms、安装包实测；更早：项目改名、7z/tar 追加、RAR 读取、
 > 多标签页、全量 i18n 等）
 
 ---
@@ -1087,7 +1089,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 属性测试 | 已实现 | `crates/thzip-core/tests/property.rs`（10 项，proptest） |
 | fuzz 目标 | 已实现 | `fuzz/fuzz_targets/` 5 个（4 个格式 + `fuzz_path_sanitize`）；`.github/workflows/fuzz.yml` 每周一 03:00 + 手动触发；主题清单改用 app 侧 proptest（解析代码耦合 eframe，链进 fuzz 不划算） |
 | 供应链门禁 | 已实现并本地跑通 | `deny.toml` + CI `cargo-deny-action`；`cargo deny check` 四类检查全绿。`zip` 4.6.1 → 9.6.0 修掉 RUSTSEC-2026-0367/0368/0369/0429；字体栈两条 unmaintained 公告（RUSTSEC-2026-0206 / 0192）附理由忽略——resvg 0.45 卡住升级路径，且只用于把本机主题里的少量 SVG 图标转位图 |
-| 体积门禁 | 已实现 | `scripts/check-size.ps1`（GUI ≤ 23 MiB、CLI ≤ 6 MiB） |
+| 体积门禁 | 已实现 | `scripts/check-size.ps1`（GUI ≤ 27 MiB、CLI ≤ 8 MiB） |
 | 无头 UI 冒烟 | 已实现 | `crates/thzip-app/src/ui/smoke.rs`（egui_kittest，3 项：数值越界、连续多帧、窄容器长文本） |
 | 长路径回归 | 已实现 | `crates/thzip-core/tests/long_path.rs`（3 项）+ CI `long-path` job（`windows-latest` 默认关着长路径开关） |
 | 伪本地化 | 已实现 | `i18n::pseudo_text`，`THZIP_PSEUDO_LOCALE=1` 开启；另有「漏翻」检测测试 |
@@ -1126,13 +1128,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 | 版本 | exe | 7z `-mx=9` 单文件压缩 |
 |---|---|---|
-| GUI 默认（含屏幕阅读器 + SVG 文字） | 21.13 MiB（22,161,408 B） | 6.50 MiB |
-| GUI `--no-default-features` | 19.87 MiB（20,830,720 B） | 6.17 MiB |
-| CLI | 4.75 MiB（4,977,664 B） | 1.46 MiB |
+| GUI 默认（含屏幕阅读器 + SVG 文字） | 24.92 MiB | 10.74 MiB |
+| GUI `--no-default-features` | 23.65 MiB | 10.24 MiB |
+| CLI | 7.18 MiB | 3.32 MiB |
 
-- 比上一轮的 20.53 MiB **没有继续下降**，两笔支出抵掉了优化收益：
-  1. crt-static 把 MSVC 运行库静态链了进来（约 1 MiB）——有意换的，Windows 10/11 不自带
-     VC++ 运行库，便携包落到精简系统上会双击闪退；
-  2. `zip` 4.6.1 → 9.6.0 修 RUSTSEC（GUI +0.13 MiB、CLI +0.14 MiB）——依赖带洞不能留。
-- 门禁：`scripts/check-size.ps1`（GUI ≤ 23 MiB、CLI ≤ 6 MiB），CI 在打包前跑。
+- 2026-11 换 RAR 后端（unrar-ng → 纯 Rust 的 `unrar-rs`）使体积上调：纠错（reedsolomon）、
+  并行解码（rayon）与 CRC 加速（crc-turbo）随项目静态链入，约 +3.8 MiB（GUI）/ +2.4 MiB（CLI），
+  换来的是条目流式解码；这些代码的内存占用与项目大小无关，详见 `docs/legal/unrar-note.md`。
+- 门禁：`scripts/check-size.ps1`（GUI ≤ 27 MiB、CLI ≤ 8 MiB），CI 在打包前跑。
 - 口径：单个 exe；「7z」列是 `7z a -t7z -mx=9` 压这单个 exe 的结果，不含主题与文档。

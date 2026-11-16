@@ -5,13 +5,13 @@ default-members = ["crates/thzip-app"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"
 
 [workspace.dependencies]
-thzip-core = { path = "crates/thzip-core", version = "0.2.0" }
+thzip-core = { path = "crates/thzip-core", version = "0.2.1" }
 thiserror = "2"
 zeroize = "1"
 encoding_rs = "0.8"

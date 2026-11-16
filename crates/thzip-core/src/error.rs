@@ -96,8 +96,6 @@ pub enum FailReason {
         format: String,
         method: String,
     },
-    EncryptedXzZipEntry,
-    EncryptedLzmaZipEntry,
     ChecksumFailed {
         format: String,
     },
@@ -270,8 +268,6 @@ impl FailReason {
             FailReason::UnsupportedMethod { format, method } => {
                 format!("{format} 暂不支持压缩方法 {method}")
             }
-            FailReason::EncryptedXzZipEntry => "加密的 XZ zip 条目暂不支持解压".to_owned(),
-            FailReason::EncryptedLzmaZipEntry => "加密的 LZMA zip 条目暂不支持解压".to_owned(),
             FailReason::ChecksumFailed { format } => format!("{format} 数据校验失败"),
             FailReason::CorruptLzmaHeader => "zip LZMA 头属性长度异常".to_owned(),
             FailReason::WriterClosed { format } => format!("{format} 写入器已中止"),

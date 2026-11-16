@@ -25,20 +25,24 @@
 | `NOTICE.md` | 代码/素材/字体/同人授权边界 |
 | `LICENSE` | MIT 全文 |
 
-工程路径：`C:\Users\karl2\Desktop\SpellArchive\spell_archive`
-素材目录：`C:\Users\karl2\Desktop\SpellArchive\assets`（与工程同级）
+工程路径：仓库根目录（本文件所在处）
+素材目录：原始像素画 `assets/` 不在版本控制内；仓库内已包含同步后的 `themes/` 成品素材
 
 ### 0.1 30 秒摘要
 
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（204）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（212）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
-- **当前风险**：RAR 只读；加密 LZMA/XZ 未支持；exe 未签名。
-- **工作区状态**：工作区干净；远端 `https://github.com/Kissshot-2003/THzip-SpellArchive`；最新提交见 `git log -1`。
-- **下一步建议**：代码签名（需证书）；handoff IPC / RAR 流式 / 加密 LZMA/XZ 与 7z 固实进度均为上游或风险阻塞，详见 `ROADMAP.md`。
+- **当前风险**：RAR 只读（UnRAR 许可限制）；exe 未签名；7z 固实包无压缩字节级进度（上游库未暴露回调）。
+- **工作区状态**：工作区干净；远端见 `git remote -v`；最新提交见 `git log -1`。
+- **提交方式**：`main` 已开分支保护——改动必须走 PR，且 `check` / `supply-chain` /
+  `differential` / `long-path` 四个检查全绿才能合。强推与删分支被禁。
+  也就是说 `git push origin main` 不再可行，流程见 `CONTRIBUTING.md` 的「提交流程」。
+- **下一步建议**：代码签名（需证书，见 `docs/legal/signing.md`）；handoff IPC 改 WM_COPYDATA 与
+  7z 固实进度均为上游或风险阻塞，详见 `ROADMAP.md`。
 
 ---
 
@@ -90,9 +94,9 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ### 2.2 命令
 
 ```powershell
-cd C:\Users\karl2\Desktop\SpellArchive\spell_archive
+cd <仓库根目录>   # 含 Cargo.toml 的那一层
 
-cargo test --workspace                 # 204 个测试
+cargo test --workspace                 # 212 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -147,7 +151,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 204 通过；clippy 无告警。
+12. `cargo test --workspace` 212 通过；clippy 无告警。
 
 ---
 
@@ -338,9 +342,13 @@ UI 选目标目录
 - 同名/大小写冲突自动 `~1` 改名。
 - LZMA（方法 14）由 `lzma-rust2` 自行解码：zip crate 的解压器不识别 ZIP 内部 LZMA 头。
   解析 2 字节版本 + 2 字节属性长度 + 5 字节属性后再喂给 `LzmaReader::new_with_props`；
-  字典上限 512 MiB，超过直接拒绝；加密的 LZMA 条目暂不支持。
-- XZ（方法 95）由 `liblzma` 解码，内存上限 512 MiB；未知方法和加密的 LZMA/XZ
-  在 `plan()` 阶段产生 `UnsupportedMethod` 警告并标记为跳过；AES 条目显示为 `AES`。
+  字典上限 512 MiB，超过直接拒绝。
+- XZ（方法 95）由 `liblzma` 解码，内存上限 512 MiB。
+- **加密条目一律交给 zip crate 处理**：WinZip AES 条目的 compression method 记作 99，
+  真实压缩方法在 0x9901 extra field 里；zip crate 解析时用真实方法覆盖 99，
+  再按「先 AES 解密、再按真实方法解压」走完。因此 AES + LZMA / AES + XZ
+  这类组合现在能正常解开（依赖其 `lzma` / `xz` feature）。
+  未加密的 LZMA/XZ 仍走本项目自己的解码器——字典上限与进度策略由本项目掌握。
 
 写入：
 
@@ -740,7 +748,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ### 8.1 数据流
 
 ```text
-../assets/  (原始素材)
+assets/  (原始素材，不在仓库内)
    └─ scripts/sync-themes.ps1
         └─ themes/<skin>/png/       (运行时读取)
              └─ theme.toml [resource] key → 路径
@@ -749,6 +757,7 @@ UV 与目标矩形必须同时按比例裁剪；只裁 UV 会把左侧比例拉�
 ```
 
 素材源与主题目录是两份：改素材后跑一次 `.\scripts\sync-themes.ps1`，`theme.toml` 不会被覆盖。
+仓库只包含同步后的 `themes/`，原始素材 `assets/` 不在版本控制内。
 
 注意：`assets/tokens/tokens.json` 里的文件名多数不存在；实际可用的是
 `icons/icon-*.png`、`avatars/*-256.png`、`progress/*.png`。
@@ -795,7 +804,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **204** 个测试（core 141 + app 59 + cli 4）。
+当前共 **212** 个测试（core 144 + app 64 + cli 4）。
 
 ### 9.2 测试分布
 
@@ -853,7 +862,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 13 | `themes/*/png` 是复制品 | 素材更新要跑同步脚本 | 已有 sync 脚本 |
 | 14 | 已修复 | 本轮批次已提交（`c2e5a6e`） | 已有回滚点 |
 | 15 | exe 未做代码签名 | SmartScreen 可能拦截 | 发布前购买/配置签名证书 |
-| 16 | 部分修复 | 写入支持 Store/Deflate/BZip2/Zstd；读取支持 Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；加密 LZMA/XZ 不支持 |
+| 16 | 已修复 | 写入支持 Store/Deflate/BZip2/Zstd；读取支持 Deflate64/BZip2/Zstd/PPMd/LZMA/XZ；加密条目（含 AES+LZMA/AES+XZ）交由 zip crate 处理 |
 | 17 | zip 追加会完整复制原包 | 大包耗时、临时空间翻倍 | 增量原地追加风险高，暂不做 |
 | 18 | 打包扫描跳过符号链接 | 链接内容不会进包 | 需要时提供“跟随链接”+ 环检测 |
 | 19 | 已修复 | zip / 7z 检测到加密包时直接拒绝追加，避免新条目以明文写入；追加仍不能设置新密码 | 加密追加需密码重加密，暂不做 |
@@ -890,7 +899,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### 格式增强
 
-- zip：加密 LZMA/XZ；写端可选更多压缩方法。
+- zip：写端可选更多压缩方法（LZMA/XZ 写入需 zip crate 支持，目前只有读取侧有）。
 - 7z：固实包压缩字节进度；固实写入；加密包追加（需密码重加密）。
 - tar：可选加密（不在 tar 规范内，暂不做）；追加已完成。
 - RAR：超大条目的性能优化；注意 UnRAR 许可证。
@@ -954,7 +963,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（204 通过）
+- [ ] `cargo test --workspace`（212 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示

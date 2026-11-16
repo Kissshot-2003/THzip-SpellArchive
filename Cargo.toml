@@ -46,6 +46,12 @@ zip = { version = "9.6", default-features = false, features = [
     "zstd",
     "ppmd",
     "aes-crypto",
+    # LZMA / XZ 解码器：zip crate 在解析 AES extra field 时会用 0x9901
+    # 里记录的真实压缩方法覆盖 method 99，因此「AES + LZMA」这类组合
+    # 只有在 crate 自带 LZMA/XZ 解码器时才能解开。用的是项目自己也在
+    # 用的 lzma-rust2，不额外引入依赖。
+    "lzma",
+    "xz",
 ] }
 crc32fast = "1"
 crossbeam-channel = "0.5"

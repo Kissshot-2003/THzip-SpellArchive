@@ -117,10 +117,6 @@ fn reason_en(reason: &FailReason) -> String {
         FailReason::UnsupportedMethod { format, method } => {
             format!("{format} does not support compression method {method}")
         }
-        FailReason::EncryptedXzZipEntry => "Encrypted XZ zip entries are not supported".to_owned(),
-        FailReason::EncryptedLzmaZipEntry => {
-            "Encrypted LZMA zip entries are not supported".to_owned()
-        }
         FailReason::ChecksumFailed { format } => {
             format!("{format} checksum verification failed")
         }

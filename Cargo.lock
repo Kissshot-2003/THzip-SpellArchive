@@ -2683,15 +2683,6 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lz4_flex"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90071f8077f8e40adfc4b7fe9cd495ce316263f19e75c2211eeff3fdf475a3d9"
-dependencies = [
- "twox-hash",
-]
-
-[[package]]
-name = "lz4_flex"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f5af6ecc17202a60aebe8502b4e8160bd745820e5a8417c8e5d048af838aec5"
@@ -4193,7 +4184,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "js-sys",
- "lz4_flex 0.14.1",
+ "lz4_flex",
  "lzma-rust2 0.23.0",
  "ppmd-rust",
  "sha2",
@@ -4613,7 +4604,7 @@ dependencies = [
  "flate2",
  "libc",
  "liblzma",
- "lz4_flex 0.12.2",
+ "lz4_flex",
  "lzma-rust2 0.16.5",
  "proptest",
  "sevenz-rust2",

@@ -61,7 +61,7 @@ tar = "0.4"
 flate2 = "1"
 bzip2 = "0.6"
 lzma-rust2 = { version = "0.16", features = ["xz", "encoder"] }
-zstd = "0.13"
+zstd = "0.14"
 lz4_flex = { version = "0.12", features = ["frame"] }
 # RAR 读取。unrar-rs 是纯 Rust 实现，`copy_to` 能把解码产物直接写进
 # 调用方的 writer——零缓冲、零临时文件，天然满足「任意大小条目流式解压」。

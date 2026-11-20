@@ -210,6 +210,11 @@ README/CHANGELOG/LICENSE/NOTICE、third_party 许可证复制到 `dist/THzip-Spe
 
 ## 致谢
 
+### 主题作者
+
+内置像素主题（博丽灵梦 / 雾雨魔理沙 / 东风谷早苗 / 琪露诺）由 THzip-SpellArchive Design 绘制，
+以 CC BY-NC-SA 4.0 发布。社区投稿主题在通过审核后，会在此列出作者署名与主页（见 `theme.toml` 的 `[meta].homepage`）。
+
 - [egui](https://github.com/emilk/egui) / [eframe](https://github.com/emilk/egui) —— 界面框架
 - [zip](https://github.com/zip-rs/zip2) —— zip 格式读写
 - [sevenz-rust2](https://github.com/ip7z/7z-rust) —— 7z 格式读写

@@ -32,6 +32,8 @@ struct Meta {
     #[serde(default)]
     author: String,
     #[serde(default)]
+    homepage: String,
+    #[serde(default)]
     version: String,
     #[serde(default)]
     license: String,
@@ -226,6 +228,7 @@ fn load_theme(dir: &Path, manifest: &Path) -> Result<Theme, String> {
         id,
         name: manifest.meta.name,
         author: manifest.meta.author,
+        homepage: manifest.meta.homepage,
         version: manifest.meta.version,
         license: manifest.meta.license,
         description: manifest.meta.description,

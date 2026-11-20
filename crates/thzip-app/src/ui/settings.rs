@@ -50,6 +50,7 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
     let palette = app.themes.palette();
     let theme_name = theme.name.clone();
     let theme_author = theme.author.clone();
+    let theme_homepage = theme.homepage.clone();
     let theme_version = theme.version.clone();
     let theme_license = theme.license.clone();
     let theme_description = theme.description.clone();
@@ -139,6 +140,16 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                                     .size(12.0)
                                     .color(palette.text_sub),
                             );
+                            if !theme_homepage.is_empty() {
+                                ui.add(
+                                    egui::Hyperlink::from_label_and_url(
+                                        egui::RichText::new(theme_homepage.clone())
+                                            .size(11.0)
+                                            .color(palette.accent),
+                                        theme_homepage.clone(),
+                                    ),
+                                );
+                            }
                         });
                     });
                 });

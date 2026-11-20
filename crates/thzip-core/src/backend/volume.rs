@@ -34,10 +34,9 @@ pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
     let parent = first
         .parent()
         .ok_or(ArchiveError::Other(FailReason::VolumeNoParent))?;
-    let Some((prefix, digits)) = name.rsplit_once('.') else {
+    let Some((prefix, _)) = name.rsplit_once('.') else {
         return Ok(vec![first.to_path_buf()]);
     };
-    let width = digits.len();
 
     // 扫描目录而不是按顺序探测：能把“缺了中间某卷”的情况报清楚。
     let mut found: std::collections::BTreeMap<u32, PathBuf> = std::collections::BTreeMap::new();
@@ -53,9 +52,7 @@ pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
         if rest.is_empty() || rest.len() > 4 || !rest.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        if let Ok(index) = rest.parse::<u32>()
-            && index > 0
-        {
+        if let Ok(index) = rest.parse::<u32>() {
             found.insert(index, entry.path());
         }
     }
@@ -64,15 +61,14 @@ pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
         return Ok(vec![first.to_path_buf()]);
     }
 
-    let max = *found.keys().next_back().unwrap_or(&1);
-    let missing: Vec<String> = (1..=max)
+    // 从实际存在的最小卷号开始检查连续性，自动兼容从 .000 或 .001 起的包。
+    let min = *found.keys().next().unwrap_or(&0);
+    let max = *found.keys().next_back().unwrap_or(&0);
+    let missing: Vec<u32> = (min..=max)
         .filter(|index| !found.contains_key(index))
-        .map(|index| format!("{index:0width$}"))
         .collect();
     if !missing.is_empty() {
-        return Err(ArchiveError::Other(FailReason::VolumeIncomplete {
-            missing: missing.join(", "),
-        }));
+        return Err(ArchiveError::Other(FailReason::VolumeIncomplete { missing }));
     }
 
     Ok(found.into_values().collect())
@@ -85,6 +81,16 @@ pub fn split_archive(
     path: &Path,
     part_size: u64,
     force: bool,
+) -> Result<Vec<PathBuf>, ArchiveError> {
+    split_archive_with_first(path, part_size, force, 1)
+}
+
+/// 与 [`split_archive`] 相同，但指定首个分卷编号（部分社团从 `.000` 起）。
+pub fn split_archive_with_first(
+    path: &Path,
+    part_size: u64,
+    force: bool,
+    first_index: u32,
 ) -> Result<Vec<PathBuf>, ArchiveError> {
     if part_size == 0 {
         return Err(ArchiveError::Other(FailReason::Raw(
@@ -107,7 +113,7 @@ pub fn split_archive(
         )));
     }
     let parts = total.div_ceil(part_size);
-    let part_paths: Vec<PathBuf> = (1..=parts)
+    let part_paths: Vec<PathBuf> = (first_index..first_index.saturating_add(parts as u32))
         .map(|index| path.with_file_name(format!("{name}.{index:03}")))
         .collect();
     if !force && let Some(existing) = part_paths.iter().find(|part| part.exists()) {
@@ -295,6 +301,51 @@ mod tests {
         assert_eq!(volumes.len(), 3);
         assert!(volumes[0].ends_with("a.7z.001"));
         assert!(volumes[2].ends_with("a.7z.003"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collects_volumes_starting_at_zero() {
+        let dir = std::env::temp_dir().join(format!(
+            "thzip-spellarchive-vol-zero-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for index in 0u32..=2 {
+            std::fs::write(dir.join(format!("a.7z.{index:03}")), b"x").unwrap();
+        }
+
+        let volumes = super::collect_volumes(&dir.join("a.7z.000")).unwrap();
+        assert_eq!(volumes.len(), 3);
+        assert!(volumes[0].ends_with("a.7z.000"));
+        assert!(volumes[2].ends_with("a.7z.002"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn splits_archive_with_custom_first_index() {
+        let dir = std::env::temp_dir().join(format!(
+            "thzip-spellarchive-vol-first-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("a.7z");
+        std::fs::write(&archive, b"0123456789").unwrap();
+
+        let parts = super::split_archive_with_first(&archive, 5, false, 0).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].ends_with("a.7z.000"));
+        assert!(parts[1].ends_with("a.7z.001"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

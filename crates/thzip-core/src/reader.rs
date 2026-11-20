@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::backend::name_codec::NameEncoding;
 use crate::error::{ArchiveError, FailReason, SinkError};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, ExtractPlan};
@@ -16,6 +17,17 @@ pub enum SkipReason {
     PolicySkip,
 }
 
+/// 文件名编码判定与改名的可追溯摘要。
+#[derive(Debug, Default)]
+pub struct NameReport {
+    pub encoding: NameEncoding,
+    pub confidence: u8,
+    pub renamed: usize,
+    pub undecodable: usize,
+    /// 原始（转义）→ 解码后，最多 20 条。
+    pub samples: Vec<(String, String)>,
+}
+
 #[derive(Debug, Default)]
 pub struct ExtractReport {
     pub succeeded: Vec<EntryId>,
@@ -24,6 +36,7 @@ pub struct ExtractReport {
     pub bytes_written: u64,
     pub elapsed: Duration,
     pub crc_mismatch: Vec<EntryId>,
+    pub name: NameReport,
 }
 
 /// 唯一写盘与计数入口。膨胀熔断、磁盘检查、进度、CRC 都在这里。

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use crate::backend::name_codec::NameEncoding;
+
 /// 条目在单个归档内的稳定下标。禁止用文件名定位条目（zip 允许重名）。
 pub type EntryId = u32;
 
@@ -114,7 +116,7 @@ impl Method {
 #[derive(Debug, Clone)]
 pub struct ArchiveEntry {
     pub id: EntryId,
-    /// 原始字节；解析阶段绝不做有损转换，落盘时以它为准。
+    /// 归档里的原始名字字节，供追溯与 `raw` 模式还原；落盘不使用它。
     pub raw_name: Arc<[u8]>,
     pub kind: EntryKind,
     pub size: u64,
@@ -125,8 +127,12 @@ pub struct ArchiveEntry {
     pub mtime: Option<SystemTime>,
     pub encrypted: bool,
     pub method: Method,
-    /// 已做编码还原的展示名，仅供 UI 使用。
+    /// 已做编码还原的展示名，落盘路径由它经 safety 净化后得到。
     pub display: Arc<str>,
+    /// 名字编码判定结果（zip 由标志位 / 0x7075 或打分得出，其余格式默认 UTF-8）。
+    pub name_encoding: NameEncoding,
+    /// 判定置信度 0-100；低于 60 时 UI 应提示可手动切换。
+    pub name_confidence: u8,
 }
 
 impl ArchiveEntry {
@@ -147,6 +153,8 @@ impl ArchiveEntry {
             encrypted: false,
             method: Method::Store,
             display: display.into(),
+            name_encoding: NameEncoding::Utf8,
+            name_confidence: 100,
         }
     }
 
@@ -170,6 +178,8 @@ impl ArchiveEntry {
             encrypted: false,
             method,
             display: Arc::from(name),
+            name_encoding: NameEncoding::Utf8,
+            name_confidence: 100,
         }
     }
 

@@ -51,6 +51,8 @@ fn entry(id: u32, name: &str, is_dir: bool) -> ArchiveEntry {
         mtime: None,
         encrypted: false,
         method: Method::Store,
+        name_encoding: thzip_core::backend::name_codec::NameEncoding::Utf8,
+        name_confidence: 100,
     }
 }
 

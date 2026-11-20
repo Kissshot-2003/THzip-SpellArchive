@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use thzip_core::ArchiveError;
-use thzip_core::backend;
+use thzip_core::backend::{self, NameOptions, name_codec};
 use thzip_core::limits::Limits;
 use thzip_core::plan::{DecisionTable, ExtractPlan, OverwritePolicy, PlanWarning};
 use thzip_core::reader::ExtractReport;
@@ -30,10 +30,20 @@ fn main() -> ExitCode {
         }
         Some("sniff") => with_path(&args, |path| sniff(path, has_json(&args))),
         Some("list") => with_path(&args, |path| {
-            list(path, password_from(&args), has_json(&args))
+            list(
+                path,
+                password_from(&args),
+                name_options_from(&args),
+                has_json(&args),
+            )
         }),
         Some("test") => with_path(&args, |path| {
-            test(path, password_from(&args), has_json(&args))
+            test(
+                path,
+                password_from(&args),
+                name_options_from(&args),
+                has_json(&args),
+            )
         }),
         Some("extract") => extract(&args),
         Some("pack") => pack(&args),
@@ -62,17 +72,27 @@ fn password_from(args: &[String]) -> Option<SecretString> {
         .map(|pw| SecretString::new(pw.as_str()))
 }
 
+fn name_options_from(args: &[String]) -> NameOptions {
+    let encoding = args
+        .iter()
+        .position(|arg| arg == "--name-encoding")
+        .and_then(|index| args.get(index + 1))
+        .and_then(|value| name_codec::NameOverride::from_str(value))
+        .unwrap_or_default();
+    NameOptions { encoding }
+}
+
 fn usage() {
     println!(
         "thzip — THzip-SpellArchive 命令行
 
 用法:
   thzip sniff   <文件> [--json]           识别归档格式（magic bytes）
-  thzip list    <文件> [--password <pw>] [--json]
+  thzip list    <文件> [--password <pw>] [--name-encoding <enc>] [--json]
                                           列出条目
-  thzip test    <文件> [--password <pw>] [--json]
+  thzip test    <文件> [--password <pw>] [--name-encoding <enc>] [--json]
                                           完整性测试（CRC 校验）
-  thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>] [--json]
+  thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>] [--name-encoding <enc>] [--json]
                                           安全解压；默认跳过已有文件
   thzip pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
                 [--7z-level <0-9>] [--7z-dict <MiB>] [--volume-size <MiB>]
@@ -125,8 +145,13 @@ fn sniff(path: &Path, json: bool) -> ExitCode {
     }
 }
 
-fn list(path: &Path, password: Option<SecretString>, json: bool) -> ExitCode {
-    match backend::open(path, password.as_ref()) {
+fn list(
+    path: &Path,
+    password: Option<SecretString>,
+    name_options: NameOptions,
+    json: bool,
+) -> ExitCode {
+    match backend::open_with_options(path, password.as_ref(), name_options) {
         Ok(reader) => {
             if json {
                 println!("{}", list_json(path, reader.as_ref()));
@@ -165,8 +190,13 @@ fn list(path: &Path, password: Option<SecretString>, json: bool) -> ExitCode {
     }
 }
 
-fn test(path: &Path, password: Option<SecretString>, json: bool) -> ExitCode {
-    match backend::open(path, password.as_ref()) {
+fn test(
+    path: &Path,
+    password: Option<SecretString>,
+    name_options: NameOptions,
+    json: bool,
+) -> ExitCode {
+    match backend::open_with_options(path, password.as_ref(), name_options) {
         Ok(mut reader) => {
             let kind = reader.kind();
             let cancel = CancelToken::new();
@@ -232,7 +262,7 @@ fn extract(args: &[String]) -> ExitCode {
         _ => default_target(input),
     };
 
-    let mut reader = match backend::open(input, password.as_ref()) {
+    let mut reader = match backend::open_with_options(input, password.as_ref(), name_options_from(args)) {
         Ok(reader) => reader,
         Err(err) => {
             report_open_error(&err);
@@ -338,6 +368,9 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
             }
             PlanWarning::SuspiciousDisplayName { id, detail } => {
                 println!("  可疑文件名（条目 {id}）: {detail}")
+            }
+            PlanWarning::NameEncodingAmbiguous { id, confidence } => {
+                println!("  文件名编码不确定（条目 {id}，置信 {confidence}），可加 --name-encoding 指定")
             }
             PlanWarning::SymlinkSkipped { id } => println!("  跳过链接（条目 {id}）"),
             PlanWarning::BombSuspected { hit } => println!("  疑似炸弹: {hit}"),
@@ -793,6 +826,12 @@ fn report_json(
             "false"
         },
     );
+    out.push_str(&format!(
+        ",\"name_encoding\":{},\"name_confidence\":{},\"name_renamed\":{}",
+        json_escape(report.name.encoding.label()),
+        report.name.confidence,
+        report.name.renamed
+    ));
     out.push_str(&format!(
         ",\"succeeded\":{},\"skipped\":{},\"bytes_written\":{},\"elapsed_ms\":{},\"failed\":[",
         report.succeeded.len(),

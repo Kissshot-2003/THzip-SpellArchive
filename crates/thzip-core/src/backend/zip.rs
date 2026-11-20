@@ -3,14 +3,17 @@ use std::io::{BufReader, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use zip::extra_fields::ExtraField;
+
+use crate::backend::NameOptions;
 use crate::backend::common::{detect_conflict, ratio_suspicious};
-use crate::backend::name_codec;
+use crate::backend::name_codec::{self, NameEncoding, NameOverride};
 use crate::error::{ArchiveError, FailReason};
 use crate::limits::Limits;
 use crate::plan::{
     ConflictKind, DecisionTable, ExtractPlan, PlanAction, PlanWarning, PlannedItem, resolve_all,
 };
-use crate::reader::{ArchiveReader, ExtractReport, ExtractSink, SkipReason};
+use crate::reader::{ArchiveReader, ExtractReport, ExtractSink, NameReport, SkipReason};
 use crate::safety::available_space;
 use crate::safety::display_guard::guard_display;
 use crate::safety::path_sanitize::{resolve_under, sanitize_rel};
@@ -54,7 +57,11 @@ impl std::io::Read for ZipEntryReader<'_> {
 }
 
 impl ZipReader {
-    pub fn new(path: &Path, password: Option<&SecretString>) -> Result<Self, ArchiveError> {
+    pub fn new(
+        path: &Path,
+        password: Option<&SecretString>,
+        options: NameOptions,
+    ) -> Result<Self, ArchiveError> {
         let mut file =
             File::open(path).map_err(|err| ArchiveError::Open(FailReason::Raw(err.to_string())))?;
         let size = file.metadata().map(|meta| meta.len()).unwrap_or(u64::MAX);
@@ -83,19 +90,31 @@ impl ZipReader {
             };
 
             let raw_name = file.name_raw().to_vec();
-            let decoded = match name_codec::decode_strict_utf8(&raw_name) {
-                Some(text) => name_codec::DecodedName {
-                    text,
-                    encoding: name_codec::NameEncoding::Utf8,
-                    lossy: false,
-                },
-                None => name_codec::decode(&raw_name),
+            // zip crate 9.x 的 name() 已处理 bit 11 与 Info-ZIP Unicode Path（0x7075，
+            // 含严格一致性校验），name_raw() 则保留扩展应用前的原始字节。
+            // 这两路是权威名字，优先于打分判定；只有 raw 强制才绕过。
+            let has_unicode_path = file
+                .extra_data_fields()
+                .any(|field| matches!(field, ExtraField::UnicodePath(_)));
+            let authoritative = file.name().ok().map(|name| name.into_owned());
+            let raw_is_utf8 = std::str::from_utf8(&raw_name).is_ok();
+            let (display, encoding, confidence) = if options.encoding == NameOverride::Raw {
+                let guess = name_codec::decode_with(&raw_name, NameOverride::Raw);
+                (guess.text, guess.encoding, guess.confidence)
+            } else if let Some(name) = authoritative
+                && (has_unicode_path || raw_is_utf8)
+            {
+                (name, NameEncoding::Utf8, 100)
+            } else {
+                let guess = name_codec::decode_with(&raw_name, options.encoding);
+                (guess.text, guess.encoding, guess.confidence)
             };
 
             let encrypted = file.encrypted();
             let kind = entry_kind(&file);
-            let mut entry =
-                ArchiveEntry::new(index as EntryId, &raw_name, decoded.text.as_str(), kind);
+            let mut entry = ArchiveEntry::new(index as EntryId, &raw_name, display.as_str(), kind);
+            entry.name_encoding = encoding;
+            entry.name_confidence = confidence;
             entry.size = if kind.is_dir() { 0 } else { file.size() };
             entry.packed = Some(file.compressed_size());
             // WinZip AES 的 CRC 字段按规范写 0，完整性由 AE-2 认证码保证，
@@ -201,6 +220,13 @@ impl ArchiveReader for ZipReader {
                 });
             }
 
+            if entry.name_confidence < 60 {
+                plan.warnings.push(PlanWarning::NameEncodingAmbiguous {
+                    id,
+                    confidence: entry.name_confidence,
+                });
+            }
+
             if matches!(entry.kind, EntryKind::Symlink | EntryKind::Hardlink) {
                 plan.warnings.push(PlanWarning::SymlinkSkipped { id });
                 item.action = PlanAction::Skip;
@@ -295,6 +321,37 @@ impl ArchiveReader for ZipReader {
         let start = Instant::now();
         let actions = resolve_all(plan, decisions);
         let mut report = ExtractReport::default();
+        report.name = NameReport {
+            encoding: self
+                .entries
+                .iter()
+                .find(|entry| entry.name_encoding != NameEncoding::Utf8)
+                .map(|entry| entry.name_encoding)
+                .unwrap_or(NameEncoding::Utf8),
+            confidence: self
+                .entries
+                .iter()
+                .map(|entry| entry.name_confidence)
+                .min()
+                .unwrap_or(100),
+            renamed: 0,
+            undecodable: self
+                .entries
+                .iter()
+                .filter(|entry| entry.name_confidence < 60)
+                .count(),
+            samples: self
+                .entries
+                .iter()
+                .take(20)
+                .map(|entry| {
+                    (
+                        name_codec::escape_raw(&entry.raw_name),
+                        entry.display.to_string(),
+                    )
+                })
+                .collect(),
+        };
         let mut buf = vec![0u8; READ_BUF];
 
         for item in &plan.items {

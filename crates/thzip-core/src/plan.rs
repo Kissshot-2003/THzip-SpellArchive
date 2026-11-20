@@ -52,6 +52,11 @@ pub enum PlanWarning {
         id: EntryId,
         detail: String,
     },
+    /// 文件名编码判定置信度过低，建议用户手动指定。
+    NameEncodingAmbiguous {
+        id: EntryId,
+        confidence: u8,
+    },
     UnsupportedMethod {
         id: EntryId,
         method: Method,

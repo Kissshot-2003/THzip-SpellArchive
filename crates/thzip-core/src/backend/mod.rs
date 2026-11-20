@@ -146,14 +146,29 @@ pub fn classify(header: &[u8], name: Option<&str>) -> ArchiveKind {
     ArchiveKind::Unknown
 }
 
+/// 打开归档时的名字解码选项。目前只影响 zip；其他格式的名字由各自后端给出。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NameOptions {
+    pub encoding: name_codec::NameOverride,
+}
+
 pub fn open(
     path: &Path,
     password: Option<&SecretString>,
 ) -> Result<Box<dyn ArchiveReader>, ArchiveError> {
+    open_with_options(path, password, NameOptions::default())
+}
+
+/// 与 [`open`] 相同，但允许指定文件名编码（强制指定 / raw 转义）。
+pub fn open_with_options(
+    path: &Path,
+    password: Option<&SecretString>,
+    options: NameOptions,
+) -> Result<Box<dyn ArchiveReader>, ArchiveError> {
     let kind =
         sniff_file(path).map_err(|err| ArchiveError::Open(FailReason::Raw(err.to_string())))?;
     match kind {
-        ArchiveKind::Zip => Ok(Box::new(zip::ZipReader::new(path, password)?)),
+        ArchiveKind::Zip => Ok(Box::new(zip::ZipReader::new(path, password, options)?)),
         ArchiveKind::SevenZ => Ok(Box::new(sevenz::SevenZReader::new(path, password)?)),
         ArchiveKind::Tar
         | ArchiveKind::TarGz

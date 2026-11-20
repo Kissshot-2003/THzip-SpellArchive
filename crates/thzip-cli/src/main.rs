@@ -77,7 +77,7 @@ fn name_options_from(args: &[String]) -> NameOptions {
         .iter()
         .position(|arg| arg == "--name-encoding")
         .and_then(|index| args.get(index + 1))
-        .and_then(|value| name_codec::NameOverride::from_str(value))
+        .and_then(|value| name_codec::NameOverride::parse(value))
         .unwrap_or_default();
     NameOptions { encoding }
 }
@@ -262,13 +262,14 @@ fn extract(args: &[String]) -> ExitCode {
         _ => default_target(input),
     };
 
-    let mut reader = match backend::open_with_options(input, password.as_ref(), name_options_from(args)) {
-        Ok(reader) => reader,
-        Err(err) => {
-            report_open_error(&err);
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut reader =
+        match backend::open_with_options(input, password.as_ref(), name_options_from(args)) {
+            Ok(reader) => reader,
+            Err(err) => {
+                report_open_error(&err);
+                return ExitCode::FAILURE;
+            }
+        };
 
     let limits = Limits::default();
     let ids: Vec<EntryId> = (0..reader.entries().len() as EntryId).collect();
@@ -370,7 +371,9 @@ fn print_plan(plan: &ExtractPlan, target: &Path) {
                 println!("  可疑文件名（条目 {id}）: {detail}")
             }
             PlanWarning::NameEncodingAmbiguous { id, confidence } => {
-                println!("  文件名编码不确定（条目 {id}，置信 {confidence}），可加 --name-encoding 指定")
+                println!(
+                    "  文件名编码不确定（条目 {id}，置信 {confidence}），可加 --name-encoding 指定"
+                )
             }
             PlanWarning::SymlinkSkipped { id } => println!("  跳过链接（条目 {id}）"),
             PlanWarning::BombSuspected { hit } => println!("  疑似炸弹: {hit}"),

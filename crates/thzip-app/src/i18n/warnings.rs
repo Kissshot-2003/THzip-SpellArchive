@@ -28,7 +28,9 @@ pub fn warning(locale: Locale, warning: &PlanWarning) -> String {
             format!("文件名编码不确定（条目 {id}，置信 {confidence}），可手动切换编码")
         }
         (Locale::EnUs, PlanWarning::NameEncodingAmbiguous { id, confidence }) => {
-            format!("Uncertain filename encoding (entry {id}, confidence {confidence}); switch encoding manually")
+            format!(
+                "Uncertain filename encoding (entry {id}, confidence {confidence}); switch encoding manually"
+            )
         }
         (Locale::ZhCn, PlanWarning::UnsupportedMethod { id, method }) => {
             format!("不支持的压缩方法（条目 {id}）：{}", method.label())

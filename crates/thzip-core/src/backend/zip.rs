@@ -320,37 +320,39 @@ impl ArchiveReader for ZipReader {
     ) -> Result<ExtractReport, ArchiveError> {
         let start = Instant::now();
         let actions = resolve_all(plan, decisions);
-        let mut report = ExtractReport::default();
-        report.name = NameReport {
-            encoding: self
-                .entries
-                .iter()
-                .find(|entry| entry.name_encoding != NameEncoding::Utf8)
-                .map(|entry| entry.name_encoding)
-                .unwrap_or(NameEncoding::Utf8),
-            confidence: self
-                .entries
-                .iter()
-                .map(|entry| entry.name_confidence)
-                .min()
-                .unwrap_or(100),
-            renamed: 0,
-            undecodable: self
-                .entries
-                .iter()
-                .filter(|entry| entry.name_confidence < 60)
-                .count(),
-            samples: self
-                .entries
-                .iter()
-                .take(20)
-                .map(|entry| {
-                    (
-                        name_codec::escape_raw(&entry.raw_name),
-                        entry.display.to_string(),
-                    )
-                })
-                .collect(),
+        let mut report = ExtractReport {
+            name: NameReport {
+                encoding: self
+                    .entries
+                    .iter()
+                    .find(|entry| entry.name_encoding != NameEncoding::Utf8)
+                    .map(|entry| entry.name_encoding)
+                    .unwrap_or(NameEncoding::Utf8),
+                confidence: self
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name_confidence)
+                    .min()
+                    .unwrap_or(100),
+                renamed: 0,
+                undecodable: self
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.name_confidence < 60)
+                    .count(),
+                samples: self
+                    .entries
+                    .iter()
+                    .take(20)
+                    .map(|entry| {
+                        (
+                            name_codec::escape_raw(&entry.raw_name),
+                            entry.display.to_string(),
+                        )
+                    })
+                    .collect(),
+            },
+            ..Default::default()
         };
         let mut buf = vec![0u8; READ_BUF];
 

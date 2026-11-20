@@ -45,7 +45,7 @@ impl NameOverride {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value.to_ascii_lowercase().as_str() {
             "auto" => Some(Self::Auto),
             "utf8" | "utf-8" => Some(Self::Utf8),
@@ -217,9 +217,7 @@ fn score_text(text: &str, had_errors: bool, sjis_candidate: bool) -> u8 {
         if matches!(ch, '‚' | 'Ì' | 'Í' | 'Î' | 'Ï' | 'ｌ' | '@' | 'ｶ' | 'ﾞ' | 'ﾟ') {
             pseudo_hanzi += 1;
         }
-        if (0xE000..=0xF8FF).contains(&code)
-            || (code < 0x20 && !matches!(ch, '\t' | '\n' | '\r'))
-        {
+        if (0xE000..=0xF8FF).contains(&code) || (code < 0x20 && !matches!(ch, '\t' | '\n' | '\r')) {
             bad += 1;
         }
     }
@@ -297,7 +295,10 @@ mod tests {
     #[test]
     fn override_utf8_and_raw() {
         let raw = "文件.txt".as_bytes();
-        assert_eq!(decode_with_test(raw, NameOverride::Utf8).encoding, NameEncoding::Utf8);
+        assert_eq!(
+            decode_with_test(raw, NameOverride::Utf8).encoding,
+            NameEncoding::Utf8
+        );
         let raw_guess = decode_with_test(raw, NameOverride::Raw);
         assert_eq!(raw_guess.encoding, NameEncoding::Lossy);
         assert_eq!(unescape_raw(&raw_guess.text).unwrap(), raw);

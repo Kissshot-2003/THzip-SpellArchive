@@ -141,14 +141,12 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
                                     .color(palette.text_sub),
                             );
                             if !theme_homepage.is_empty() {
-                                ui.add(
-                                    egui::Hyperlink::from_label_and_url(
-                                        egui::RichText::new(theme_homepage.clone())
-                                            .size(11.0)
-                                            .color(palette.accent),
-                                        theme_homepage.clone(),
-                                    ),
-                                );
+                                ui.add(egui::Hyperlink::from_label_and_url(
+                                    egui::RichText::new(theme_homepage.clone())
+                                        .size(11.0)
+                                        .color(palette.accent),
+                                    theme_homepage.clone(),
+                                ));
                             }
                         });
                     });

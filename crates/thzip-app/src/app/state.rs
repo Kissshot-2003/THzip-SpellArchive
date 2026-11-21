@@ -232,7 +232,7 @@ impl Default for PackState {
             output: String::new(),
             store: false,
             zip_method: ZipPackMethod::default(),
-            sevenz_level: 6,
+            sevenz_level: thzip_core::writer::SevenZOptions::default().level,
             sevenz_dict_mib: 0,
             volume_mib: 0,
             append: false,

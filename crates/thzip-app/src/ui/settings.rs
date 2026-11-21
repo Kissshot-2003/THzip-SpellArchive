@@ -177,8 +177,9 @@ pub fn show(app: &mut ThzipApp, root: &mut egui::Ui) {
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut app.locale, Locale::ZhCn, "简体中文");
-                ui.selectable_value(&mut app.locale, Locale::EnUs, "English");
+                ui.selectable_value(&mut app.locale, Locale::ZhCn, Locale::ZhCn.label());
+                ui.selectable_value(&mut app.locale, Locale::EnUs, Locale::EnUs.label());
+                ui.selectable_value(&mut app.locale, Locale::JaJp, Locale::JaJp.label());
                 ui.checkbox(&mut app.tr.prefer_standard, standard_terms);
             });
 

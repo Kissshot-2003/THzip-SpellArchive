@@ -82,6 +82,63 @@ fn json_comment_and_extract_roundtrip() {
 }
 
 #[test]
+fn extract_reads_password_from_file_and_same_dir() {
+    let dir = TempDir::new("pwfile");
+    let source = dir.path().join("secret.txt");
+    std::fs::write(&source, b"classified").unwrap();
+    let archive = dir.path().join("locked.zip");
+
+    let pack = run(&[
+        "pack",
+        archive.to_str().unwrap(),
+        source.to_str().unwrap(),
+        "--password",
+        "hunter2",
+    ]);
+    assert!(pack.status.success(), "{}", stdout(&pack));
+
+    // --password-file，文件带 UTF-8 BOM 与尾随空行。
+    let pwfile = dir.path().join("pw.txt");
+    std::fs::write(&pwfile, b"\xEF\xBB\xBFhunter2\n\n").unwrap();
+    let target1 = dir.path().join("out1");
+    let ex1 = run(&[
+        "extract",
+        archive.to_str().unwrap(),
+        target1.to_str().unwrap(),
+        "--password-file",
+        pwfile.to_str().unwrap(),
+    ]);
+    assert!(ex1.status.success(), "{}", stdout(&ex1));
+    assert_eq!(
+        std::fs::read(target1.join("secret.txt")).unwrap(),
+        b"classified"
+    );
+
+    // 同目录 password.txt 约定，显式不传密码。
+    std::fs::write(dir.path().join("password.txt"), b"hunter2\n").unwrap();
+    let target2 = dir.path().join("out2");
+    let ex2 = run(&[
+        "extract",
+        archive.to_str().unwrap(),
+        target2.to_str().unwrap(),
+    ]);
+    assert!(ex2.status.success(), "{}", stdout(&ex2));
+    assert_eq!(
+        std::fs::read(target2.join("secret.txt")).unwrap(),
+        b"classified"
+    );
+
+    // 密码不进 JSON。
+    let ex3 = run(&[
+        "extract",
+        archive.to_str().unwrap(),
+        dir.path().join("out3").to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(!stdout(&ex3).contains("hunter2"), "{}", stdout(&ex3));
+}
+
+#[test]
 fn split_7z_volumes_are_readable() {
     let dir = TempDir::new("split");
     let source = dir.path().join("payload.bin");

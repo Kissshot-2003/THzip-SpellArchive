@@ -32,7 +32,7 @@ fn main() -> ExitCode {
         Some("list") => with_path(&args, |path| {
             list(
                 path,
-                password_from(&args),
+                password_from(&args).or_else(|| password_file_from(&args)),
                 name_options_from(&args),
                 has_json(&args),
             )
@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         Some("test") => with_path(&args, |path| {
             test(
                 path,
-                password_from(&args),
+                password_from(&args).or_else(|| password_file_from(&args)),
                 name_options_from(&args),
                 has_json(&args),
             )
@@ -72,6 +72,50 @@ fn password_from(args: &[String]) -> Option<SecretString> {
         .map(|pw| SecretString::new(pw.as_str()))
 }
 
+/// 读取密码文件的首个非空行，支持 UTF-8 / UTF-16 LE / UTF-16 BE（含 BOM）。
+fn read_password_file(path: &Path) -> Option<SecretString> {
+    let bytes = std::fs::read(path).ok()?;
+    let text = if bytes.starts_with(&[0xFF, 0xFE]) {
+        let units: Vec<u16> = bytes[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16(&units).ok()?
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = bytes[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16(&units).ok()?
+    } else {
+        String::from_utf8(bytes.to_vec())
+            .ok()?
+            .trim_start_matches('\u{FEFF}')
+            .to_owned()
+    };
+    let line = text.lines().find(|line| !line.trim().is_empty())?.trim();
+    (!line.is_empty()).then(|| SecretString::new(line))
+}
+
+fn password_file_from(args: &[String]) -> Option<SecretString> {
+    args.iter()
+        .position(|arg| arg == "--password-file")
+        .and_then(|index| args.get(index + 1))
+        .and_then(|path| read_password_file(Path::new(path)))
+}
+
+/// 同目录密码约定：只尝试一次，失败由调用方静默跳过。
+fn auto_password(archive: &Path) -> Option<SecretString> {
+    let dir = archive.parent()?;
+    ["password.txt", "解压密码.txt"]
+        .iter()
+        .find_map(|name| read_password_file(&dir.join(name)))
+}
+
 fn name_options_from(args: &[String]) -> NameOptions {
     let encoding = args
         .iter()
@@ -88,11 +132,11 @@ fn usage() {
 
 用法:
   thzip sniff   <文件> [--json]           识别归档格式（magic bytes）
-  thzip list    <文件> [--password <pw>] [--name-encoding <enc>] [--json]
+  thzip list    <文件> [--password <pw> | --password-file <path>] [--name-encoding <enc>] [--json]
                                           列出条目
-  thzip test    <文件> [--password <pw>] [--name-encoding <enc>] [--json]
+  thzip test    <文件> [--password <pw> | --password-file <path>] [--name-encoding <enc>] [--json]
                                           完整性测试（CRC 校验）
-  thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw>] [--name-encoding <enc>] [--json]
+  thzip extract <文件> [目标目录] [--force|--rename|--number] [--password <pw> | --password-file <path>] [--name-encoding <enc>] [--json]
                                           安全解压；默认跳过已有文件
   thzip pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
                 [--7z-level <0-9>] [--7z-dict <MiB>] [--volume-size <MiB>]
@@ -254,9 +298,11 @@ fn extract(args: &[String]) -> ExitCode {
         eprintln!("--force / --rename / --number 只能选一个");
         return ExitCode::FAILURE;
     }
-    let password = password_from(args);
-    let json = has_json(args);
     let input = Path::new(input);
+    let password = password_from(args)
+        .or_else(|| password_file_from(args))
+        .or_else(|| auto_password(input));
+    let json = has_json(args);
 
     let target = match args.get(2) {
         Some(arg) if !arg.starts_with('-') => PathBuf::from(arg),
@@ -480,6 +526,7 @@ fn pack(args: &[String]) -> ExitCode {
         }
         if arg == "--password"
             || arg == "-p"
+            || arg == "--password-file"
             || arg == "--method"
             || arg == "-m"
             || arg == "--7z-level"

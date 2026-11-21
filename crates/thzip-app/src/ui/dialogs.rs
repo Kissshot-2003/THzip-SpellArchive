@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use eframe::egui;
+use thzip_core::backend::name_codec::NameOverride;
 use thzip_core::plan::{OverwritePolicy, PlanWarning};
 use thzip_core::secret::SecretString;
 use thzip_core::types::ArchiveKind;
@@ -659,6 +660,9 @@ fn password_prompt(app: &mut ThzipApp, ctx: &egui::Context) {
 }
 
 fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
+    let current_encoding = app.name_override;
+    let mut selected_encoding = current_encoding;
+    let encoding_label = app.tr.t(TextKey::NameEncoding);
     let Some(pending) = app.pending_extract.as_mut() else {
         return;
     };
@@ -737,6 +741,23 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
         .scroll([false, true])
         .show(ctx, |ui| {
             ui.label(egui::RichText::new(&entry_count).size(17.0).strong());
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(&encoding_label).color(palette.text_sub));
+                egui::ComboBox::from_id_salt("precheck_name_encoding")
+                    .selected_text(selected_encoding.label())
+                    .show_ui(ui, |ui| {
+                        for option in [
+                            NameOverride::Auto,
+                            NameOverride::Utf8,
+                            NameOverride::Gbk,
+                            NameOverride::ShiftJis,
+                            NameOverride::Raw,
+                        ] {
+                            ui.selectable_value(&mut selected_encoding, option, option.label());
+                        }
+                    });
+            });
             ui.add_space(6.0);
             egui::Grid::new("precheck_grid")
                 .num_columns(2)
@@ -872,6 +893,10 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
                 });
             });
         });
+
+    if selected_encoding != current_encoding {
+        app.apply_name_override(selected_encoding);
+    }
 
     if start {
         app.start_extract();

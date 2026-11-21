@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::backend::name_codec::NameEncoding;
+use crate::backend::name_codec::{NameEncoding, NameOverride};
 use crate::error::{ArchiveError, FailReason, SinkError};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, ExtractPlan};
@@ -73,6 +73,10 @@ pub trait ArchiveReader: Send {
     fn comment(&self) -> Option<String> {
         None
     }
+
+    /// 用新的编码覆盖重新解码条目名。只重解码名字，不重读包体数据。
+    /// 解压落盘用的是条目名，因此调用后需要重新 `plan()`。
+    fn apply_name_override(&mut self, _override: NameOverride) {}
 
     /// 只读预检：净化路径、检测冲突、估算总量。不写盘。
     fn plan(

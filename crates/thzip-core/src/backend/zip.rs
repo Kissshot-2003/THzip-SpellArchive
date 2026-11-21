@@ -169,6 +169,22 @@ impl ArchiveReader for ZipReader {
         Some(String::from_utf8_lossy(raw).into_owned())
     }
 
+    fn apply_name_override(&mut self, override_encoding: NameOverride) {
+        for entry in &mut self.entries {
+            // bit 11 / 0x7075 给出的权威名字在 auto 下保持不变。
+            if override_encoding == NameOverride::Auto
+                && entry.name_encoding == NameEncoding::Utf8
+                && entry.name_confidence == 100
+            {
+                continue;
+            }
+            let guess = name_codec::decode_with(&entry.raw_name, override_encoding);
+            entry.display = std::sync::Arc::from(guess.text.as_str());
+            entry.name_encoding = guess.encoding;
+            entry.name_confidence = guess.confidence;
+        }
+    }
+
     fn plan(
         &self,
         ids: &[EntryId],

@@ -9,6 +9,7 @@ use crate::theme::ThemeStore;
 use crate::tray::{Tray, TrayAction};
 use eframe::egui;
 use thzip_core::SevenZOptions;
+use thzip_core::backend::name_codec::NameOverride;
 use thzip_core::plan::{DecisionTable, OverwritePolicy};
 use thzip_core::secret::SecretString;
 use thzip_core::task::{SharedReader, TaskEvent, TaskId, TaskOp, TaskPhase, TaskRunner};
@@ -47,6 +48,8 @@ pub struct ThzipApp {
     pub archive_path: Option<PathBuf>,
     pub reader: Option<SharedReader>,
     pub entries: Vec<ArchiveEntry>,
+    /// 文件名编码覆盖；在预检面板切换，只重解码名字不重读包体。
+    pub name_override: NameOverride,
     pub comment: Option<String>,
     pub preview: Option<PreviewView>,
     pub search: String,
@@ -143,6 +146,7 @@ impl ThzipApp {
             archive_path: None,
             reader: None,
             entries: Vec::new(),
+            name_override: NameOverride::default(),
             comment: None,
             preview: None,
             search: String::new(),
@@ -725,6 +729,33 @@ impl ThzipApp {
             image: None,
             texture: None,
         });
+    }
+
+    /// 预检面板切换编码：只重解码名字并重算计划，不重新读包体。
+    pub fn apply_name_override(&mut self, override_encoding: NameOverride) {
+        if self.name_override == override_encoding {
+            return;
+        }
+        self.name_override = override_encoding;
+        let Some(reader) = self.reader.clone() else {
+            return;
+        };
+        let Ok(mut guard) = reader.lock() else {
+            return;
+        };
+        guard.apply_name_override(override_encoding);
+        let entries = guard.entries().to_vec();
+        self.entries = entries.clone();
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            tab.entries = entries;
+        }
+        if let Some(pending) = self.pending_extract.as_mut() {
+            let ids: Vec<_> = (0..self.entries.len() as u32).collect();
+            if let Ok(plan) = guard.plan(&ids, &pending.target, &self.limits) {
+                pending.plan = plan;
+                pending.risk_acknowledged = false;
+            }
+        }
     }
 
     pub fn open_path(&mut self, path: PathBuf, password: Option<SecretString>) {

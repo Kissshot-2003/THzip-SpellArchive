@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::backend::name_codec::{NameEncoding, NameOverride};
 use crate::error::{ArchiveError, FailReason, SinkError};
 use crate::limits::Limits;
 use crate::plan::{DecisionTable, ExtractPlan};
@@ -16,6 +17,17 @@ pub enum SkipReason {
     PolicySkip,
 }
 
+/// 文件名编码判定与改名的可追溯摘要。
+#[derive(Debug, Default)]
+pub struct NameReport {
+    pub encoding: NameEncoding,
+    pub confidence: u8,
+    pub renamed: usize,
+    pub undecodable: usize,
+    /// 原始（转义）→ 解码后，最多 20 条。
+    pub samples: Vec<(String, String)>,
+}
+
 #[derive(Debug, Default)]
 pub struct ExtractReport {
     pub succeeded: Vec<EntryId>,
@@ -24,6 +36,7 @@ pub struct ExtractReport {
     pub bytes_written: u64,
     pub elapsed: Duration,
     pub crc_mismatch: Vec<EntryId>,
+    pub name: NameReport,
 }
 
 /// 唯一写盘与计数入口。膨胀熔断、磁盘检查、进度、CRC 都在这里。
@@ -60,6 +73,10 @@ pub trait ArchiveReader: Send {
     fn comment(&self) -> Option<String> {
         None
     }
+
+    /// 用新的编码覆盖重新解码条目名。只重解码名字，不重读包体数据。
+    /// 解压落盘用的是条目名，因此调用后需要重新 `plan()`。
+    fn apply_name_override(&mut self, _override: NameOverride) {}
 
     /// 只读预检：净化路径、检测冲突、估算总量。不写盘。
     fn plan(

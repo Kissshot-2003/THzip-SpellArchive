@@ -22,7 +22,7 @@ pub mod writer;
 pub use error::{ArchiveError, SinkError};
 pub use limits::{LimitProfile, Limits};
 pub use plan::{DecisionTable, ExtractPlan, OverwritePolicy};
-pub use reader::{ArchiveReader, ExtractReport, ExtractSink};
+pub use reader::{ArchiveReader, ExtractReport, ExtractSink, NameReport};
 pub use secret::SecretString;
 pub use types::{ArchiveEntry, ArchiveKind, EntryId, EntryKind, Method};
 pub use writer::{

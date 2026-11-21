@@ -198,6 +198,8 @@ pub enum TextKey {
     DeleteTemplate,
     TemplateSaved,
     VolumeSize,
+    /// 预检面板的文件名编码选择标签。
+    NameEncoding,
     VolumeNone,
     ThemeStats,
     SamplingNearest,
@@ -453,6 +455,7 @@ impl TextKey {
         TextKey::DeleteTemplate,
         TextKey::TemplateSaved,
         TextKey::VolumeSize,
+        TextKey::NameEncoding,
         TextKey::VolumeNone,
         TextKey::ThemeStats,
         TextKey::SamplingNearest,
@@ -707,6 +710,7 @@ impl TextKey {
             TextKey::DeleteTemplate => "delete_template",
             TextKey::TemplateSaved => "template_saved",
             TextKey::VolumeSize => "volume_size",
+            TextKey::NameEncoding => "name_encoding",
             TextKey::VolumeNone => "volume_none",
             TextKey::ThemeStats => "theme_stats",
             TextKey::SamplingNearest => "sampling_nearest",
@@ -969,6 +973,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::DeleteTemplate => "删除模板",
             TextKey::TemplateSaved => "打包模板已保存",
             TextKey::VolumeSize => "分卷大小",
+            TextKey::NameEncoding => "文件名编码",
             TextKey::VolumeNone => "不分卷",
             TextKey::ThemeStats => "资源：{resources} 个纹理 · 采样：{sampling} · 基准 {scale}x",
             TextKey::SamplingNearest => "NEAREST（像素）",
@@ -1256,6 +1261,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::DeleteTemplate => "Delete template",
             TextKey::TemplateSaved => "Pack template saved",
             TextKey::VolumeSize => "Volume size",
+            TextKey::NameEncoding => "Name encoding",
             TextKey::VolumeNone => "No split",
             TextKey::ThemeStats => {
                 "Resources: {resources} textures · Sampling: {sampling} · Base {scale}x"

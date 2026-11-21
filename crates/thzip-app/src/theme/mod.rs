@@ -200,6 +200,8 @@ pub struct Theme {
     pub id: String,
     pub name: String,
     pub author: String,
+    /// 作者主页（theme.toml `[meta].homepage`），空串表示未提供。
+    pub homepage: String,
     pub version: String,
     pub license: String,
     pub description: String,
@@ -233,6 +235,7 @@ impl Theme {
             id: id.to_owned(),
             name: name.to_owned(),
             author: "THzip-SpellArchive".to_owned(),
+            homepage: String::new(),
             version: "0.1".to_owned(),
             license: "CC-BY-NC-SA-4.0".to_owned(),
             description: description.to_owned(),

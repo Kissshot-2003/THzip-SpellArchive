@@ -20,6 +20,7 @@ schema = 1
 [meta]
 name = "THzip-SpellArchive - Reimu"
 author = "YourName"
+homepage = "https://example.com"   # 可选，作者主页；设置页主题信息行显示为链接
 version = "1.0"
 license = "CC-BY-NC-SA-4.0"      # 必填
 description = "灵梦结界主题，像素符卡风格"

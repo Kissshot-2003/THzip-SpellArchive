@@ -1997,6 +1997,40 @@ mod tests {
         assert!(offenders.is_empty(), "疑似漏翻: {offenders:?}");
     }
 
+    /// 日语译文必须真的含日文字符（假名或汉字），防止 251 条一次性合入时
+    /// 混入未翻译的英文/中文。日语没有小写 ASCII 字母，原来的启发式不适用，
+    /// 这里改用「是否含日文假名或 CJK 汉字」判断。
+    ///
+    /// 产品名、纯数字/符号、缩写等无需本地化的条目显式列入白名单。
+    #[test]
+    fn japanese_translations_are_localized() {
+        // col_crc = "CRC32"、sampling_linear = "LINEAR" 是技术术语；
+        // summary_line 是纯占位符模板，都无需本地化。
+        const NO_LOCALIZATION_NEEDED: &[&str] = &[
+            "app_name",
+            "app_title",
+            "col_crc",
+            "sampling_linear",
+            "summary_line",
+        ];
+        let mut offenders = Vec::new();
+        for &key in TextKey::ALL {
+            if NO_LOCALIZATION_NEEDED.contains(&key.key()) {
+                continue;
+            }
+            let ja = builtin(Locale::JaJp, key);
+            let has_japanese = ja.chars().any(|ch| {
+                let code = ch as u32;
+                // 平假名 / 片假名 / CJK 统一表意文字（含常用汉字）
+                (0x3040..=0x30FF).contains(&code) || (0x4E00..=0x9FFF).contains(&code)
+            });
+            if !has_japanese {
+                offenders.push((key.key(), ja));
+            }
+        }
+        assert!(offenders.is_empty(), "日语疑似漏翻: {offenders:?}");
+    }
+
     #[test]
     fn tf_replaces_named_placeholders() {
         let tr = Translator::new();

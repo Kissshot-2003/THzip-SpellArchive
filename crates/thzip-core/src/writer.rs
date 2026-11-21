@@ -299,3 +299,16 @@ pub trait ArchiveWriter: Send {
         Err(ArchiveError::Unsupported(FailReason::BackendMissingWrite))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SevenZOptions;
+
+    /// 默认级别锁定在 3（Fast + Hc4）：文本数据比 level 6 快约 4 倍，
+    /// 随机数据持平，压缩率仅降约 9%。改回 6 会让性能回退且 CI 全绿无人察觉，
+    /// 所以用一个断言把它钉住。理由见 README 性能基线与 HANDOVER §16.6。
+    #[test]
+    fn sevenz_default_level_is_speed_optimized() {
+        assert_eq!(SevenZOptions::default().level, 3);
+    }
+}

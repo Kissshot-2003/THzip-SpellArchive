@@ -1520,7 +1520,7 @@ fn cjk_font_bytes() -> Option<Vec<u8>> {
 
 const EMBEDDED_CJK: &[u8] = include_bytes!("../assets/NotoSansSC-subset.ttf");
 
-fn install_cjk_fonts(ctx: &egui::Context) {
+pub(crate) fn install_cjk_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
     // 先挂内嵌子集，保证没有中文字体的系统也能正常显示；

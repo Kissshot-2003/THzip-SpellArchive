@@ -98,6 +98,18 @@ impl ArchiveReader for SevenZReader {
         self.archive.is_solid
     }
 
+    fn volume_info(&self) -> Option<(usize, u64)> {
+        if self.volumes.is_empty() {
+            return None;
+        }
+        let total = self
+            .volumes
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok().map(|meta| meta.len()))
+            .sum();
+        Some((self.volumes.len(), total))
+    }
+
     fn plan(
         &self,
         ids: &[EntryId],

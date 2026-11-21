@@ -198,6 +198,8 @@ pub enum TextKey {
     DeleteTemplate,
     TemplateSaved,
     VolumeSize,
+    /// 预检面板的分卷摘要标签。
+    Volumes,
     /// 预检面板的文件名编码选择标签。
     NameEncoding,
     VolumeNone,
@@ -455,6 +457,7 @@ impl TextKey {
         TextKey::DeleteTemplate,
         TextKey::TemplateSaved,
         TextKey::VolumeSize,
+        TextKey::Volumes,
         TextKey::NameEncoding,
         TextKey::VolumeNone,
         TextKey::ThemeStats,
@@ -710,6 +713,7 @@ impl TextKey {
             TextKey::DeleteTemplate => "delete_template",
             TextKey::TemplateSaved => "template_saved",
             TextKey::VolumeSize => "volume_size",
+            TextKey::Volumes => "volumes",
             TextKey::NameEncoding => "name_encoding",
             TextKey::VolumeNone => "volume_none",
             TextKey::ThemeStats => "theme_stats",
@@ -973,6 +977,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::DeleteTemplate => "删除模板",
             TextKey::TemplateSaved => "打包模板已保存",
             TextKey::VolumeSize => "分卷大小",
+            TextKey::Volumes => "分卷",
             TextKey::NameEncoding => "文件名编码",
             TextKey::VolumeNone => "不分卷",
             TextKey::ThemeStats => "资源：{resources} 个纹理 · 采样：{sampling} · 基准 {scale}x",
@@ -1261,6 +1266,7 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
             TextKey::DeleteTemplate => "Delete template",
             TextKey::TemplateSaved => "Pack template saved",
             TextKey::VolumeSize => "Volume size",
+            TextKey::Volumes => "Volumes",
             TextKey::NameEncoding => "Name encoding",
             TextKey::VolumeNone => "No split",
             TextKey::ThemeStats => {

@@ -74,6 +74,11 @@ pub trait ArchiveReader: Send {
         None
     }
 
+    /// 分卷信息：(卷数, 总字节)。非分卷格式返回 None。
+    fn volume_info(&self) -> Option<(usize, u64)> {
+        None
+    }
+
     /// 用新的编码覆盖重新解码条目名。只重解码名字，不重读包体数据。
     /// 解压落盘用的是条目名，因此调用后需要重新 `plan()`。
     fn apply_name_override(&mut self, _override: NameOverride) {}

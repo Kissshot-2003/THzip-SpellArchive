@@ -446,10 +446,7 @@ fn pack(args: &[String]) -> ExitCode {
         }
     }
     let mut volume_first_index = 1u32;
-    if let Some(index) = args
-        .iter()
-        .position(|arg| arg == "--volume-first-index")
-    {
+    if let Some(index) = args.iter().position(|arg| arg == "--volume-first-index") {
         match args
             .get(index + 1)
             .and_then(|value| value.parse::<u32>().ok())

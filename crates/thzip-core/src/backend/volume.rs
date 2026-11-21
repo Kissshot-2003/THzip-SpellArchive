@@ -68,7 +68,9 @@ pub fn collect_volumes(first: &Path) -> Result<Vec<PathBuf>, ArchiveError> {
         .filter(|index| !found.contains_key(index))
         .collect();
     if !missing.is_empty() {
-        return Err(ArchiveError::Other(FailReason::VolumeIncomplete { missing }));
+        return Err(ArchiveError::Other(FailReason::VolumeIncomplete {
+            missing,
+        }));
     }
 
     Ok(found.into_values().collect())

@@ -66,7 +66,7 @@ lz4_flex = { version = "0.14", features = ["frame"] }
 # 许可：Apache-2.0 + UnRAR 条款（允许解压，禁止用于开发 RAR 兼容压缩器）。
 # 默认 feature 走 aws-lc-rs，需要 NASM 才能编译；改用 crypto-rust 走纯 Rust
 # 的 aes/cbc/hmac，构建链更简单，也省掉一个 C 依赖。
-unrar-rs = { version = "0.15.2", default-features = false, features = ["crypto-rust"] }
+unrar-rs = { version = "0.16.4", default-features = false, features = ["crypto-rust"] }
 single-instance = "0.3"
 tray-icon = "0.24"
 winreg = "0.56"

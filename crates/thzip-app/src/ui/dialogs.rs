@@ -663,6 +663,12 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
     let current_encoding = app.name_override;
     let mut selected_encoding = current_encoding;
     let encoding_label = app.tr.t(TextKey::NameEncoding);
+    let volumes_label = app.tr.t(TextKey::Volumes);
+    let volume_info = app
+        .pending_extract
+        .as_ref()
+        .and_then(|pending| pending.reader.lock().ok())
+        .and_then(|reader| reader.volume_info());
     let Some(pending) = app.pending_extract.as_mut() else {
         return;
     };
@@ -766,6 +772,12 @@ fn precheck(app: &mut ThzipApp, ctx: &egui::Context) {
                     ui.label(egui::RichText::new(target_label).color(palette.text_sub));
                     ui.label(&target);
                     ui.end_row();
+
+                    if let Some((count, bytes)) = volume_info {
+                        ui.label(egui::RichText::new(&volumes_label).color(palette.text_sub));
+                        ui.label(format!("{count} / {}", format_bytes(bytes)));
+                        ui.end_row();
+                    }
 
                     ui.label(egui::RichText::new(total_label).color(palette.text_sub));
                     ui.label(format_bytes(total));

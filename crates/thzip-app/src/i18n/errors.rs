@@ -143,9 +143,14 @@ fn reason_en(reason: &FailReason) -> String {
         FailReason::RarFailed { detail } => format!("RAR processing failed: {detail}"),
         FailReason::VolumeNameInvalid => "Invalid volume file name".to_owned(),
         FailReason::VolumeNoParent => "Volume has no parent directory".to_owned(),
-        FailReason::VolumeIncomplete { missing } => {
-            format!("Incomplete volume set, missing: {missing}")
-        }
+        FailReason::VolumeIncomplete { missing } => format!(
+            "Incomplete volume set, missing: {}",
+            missing
+                .iter()
+                .map(|index| format!("{index:03}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         FailReason::MoveIntoSelf { name } => {
             format!("Cannot move directory {name} into itself")
         }

@@ -96,6 +96,7 @@ fn usage() {
                                           安全解压；默认跳过已有文件
   thzip pack    <输出> <输入...> [--store] [--method <deflate|bzip2|zstd>]
                 [--7z-level <0-9>] [--7z-dict <MiB>] [--volume-size <MiB>]
+                 [--volume-first-index <0-999>]
                 [--comment <文本>] [--force] [--append] [--password <pw>] [--json]
                                           创建 zip / 7z / tar 家族；--password 用于 zip / 7z 加密
   thzip --version
@@ -444,6 +445,19 @@ fn pack(args: &[String]) -> ExitCode {
             }
         }
     }
+    let mut volume_first_index = 1u32;
+    if let Some(index) = args.iter().position(|arg| arg == "--volume-first-index") {
+        match args
+            .get(index + 1)
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            Some(first) if first <= 999 => volume_first_index = first,
+            _ => {
+                eprintln!("--volume-first-index 需要 0–999 的整数");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     let mut sevenz_dict_mib = 0u32;
     if let Some(index) = args.iter().position(|arg| arg == "--7z-dict") {
         match args
@@ -471,6 +485,7 @@ fn pack(args: &[String]) -> ExitCode {
             || arg == "--7z-level"
             || arg == "--7z-dict"
             || arg == "--volume-size"
+            || arg == "--volume-first-index"
             || arg == "--comment"
         {
             skip_value = true;
@@ -635,10 +650,11 @@ fn pack(args: &[String]) -> ExitCode {
         Ok(report) => {
             let mut volumes = 0usize;
             if volume_mib > 0 {
-                match backend::volume::split_archive(
+                match backend::volume::split_archive_with_first(
                     output,
                     u64::from(volume_mib) * 1024 * 1024,
                     force,
+                    volume_first_index,
                 ) {
                     Ok(parts) => volumes = parts.len(),
                     Err(err) => {

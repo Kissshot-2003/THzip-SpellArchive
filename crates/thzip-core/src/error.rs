@@ -140,7 +140,7 @@ pub enum FailReason {
     VolumeNameInvalid,
     VolumeNoParent,
     VolumeIncomplete {
-        missing: String,
+        missing: Vec<u32>,
     },
 
     MoveIntoSelf {
@@ -286,7 +286,14 @@ impl FailReason {
             FailReason::RarFailed { detail } => format!("RAR 处理失败: {detail}"),
             FailReason::VolumeNameInvalid => "分卷文件名无效".to_owned(),
             FailReason::VolumeNoParent => "分卷没有父目录".to_owned(),
-            FailReason::VolumeIncomplete { missing } => format!("分卷不完整，缺少：{missing}"),
+            FailReason::VolumeIncomplete { missing } => format!(
+                "分卷不完整，缺少：{}",
+                missing
+                    .iter()
+                    .map(|index| format!("{index:03}"))
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ),
             FailReason::MoveIntoSelf { name } => {
                 format!("不能把目录 {name} 移动到自身内部")
             }

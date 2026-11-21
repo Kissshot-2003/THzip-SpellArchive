@@ -1,3 +1,6 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -47,6 +50,8 @@ fn main() -> ExitCode {
         }),
         Some("extract") => extract(&args),
         Some("pack") => pack(&args),
+        Some("checksum") => checksum(&args),
+        Some("verify") => verify(&args),
         Some(other) => {
             eprintln!("未知命令: {other}");
             usage();
@@ -70,6 +75,351 @@ fn password_from(args: &[String]) -> Option<SecretString> {
         .position(|arg| arg == "--password" || arg == "-p")
         .and_then(|index| args.get(index + 1))
         .map(|pw| SecretString::new(pw.as_str()))
+}
+
+#[derive(Clone, Copy)]
+enum HashAlgo {
+    Sha256,
+    Sha1,
+    Md5,
+}
+
+impl HashAlgo {
+    fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "sha256" => Some(Self::Sha256),
+            "sha1" => Some(Self::Sha1),
+            "md5" => Some(Self::Md5),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Sha256 => "sha256",
+            Self::Sha1 => "sha1",
+            Self::Md5 => "md5",
+        }
+    }
+
+    fn hasher(self) -> Hasher {
+        match self {
+            Self::Sha256 => Hasher::Sha256(<sha2::Sha256 as sha2::Digest>::new()),
+            Self::Sha1 => Hasher::Sha1(<sha1::Sha1 as sha1::Digest>::new()),
+            Self::Md5 => Hasher::Md5(<md5::Md5 as md5::Digest>::new()),
+        }
+    }
+}
+
+enum Hasher {
+    Sha256(sha2::Sha256),
+    Sha1(sha1::Sha1),
+    Md5(md5::Md5),
+}
+
+impl Hasher {
+    fn update(&mut self, data: &[u8]) {
+        match self {
+            Self::Sha256(h) => sha2::Digest::update(h, data),
+            Self::Sha1(h) => sha1::Digest::update(h, data),
+            Self::Md5(h) => md5::Digest::update(h, data),
+        }
+    }
+
+    fn finish_hex(self) -> String {
+        match self {
+            Self::Sha256(h) => hex::encode(sha2::Digest::finalize(h)),
+            Self::Sha1(h) => hex::encode(sha1::Digest::finalize(h)),
+            Self::Md5(h) => hex::encode(md5::Digest::finalize(h)),
+        }
+    }
+}
+
+fn hash_file(path: &Path, algo: HashAlgo) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = algo.hasher();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(hasher.finish_hex())
+}
+
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_files(&path, out)?;
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn algo_from_args(args: &[String]) -> Option<HashAlgo> {
+    args.iter()
+        .position(|arg| arg == "--algo")
+        .and_then(|index| args.get(index + 1))
+        .and_then(|value| HashAlgo::parse(value))
+}
+
+fn checksum(args: &[String]) -> ExitCode {
+    let Some(target) = args.get(1) else {
+        usage();
+        return ExitCode::FAILURE;
+    };
+    if args.iter().any(|arg| arg == "--algo")
+        && args
+            .iter()
+            .position(|arg| arg == "--algo")
+            .and_then(|index| args.get(index + 1))
+            .is_some_and(|value| HashAlgo::parse(value).is_none())
+    {
+        eprintln!("--algo 只支持 sha256 / sha1 / md5");
+        return ExitCode::FAILURE;
+    }
+    let algo = algo_from_args(args).unwrap_or(HashAlgo::Sha256);
+    let json = has_json(args);
+    let path = Path::new(target);
+    let mut lines: Vec<(String, String)> = Vec::new();
+
+    if path.is_dir() {
+        let mut files = Vec::new();
+        if let Err(err) = collect_files(path, &mut files) {
+            eprintln!("无法遍历目录: {err}");
+            return ExitCode::FAILURE;
+        }
+        files.sort();
+        for file in &files {
+            let Ok(rel) = file.strip_prefix(path) else {
+                continue;
+            };
+            match hash_file(file, algo) {
+                Ok(hash) => lines.push((hash, rel.to_string_lossy().replace('\\', "/"))),
+                Err(err) => {
+                    eprintln!("无法读取 {}: {err}", file.display());
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    } else {
+        match hash_file(path, algo) {
+            Ok(hash) => lines.push((
+                hash,
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string()),
+            )),
+            Err(err) => {
+                eprintln!("无法读取 {}: {err}", path.display());
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    if json {
+        let mut out = format!(
+            "{{\"op\":\"checksum\",\"path\":{},\"algo\":{},\"entries\":[",
+            json_escape(&path.display().to_string()),
+            json_escape(algo.label())
+        );
+        for (index, (hash, name)) in lines.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"hash\":{},\"path\":{}}}",
+                json_escape(hash),
+                json_escape(name)
+            ));
+        }
+        out.push_str("]}");
+        println!("{out}");
+    } else {
+        for (hash, name) in &lines {
+            println!("{hash}  {name}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn parse_sums(text: &str) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((hash, path)) = line.split_once("  ") else {
+            continue;
+        };
+        let path = path
+            .trim_start_matches('*')
+            .trim_start_matches("./")
+            .replace('\\', "/");
+        map.insert(path, hash.to_ascii_lowercase());
+    }
+    map
+}
+
+fn normalize_entry_name(name: &str) -> String {
+    name.trim_start_matches("./").replace('\\', "/")
+}
+
+struct HashSink {
+    algo: HashAlgo,
+    hashers: HashMap<EntryId, Hasher>,
+}
+
+impl thzip_core::ExtractSink for HashSink {
+    fn on_entry_begin(
+        &mut self,
+        id: EntryId,
+        _entry: &thzip_core::ArchiveEntry,
+    ) -> Result<(), thzip_core::SinkError> {
+        self.hashers.insert(id, self.algo.hasher());
+        Ok(())
+    }
+
+    fn on_data(&mut self, id: EntryId, chunk: &[u8]) -> Result<(), thzip_core::SinkError> {
+        if let Some(hasher) = self.hashers.get_mut(&id) {
+            hasher.update(chunk);
+        }
+        Ok(())
+    }
+
+    fn on_entry_end(&mut self, _id: EntryId, _ok: bool) -> Result<(), thzip_core::SinkError> {
+        Ok(())
+    }
+}
+
+fn verify(args: &[String]) -> ExitCode {
+    let Some(archive) = args.get(1) else {
+        usage();
+        return ExitCode::FAILURE;
+    };
+    let sum_path = args
+        .iter()
+        .position(|arg| arg == "--checksum-file")
+        .and_then(|index| args.get(index + 1));
+    let Some(sum_path) = sum_path else {
+        eprintln!("verify 需要 --checksum-file <SHA256SUMS.txt>");
+        return ExitCode::FAILURE;
+    };
+    let text = match std::fs::read_to_string(sum_path) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("无法读取校验和文件: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let expected = parse_sums(&text);
+    let algo = algo_from_args(args).unwrap_or(HashAlgo::Sha256);
+    let json = has_json(args);
+    let archive = Path::new(archive);
+
+    let mut reader = match backend::open(archive, password_from(args).as_ref()) {
+        Ok(reader) => reader,
+        Err(err) => {
+            report_open_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let names: Vec<(EntryId, String)> = reader
+        .entries()
+        .iter()
+        .filter(|entry| !entry.kind.is_dir())
+        .map(|entry| (entry.id, normalize_entry_name(&entry.display)))
+        .collect();
+    let ids: Vec<EntryId> = names.iter().map(|(id, _)| *id).collect();
+    let target = PathBuf::from("__thzip_verify__");
+    let limits = Limits::default();
+    let plan = match reader.plan(&ids, &target, &limits) {
+        Ok(plan) => plan,
+        Err(err) => {
+            eprintln!("预检失败: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let decisions = DecisionTable::default();
+    let cancel = CancelToken::new();
+    let mut sink = HashSink {
+        algo,
+        hashers: HashMap::new(),
+    };
+    if let Err(err) = reader.extract(&plan, &decisions, &cancel, &mut sink) {
+        eprintln!("读取归档失败: {err}");
+        return ExitCode::FAILURE;
+    }
+
+    let mut actual = BTreeMap::new();
+    for (id, name) in names {
+        if let Some(hasher) = sink.hashers.remove(&id) {
+            actual.insert(name, hasher.finish_hex());
+        }
+    }
+    let mut missing = Vec::new();
+    let mut extra = Vec::new();
+    let mut mismatch = Vec::new();
+    for (path, hash) in &expected {
+        match actual.get(path) {
+            None => missing.push(path.clone()),
+            Some(actual_hash) if actual_hash != hash => mismatch.push(path.clone()),
+            _ => {}
+        }
+    }
+    for path in actual.keys() {
+        if !expected.contains_key(path) {
+            extra.push(path.clone());
+        }
+    }
+
+    let ok = missing.is_empty() && extra.is_empty() && mismatch.is_empty();
+    if json {
+        println!(
+            "{{\"op\":\"verify\",\"path\":{},\"ok\":{},\"missing\":{},\"extra\":{},\"mismatch\":{}}}",
+            json_escape(&archive.display().to_string()),
+            ok,
+            json_string_array(&missing),
+            json_string_array(&extra),
+            json_string_array(&mismatch)
+        );
+    } else {
+        if !missing.is_empty() {
+            println!("缺失 {} 项：{}", missing.len(), missing.join("、"));
+        }
+        if !extra.is_empty() {
+            println!("多出 {} 项：{}", extra.len(), extra.join("、"));
+        }
+        if !mismatch.is_empty() {
+            println!("不符 {} 项：{}", mismatch.len(), mismatch.join("、"));
+        }
+        if ok {
+            println!("校验通过：{} 项一致", actual.len());
+        }
+    }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn json_string_array(items: &[String]) -> String {
+    let mut out = String::from("[");
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_escape(item));
+    }
+    out.push(']');
+    out
 }
 
 /// 读取密码文件的首个非空行，支持 UTF-8 / UTF-16 LE / UTF-16 BE（含 BOM）。
@@ -143,6 +493,10 @@ fn usage() {
                  [--volume-first-index <0-999>]
                 [--comment <文本>] [--force] [--append] [--password <pw>] [--json]
                                           创建 zip / 7z / tar 家族；--password 用于 zip / 7z 加密
+  thzip checksum <文件或目录> [--algo sha256|sha1|md5] [--json]
+                                           生成 SHA256SUMS 兼容格式的校验和
+  thzip verify   <归档> --checksum-file <SHA256SUMS.txt> [--password <pw>] [--algo <algo>] [--json]
+                                           比对归档内文件与校验和；不一致时退出码非零
   thzip --version
 
   --json 把结果以单行 JSON 写到 stdout；错误仍写 stderr 并返回非零退出码。

@@ -185,3 +185,54 @@ fn version_uses_product_name() {
     assert!(body.starts_with("thzip "), "{body}");
     assert!(body.contains("THzip-SpellArchive"), "{body}");
 }
+
+#[test]
+fn checksum_and_verify_roundtrip() {
+    let dir = TempDir::new("sums");
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    std::fs::write(&a, b"alpha").unwrap();
+    std::fs::write(&b, b"beta").unwrap();
+    let archive = dir.path().join("data.zip");
+
+    let pack = run(&[
+        "pack",
+        archive.to_str().unwrap(),
+        a.to_str().unwrap(),
+        b.to_str().unwrap(),
+    ]);
+    assert!(pack.status.success(), "{}", stdout(&pack));
+
+    let ca = run(&["checksum", a.to_str().unwrap()]);
+    let cb = run(&["checksum", b.to_str().unwrap()]);
+    assert!(ca.status.success(), "{}", stdout(&ca));
+    assert!(cb.status.success(), "{}", stdout(&cb));
+    let ha = stdout(&ca).split_whitespace().next().unwrap().to_owned();
+    let hb = stdout(&cb).split_whitespace().next().unwrap().to_owned();
+
+    let sums = dir.path().join("SHA256SUMS.txt");
+    std::fs::write(&sums, format!("{ha}  a.txt\n{hb}  b.txt\n")).unwrap();
+
+    let ok = run(&[
+        "verify",
+        archive.to_str().unwrap(),
+        "--checksum-file",
+        sums.to_str().unwrap(),
+    ]);
+    assert!(ok.status.success(), "{}", stdout(&ok));
+
+    std::fs::write(&sums, format!("{ha}  a.txt\n0000  b.txt\n")).unwrap();
+    let bad = run(&[
+        "verify",
+        archive.to_str().unwrap(),
+        "--checksum-file",
+        sums.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(!bad.status.success(), "{}", stdout(&bad));
+    assert!(
+        stdout(&bad).contains("\"mismatch\":[\"b.txt\"]"),
+        "{}",
+        stdout(&bad)
+    );
+}

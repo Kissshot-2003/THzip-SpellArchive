@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use eframe::egui;
 
+use crate::i18n::{Locale, TextKey, builtin};
 use crate::theme::ThemeStore;
 use crate::ui::thzip_progress;
 
@@ -96,4 +97,68 @@ fn narrow_container_with_long_text_does_not_break() {
         measured.is_finite() && measured <= 200.0,
         "窄容器被撑开: {measured}"
     );
+}
+
+/// 真实三语文案（尤其日语假名 + 汉字，无空格断行）在窄容器里不能撑破布局。
+/// 挑的都是最长的说明性文案：预检提示、风险确认、密码说明、删除确认、CRC 警告。
+/// 伪本地化假文覆盖不到 CJK 的宽度和断行行为，这里用真实译文补上。
+#[test]
+fn real_localized_long_text_fits_narrow_layout() {
+    for locale in [Locale::ZhCn, Locale::EnUs, Locale::JaJp] {
+        for key in [
+            TextKey::PrecheckEncrypted,
+            TextKey::PrecheckLowSpace,
+            TextKey::RiskAck,
+            TextKey::RiskFat32,
+            TextKey::RememberPasswordNote,
+            TextKey::DeleteConfirm,
+            TextKey::CrcMismatch,
+            TextKey::SpoofedHint,
+        ] {
+            let text = builtin(locale, key).to_owned();
+            let width = Rc::new(Cell::new(0.0f32));
+            let sink = Rc::clone(&width);
+            // 用真实字体（含 CJK + 假名），否则无头 harness 的默认字体
+            // 遇到中文/日文会直接 panic，测不到真正的布局行为。
+            let mut harness = egui_kittest::Harness::builder()
+                .with_context_setup(crate::app::install_cjk_fonts)
+                .build_ui(move |ui| {
+                    ui.set_max_width(160.0);
+                    // wrap 模式：长文本换行，容器宽度不应被撑破。
+                    ui.add(egui::Label::new(egui::RichText::new(&text).size(12.0)).wrap());
+                    sink.set(ui.min_rect().width());
+                });
+            harness.run();
+            let measured = width.get();
+            assert!(
+                measured.is_finite() && measured <= 260.0,
+                "{locale:?} {key:?} 文案撑破窄容器: {measured}"
+            );
+        }
+    }
+}
+
+/// 三语 × 进度条：真实译文的标题/标签和进度条一起布局，多帧不 panic、宽度稳定。
+#[test]
+fn progress_bar_with_localized_labels_is_stable() {
+    let store = ThemeStore::load();
+    let theme = store.current().clone();
+    let palette = store.palette();
+
+    for locale in [Locale::ZhCn, Locale::EnUs, Locale::JaJp] {
+        let label = builtin(locale, TextKey::TaskRunning).to_owned();
+        let theme = theme.clone();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_context_setup(crate::app::install_cjk_fonts)
+            .build_ui(move |ui| {
+                ui.set_min_width(320.0);
+                ui.horizontal(|ui| {
+                    ui.label(&label);
+                    thzip_progress::show(ui, 120.0, 0.66, false, &theme, &palette);
+                });
+            });
+        for _ in 0..3 {
+            harness.run();
+        }
+    }
 }

@@ -12,6 +12,7 @@ pub mod warnings;
 pub enum Locale {
     ZhCn,
     EnUs,
+    JaJp,
 }
 
 impl Locale {
@@ -19,13 +20,15 @@ impl Locale {
         match self {
             Locale::ZhCn => "简体中文",
             Locale::EnUs => "English",
+            Locale::JaJp => "日本語",
         }
     }
 
     pub fn toggled(self) -> Self {
         match self {
             Locale::ZhCn => Locale::EnUs,
-            Locale::EnUs => Locale::ZhCn,
+            Locale::EnUs => Locale::JaJp,
+            Locale::JaJp => Locale::ZhCn,
         }
     }
 
@@ -33,6 +36,7 @@ impl Locale {
         match self {
             Locale::ZhCn => "zh-CN",
             Locale::EnUs => "en-US",
+            Locale::JaJp => "ja-JP",
         }
     }
 
@@ -40,6 +44,7 @@ impl Locale {
         match code {
             "zh-CN" | "zh" => Some(Locale::ZhCn),
             "en-US" | "en" => Some(Locale::EnUs),
+            "ja-JP" | "ja" => Some(Locale::JaJp),
             _ => None,
         }
     }
@@ -1392,6 +1397,309 @@ pub fn builtin(locale: Locale, key: TextKey) -> &'static str {
                 "The password is encrypted with Windows DPAPI and can only be decrypted by the current user on this machine; moving to another machine, reinstalling or switching users invalidates it."
             }
         },
+        Locale::JaJp => match key {
+            TextKey::AppTitle => "THzip-SpellArchive",
+            TextKey::Open => "アーカイブを開く",
+            TextKey::NewArchive => "新しいアーカイブ",
+            TextKey::Extract => "展開",
+            TextKey::Pack => "アーカイブに追加",
+            TextKey::TestArchive => "整合性チェック",
+            TextKey::Settings => "設定",
+            TextKey::LocalFiles => "ローカルファイル",
+            TextKey::ArchiveEntries => "アーカイブ内の項目",
+            TextKey::TaskQueue => "タスク",
+            TextKey::TaskRunning => "実行中…",
+            TextKey::TaskDone => "完了",
+            TextKey::SearchHint => "ファイル名を検索…（* / ? ワイルドカード、re: 正規表現）",
+            TextKey::Theme => "テーマ",
+            TextKey::Language => "言語",
+            TextKey::StandardTerms => "標準用語を表示",
+            TextKey::FirstRunHint => {
+                "テーマによる表示は装飾です。各操作は標準的なアーカイブツールと対応しています。"
+            }
+            TextKey::Dismiss => "了解",
+            TextKey::EmptyArchive => "アーカイブが開かれていません",
+            TextKey::DemoBadge => "デモデータ",
+            TextKey::GoUp => "上へ",
+            TextKey::StatusReady => "準備完了",
+            TextKey::About => "情報",
+            TextKey::Cancel => "キャンセル",
+            TextKey::Pause => "一時停止",
+            TextKey::Resume => "再開",
+            TextKey::StartExtract => "展開を開始",
+            TextKey::Precheck => "展開前チェック",
+            TextKey::ExtractTo => "展開先",
+            TextKey::SkipExisting => "既存ファイルをスキップ",
+            TextKey::OverwriteExisting => "既存ファイルを上書き",
+            TextKey::RenameExisting => "既存を保持して新しい方に名前を付ける (a~1.txt)",
+            TextKey::AutoNumberExisting => "既存を保持して新しい方に連番を付ける (a (1).txt)",
+            TextKey::ClearFinished => "完了したタスクを消去",
+            TextKey::PasswordPrompt => "このアーカイブにはパスワードが必要です",
+            TextKey::TotalSize => "展開後のサイズ",
+            TextKey::LargestFile => "最大のファイル",
+            TextKey::FreeSpace => "空き容量",
+            TextKey::Conflicts => "競合",
+            TextKey::Warnings => "警告",
+            TextKey::Opening => "開いています…",
+            TextKey::Testing => "検証中…",
+            TextKey::TrayShow => "ウィンドウを表示",
+            TextKey::TrayHide => "ウィンドウを隠す",
+            TextKey::TrayQuit => "終了",
+            TextKey::NewTab => "新しいタブ",
+            TextKey::CloseTab => "タブを閉じる",
+            TextKey::SelectedOne => "選択中: {name}",
+            TextKey::SelectedMany => "{count} 件選択中",
+            TextKey::StatusSuffix => "{theme} · {locale} · {total} 件",
+            TextKey::DropBrowseFolder => "離すとフォルダーを参照",
+            TextKey::DropOpenArchive => "離すとアーカイブを開く",
+            TextKey::OneFile => "1 ファイル",
+            TextKey::ItemCount => "{count} 件",
+            TextKey::ClearSelection => "選択解除",
+            TextKey::SelectAll => "すべて選択",
+            TextKey::DeleteSelected => "選択を削除",
+            TextKey::RenameSelected => "名前を変更…",
+            TextKey::MoveSelected => "移動…",
+            TextKey::BatchRenameSelected => "一括名前変更…",
+            TextKey::RegexRenameSelected => "正規表現で名前変更…",
+            TextKey::RelocateRenameTitle => "アーカイブ内項目の名前を変更",
+            TextKey::RelocateMoveTitle => "アーカイブ内項目を移動",
+            TextKey::RelocateBatchTitle => "アーカイブ内項目を一括名前変更",
+            TextKey::RelocateRegexTitle => "正規表現で置換リネーム",
+            TextKey::RelocatePathLabel => "新しいパス（アーカイブ内）",
+            TextKey::RelocateFolderLabel => "移動先フォルダー（空ならルート）",
+            TextKey::RelocateBatchLabel => {
+                "パターン: {name}=元の名前, {n}=番号, {ext}=拡張子。{ext} を使わない限り拡張子は保持されます"
+            }
+            TextKey::RelocateRegexPatternLabel => "正規表現（ファイル名のみ）",
+            TextKey::RelocateRegexReplaceLabel => "置換文字列 ($1、グループは ${name})",
+            TextKey::RelocateRegexHint => {
+                "例: ep(\\d+) → episode$1。フォルダーを改名すると子項目も移動します"
+            }
+            TextKey::RelocateCaseInsensitive => "大文字・小文字を区別しない",
+            TextKey::RelocateApply => "適用",
+            TextKey::RelocateNoSelection => "先に項目を選択してください",
+            TextKey::RelocateOneOnly => "名前変更は一度に 1 件だけです",
+            TextKey::RelocateInvalid => "無効なアーカイブパス",
+            TextKey::RelocateInvalidRegex => "正規表現が無効です: {error}",
+            TextKey::RelocateDuplicate => "名前変更後に重複: {name}",
+            TextKey::RelocateNested => "フォルダーを自分自身の中へ移動できません",
+            TextKey::RelocateNoChange => "パスは変更されていません",
+            TextKey::TaskRelocate => "項目を移動: {name}",
+            TextKey::Relocating => "アーカイブを書き換えて {count} 件を移動中…",
+            TextKey::EmptyHint => {
+                "一覧の zip / 7z をダブルクリックするか、ファイルをウィンドウへドラッグできます"
+            }
+            TextKey::ColName => "名前",
+            TextKey::ColSize => "サイズ",
+            TextKey::ColPacked => "圧縮後",
+            TextKey::ColRatio => "圧縮率",
+            TextKey::ColMethod => "方式",
+            TextKey::ColTime => "更新日時",
+            TextKey::ColCrc => "CRC32",
+            TextKey::CrcMismatch => {
+                "CRC 不一致: 展開データが記録されたチェックサムと一致しません。ファイルが破損している可能性があります"
+            }
+            TextKey::ColFlags => "フラグ",
+            TextKey::FlagLocked => "ロック",
+            TextKey::FlagSpoofed => "なりすまし",
+            TextKey::SpoofedHint => {
+                "名前に双方向制御文字が含まれています。表示される拡張子と実際の拡張子が異なる可能性があります"
+            }
+            TextKey::SortHint => "クリックで昇順／降順を切り替え",
+            TextKey::TaskCount => "{count} 件のタスク",
+            TextKey::PhasePending => "待機中",
+            TextKey::PhasePlanning => "準備中",
+            TextKey::PhaseAwaitingDecision => "確認待ち",
+            TextKey::PhaseRunning => "実行中",
+            TextKey::PhasePaused => "一時停止中",
+            TextKey::PhaseFailed => "失敗",
+            TextKey::CancellingTask => "キャンセル中: {name}",
+            TextKey::BrowserDoubleClick => "{name} · {kind} · ダブルクリックで開く",
+            TextKey::BrowserSelected => "選択中: {name}",
+            TextKey::PackTitle => "アーカイブを作成",
+            TextKey::AddFiles => "ファイルを追加…",
+            TextKey::AddFolder => "フォルダーを追加…",
+            TextKey::PackEmpty => "ファイルやフォルダーがまだ追加されていません",
+            TextKey::Output => "出力先",
+            TextKey::Browse => "参照…",
+            TextKey::StoreOnly => "無圧縮 (Store)",
+            TextKey::ZipMethod => "zip 圧縮方式",
+            TextKey::SevenZOptionsLabel => "7z オプション",
+            TextKey::SevenZLevel => "圧縮レベル",
+            TextKey::SevenZDict => "辞書サイズ",
+            TextKey::SevenZAuto => "自動",
+            TextKey::AppendMode => "既存の zip に追加（既存項目は保持）",
+            TextKey::AesEncrypt => "AES-256 暗号化",
+            TextKey::Password => "パスワード",
+            TextKey::PackFormatsHint => {
+                ".zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4 に対応"
+            }
+            TextKey::PackAppendHint => {
+                "既存の zip に追加します。成功時に元ファイルは原子的に置き換えられます。"
+            }
+            TextKey::PackOverwriteHint => {
+                "出力先が既に存在します。確認後、原子的に置き換えられます。"
+            }
+            TextKey::PackAppendMissing => "追加モードには既存のアーカイブが必要です。",
+            TextKey::StartAppend => "追加を開始",
+            TextKey::OverwriteAndPack => "上書きしてパック",
+            TextKey::StartPack => "パックを開始",
+            TextKey::Unknown => "不明",
+            TextKey::PrecheckEncrypted => {
+                "暗号化された項目が含まれています。パスワードがないと展開できません。"
+            }
+            TextKey::PrecheckLowSpace => {
+                "展開後の合計が出力先ドライブの空き容量を超える見込みです。"
+            }
+            TextKey::ConflictPolicy => "競合時の処理",
+            TextKey::CloseToTray => "ウィンドウを閉じるときトレイに最小化",
+            TextKey::ShellMenu => {
+                "エクスプローラーの右クリックメニュー（Windows 11 は「その他のオプションを表示」内）"
+            }
+            TextKey::ImportTheme => "テーマパックを読み込む…",
+            TextKey::ExportTheme => "テーマパックを書き出す…",
+            TextKey::ThemeExportUnavailable => {
+                "現在のテーマには書き出し可能なディレクトリがありません（標準テーマは組み込み）"
+            }
+            TextKey::Comment => "アーカイブのコメント",
+            TextKey::CommentHint => "zip のみ。不要なら空欄にしてください",
+            TextKey::Preview => "プレビュー",
+            TextKey::PreviewLoading => "項目を読み込み中…",
+            TextKey::PreviewBinary => "バイナリ内容のためプレビューできません",
+            TextKey::PreviewTruncated => "内容が大きすぎるため先頭のみ表示しています",
+            TextKey::Template => "パック テンプレート",
+            TextKey::TemplateNone => "テンプレートなし",
+            TextKey::TemplateName => "テンプレート名",
+            TextKey::SaveTemplate => "テンプレートを保存",
+            TextKey::DeleteTemplate => "テンプレートを削除",
+            TextKey::TemplateSaved => "パック テンプレートを保存しました",
+            TextKey::VolumeSize => "分巻サイズ",
+            TextKey::Volumes => "分巻",
+            TextKey::NameEncoding => "ファイル名のエンコーディング",
+            TextKey::VolumeNone => "分割なし",
+            TextKey::ThemeStats => {
+                "リソース: {resources} テクスチャ · サンプリング: {sampling} · 基準 {scale}x"
+            }
+            TextKey::SamplingNearest => "NEAREST（ピクセル）",
+            TextKey::SamplingLinear => "LINEAR",
+            TextKey::LimitsInfo => "安全上限: 合計 {total} GiB · 1 項目 {entry} GiB · {entries} 件",
+            TextKey::FeatureSummary => {
+                "実装済み: zip / 7z / rar / tar の読み取り、zip / 7z / tar の書き込み、単一ストリーム読み取り、AES-256、\n事前チェック、CRC、バックグラウンド タスク、キャンセル、パスワード再試行、テーマと i18n のフォールバック、\nパスのサニタイズ、上限遮断、アトミック上書き、設定の永続化、ログ、シングル インスタンス、トレイ、\n右クリック メニュー、テーマ パックの読み込み、内蔵フォント、正規表現リネーム。\n未実装: コード署名。"
+            }
+            TextKey::ConfigPath => "設定ファイル: {path}",
+            TextKey::LogPath => "ログ ファイル: {path}",
+            TextKey::ShellMenuAdded => "エクスプローラーの右クリック メニューを追加しました",
+            TextKey::ShellMenuRemoved => "エクスプローラーの右クリック メニューを削除しました",
+            TextKey::ShellMenuFailed => "右クリック メニューの更新に失敗しました: {error}",
+            TextKey::ExePathFailed => "exe のパスを取得できませんでした: {error}",
+            TextKey::ThemeSwitched => "テーマを切り替えました: {name}",
+            TextKey::TabSwitched => "切り替え: {name}",
+            TextKey::TabClosed => "タブを閉じました。残り {count} 件",
+            TextKey::ThemeReloaded => "テーマ ファイルを再読み込みしました",
+            TextKey::DirectoryStatus => "ディレクトリ: {path}",
+            TextKey::FilterArchives => "アーカイブ",
+            TextKey::FilterAll => "すべてのファイル",
+            TextKey::FilterThemePack => "テーマ パック",
+            TextKey::ThemeDirMissing => "themes ディレクトリが見つかりません",
+            TextKey::TaskImportTheme => "テーマを読み込み: {name}",
+            TextKey::ImportingTheme => "バックグラウンドでテーマ パックを読み込み中…",
+            TextKey::TaskExportTheme => "テーマを書き出し: {name}",
+            TextKey::ExportingTheme => "バックグラウンドでテーマ パックを書き出し中…",
+            TextKey::OpeningFile => "開いています: {name}",
+            TextKey::TaskOpen => "開く: {name}",
+            TextKey::TaskPrecheck => "事前チェック: {name}",
+            TextKey::Prechecking => "バックグラウンドで事前チェック中…",
+            TextKey::SelectBeforeDelete => "先に削除する項目を選択してください",
+            TextKey::DeleteTitle => "アーカイブ内項目を削除",
+            TextKey::DeleteConfirm => {
+                "{count} 件をアーカイブから削除しますか？\nアーカイブは書き換えられますが、成功するまで元ファイルは変更されません。"
+            }
+            TextKey::TaskDelete => "項目を削除: {name}",
+            TextKey::Rewriting => "アーカイブを書き換えて {count} 件を削除中…",
+            TextKey::TaskExtract => "展開: {name}",
+            TextKey::ExtractStarted => "展開先: {path}",
+            TextKey::PackReady => "{count} 件を {path} にパックする準備ができました",
+            TextKey::ChoosePackFiles => "パックするファイルを選択",
+            TextKey::ChoosePackFolder => "パックするフォルダーを選択",
+            TextKey::PackErrNoSources => "先にファイルやフォルダーを追加してください",
+            TextKey::PackErrNoOutput => "出力先のファイル パスを入力してください",
+            TextKey::PackErrUnsupported => {
+                "出力形式がサポートされていません。.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4 を使用してください"
+            }
+            TextKey::PackErrOutputIsDir => "出力先がフォルダーです。ファイル名を指定してください",
+            TextKey::PackErrAppendZipOnly => "追加モードは zip / 7z / tar に対応しています",
+            TextKey::PackErrAppendMissing => "追加モードには既存のアーカイブが必要です",
+            TextKey::PackErrConfirmOverwrite => {
+                "出力先が既に存在します。「パックを開始」をもう一度クリックすると上書きされます"
+            }
+            TextKey::PackErrEncryptUnsupported => "暗号化して書き込めるのは zip / 7z だけです",
+            TextKey::PackErrAppendPassword => "追加モードでは新しいパスワードを設定できません",
+            TextKey::PackErrPasswordRequired => {
+                "暗号化を有効にした場合はパスワードを入力してください"
+            }
+            TextKey::PackingTo => "パック中: {path}",
+            TextKey::AppendingTo => "追加中: {path}",
+            TextKey::TaskPack => "パック: {name}",
+            TextKey::TaskAppend => "追加: {name}",
+            TextKey::TaskTest => "テスト: {name}",
+            TextKey::TestStarted => "整合性チェックを開始: {name}",
+            TextKey::ArchiveOpened => "{name} を開きました: {count} 件",
+            TextKey::EntryCount => "{count} 件",
+            TextKey::PasswordNeededFor => "{name} にはパスワードが必要です",
+            TextKey::PasswordNeeded => "パスワードが必要です",
+            TextKey::TaskFinished => "タスク完了: {summary}",
+            TextKey::SummaryLine => "{label}: {summary}",
+            TextKey::ExtractSummary => "成功 {ok} · スキップ {skipped} · 失敗 {failed} · CRC {crc}",
+            TextKey::PackSummary => "{entries} 件 · {bytes_in} → {bytes_out}",
+            TextKey::PackDone => "パックが完了しました",
+            TextKey::AppendDone => "追加が完了しました",
+            TextKey::RewriteSummary => "書き換え完了: {entries} 件 · {bytes} バイト",
+            TextKey::PrecheckSummary => "事前チェック完了: {count} 件、展開後 {size}",
+            TextKey::ThemePackSummary => {
+                "テーマ パック: 成功 {ok} · スキップ {skipped} · 失敗 {failed}"
+            }
+            TextKey::FailedEntries => "失敗した項目:",
+            TextKey::FailedEntryLine => "項目 {id}: {error}",
+            TextKey::PartialFailure => "{summary}（一部の項目が失敗しました）",
+            TextKey::TaskFailed => "タスク失敗: {error}",
+            TextKey::OpeningMany => "{count} 個のアーカイブを開いています（1 つずつタブ）",
+            TextKey::ShellOpen => "THzip-SpellArchive で開く",
+            TextKey::ShellExtractHere => "ここに展開",
+            TextKey::ShellExtractTo => "フォルダーに展開",
+            TextKey::ShellAddToZip => "zip に追加",
+            TextKey::ShellClassicMenu => "Win10 クラシック右クリック メニューを復元",
+            TextKey::ShellClassicMenuNote => {
+                "「その他のオプションを表示」ではなく、右クリックで直接メニューを表示します。エクスプローラーの再起動が必要です。"
+            }
+            TextKey::ShellClassicMenuOn => {
+                "Win10 クラシック右クリック メニューを復元しました。エクスプローラーを再起動してください"
+            }
+            TextKey::ShellClassicMenuOff => {
+                "Win11 の右クリック メニューに戻しました。エクスプローラーを再起動してください"
+            }
+            TextKey::NoMatches => "一致する項目がありません",
+            TextKey::OnlyAnomalies => "異常のある項目のみ",
+            TextKey::SuspiciousName => "疑わしい名前: {detail}",
+            TextKey::CommandPalette => "コマンド パレット",
+            TextKey::CommandPaletteHint => "入力で絞り込み、Enter で実行、Esc で閉じる",
+            TextKey::CommandNoMatch => "一致するコマンドがありません",
+            TextKey::CmdToggleTheme => "テーマを切り替え",
+            TextKey::CmdToggleLanguage => "言語を切り替え",
+            TextKey::ReduceMotion => "動きを減らす（トランジションとパーティクルなし）",
+            TextKey::HighContrast => "ハイ コントラスト モード（本文 ≥ 7:1）",
+            TextKey::LimitsTitle => "安全上限",
+            TextKey::LimitsPreset => "プリセット",
+            TextKey::LimitsInvalid => "値が範囲外です。適用されませんでした",
+            TextKey::RiskTitle => "高リスク操作です。確認が必要です",
+            TextKey::RiskAck => "リスクを理解した上で続行します",
+            TextKey::RiskFat32 => {
+                "項目が 4 GiB を超えていますが出力先が FAT32 です。書き込みは失敗します。NTFS/exFAT を使用してください"
+            }
+            TextKey::RememberPassword => "パスワードを記憶（このマシン・このユーザー）",
+            TextKey::RememberPasswordNote => {
+                "パスワードは Windows DPAPI で暗号化され、このマシンの現在のユーザーしか復号できません。別のマシンへの移動、再インストール、ユーザー切り替えで無効になります。"
+            }
+        },
     }
 }
 
@@ -1420,6 +1728,17 @@ pub fn limit_field_label(locale: Locale, field: LimitField) -> &'static str {
             LimitField::Nesting => "Max nesting depth",
             LimitField::MinFreeSpace => "Free space to keep",
         },
+        Locale::JaJp => match field {
+            LimitField::TotalBytes => "展開総量の上限",
+            LimitField::EntryBytes => "1 項目のサイズ上限",
+            LimitField::Entries => "項目数の上限",
+            LimitField::RatioStreamed => "膨張倍率の上限",
+            LimitField::PathDepth => "パスの階層上限",
+            LimitField::PathLen => "パス長の上限",
+            LimitField::DictSize => "辞書サイズの上限",
+            LimitField::Nesting => "入れ子の深さ上限",
+            LimitField::MinFreeSpace => "確保する空き容量",
+        },
     }
 }
 
@@ -1435,6 +1754,11 @@ pub fn limit_profile_label(locale: Locale, profile: LimitProfile) -> &'static st
             LimitProfile::Strict => "Strict",
             LimitProfile::Default => "Default",
             LimitProfile::Relaxed => "Relaxed",
+        },
+        Locale::JaJp => match profile {
+            LimitProfile::Strict => "厳格",
+            LimitProfile::Default => "既定",
+            LimitProfile::Relaxed => "緩やか",
         },
     }
 }
@@ -1580,13 +1904,32 @@ mod tests {
     }
 
     #[test]
+    fn locale_cycle_and_codes() {
+        // 语言切换应能遍历三种语言并回到起点。
+        let mut locale = Locale::ZhCn;
+        let first = locale;
+        for _ in 0..3 {
+            locale = locale.toggled();
+        }
+        assert_eq!(locale, first);
+
+        assert_eq!(Locale::from_code("zh-CN"), Some(Locale::ZhCn));
+        assert_eq!(Locale::from_code("en-US"), Some(Locale::EnUs));
+        assert_eq!(Locale::from_code("ja-JP"), Some(Locale::JaJp));
+        assert_eq!(Locale::from_code("ja"), Some(Locale::JaJp));
+        assert_eq!(Locale::from_code("fr-FR"), None);
+        assert_eq!(Locale::JaJp.code(), "ja-JP");
+        assert_eq!(Locale::JaJp.label(), "日本語");
+    }
+
+    #[test]
     fn every_key_has_unique_id_and_both_locales() {
         let mut ids = HashSet::new();
         for &key in TextKey::ALL {
             let id = key.key();
             assert!(!id.is_empty(), "empty id for {key:?}");
             assert!(ids.insert(id), "duplicate id: {id}");
-            for locale in [Locale::ZhCn, Locale::EnUs] {
+            for locale in [Locale::ZhCn, Locale::EnUs, Locale::JaJp] {
                 let text = builtin(locale, key);
                 assert!(!text.trim().is_empty(), "missing {locale:?} for {id}");
             }
@@ -1599,7 +1942,9 @@ mod tests {
         for &key in TextKey::ALL {
             let zh = placeholders(builtin(Locale::ZhCn, key));
             let en = placeholders(builtin(Locale::EnUs, key));
-            assert_eq!(zh, en, "placeholder mismatch for {}", key.key());
+            let ja = placeholders(builtin(Locale::JaJp, key));
+            assert_eq!(zh, en, "placeholder mismatch (zh/en) for {}", key.key());
+            assert_eq!(zh, ja, "placeholder mismatch (zh/ja) for {}", key.key());
         }
     }
 

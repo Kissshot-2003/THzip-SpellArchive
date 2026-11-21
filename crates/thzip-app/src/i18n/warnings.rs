@@ -1,7 +1,7 @@
 use thzip_core::plan::{Conflict, ConflictKind, PlanWarning};
 
 use super::Locale;
-use super::errors::{issue_en, limit_en};
+use super::errors::{issue_en, issue_ja, limit_en, limit_ja};
 
 /// 预检警告的中文/英文文案。
 pub fn warning(locale: Locale, warning: &PlanWarning) -> String {
@@ -84,6 +84,46 @@ pub fn warning(locale: Locale, warning: &PlanWarning) -> String {
             "{} exceeds the 4 GiB FAT32 limit (entry {id})",
             human_size(*size)
         ),
+        (Locale::JaJp, PlanWarning::BombSuspected { hit }) => {
+            format!("zip 爆弾の可能性: {}", limit_ja(*hit))
+        }
+        (Locale::JaJp, PlanWarning::SymlinkSkipped { id }) => {
+            format!("リンクをスキップ（項目 {id}）")
+        }
+        (Locale::JaJp, PlanWarning::SuspiciousDisplayName { id, detail }) => {
+            format!("疑わしいファイル名（項目 {id}）: {detail}")
+        }
+        (Locale::JaJp, PlanWarning::NameEncodingAmbiguous { id, confidence }) => {
+            format!(
+                "ファイル名のエンコーディングが不确定です（項目 {id}、信頼度 {confidence}）。手動で切り替えてください"
+            )
+        }
+        (Locale::JaJp, PlanWarning::UnsupportedMethod { id, method }) => {
+            format!("非対応の圧縮方式（項目 {id}）: {}", method.label())
+        }
+        (Locale::JaJp, PlanWarning::UnsafePath { id, issue }) => {
+            format!("安全でないパス（項目 {id}）: {}", issue_ja(*issue))
+        }
+        (
+            Locale::JaJp,
+            PlanWarning::InsufficientSpace {
+                required,
+                reserved,
+                available,
+            },
+        ) => format!(
+            "空き容量が不足: {required} 必要、{reserved} 確保が必要、{available} 利用可能",
+            required = human_size(*required),
+            reserved = human_size(*reserved),
+            available = human_size(*available)
+        ),
+        (Locale::JaJp, PlanWarning::NestedArchive { id, depth }) => {
+            format!("入れ子のアーカイブ（項目 {id}、第 {depth} 層）")
+        }
+        (Locale::JaJp, PlanWarning::LargeFileOnFat32 { id, size }) => format!(
+            "{} が FAT32 の 4 GiB 上限を超えています（項目 {id}）",
+            human_size(*size)
+        ),
     }
 }
 
@@ -114,6 +154,10 @@ pub fn conflict(locale: Locale, conflict: &Conflict) -> String {
         (Locale::EnUs, ConflictKind::ExistingDir) => "existing folder",
         (Locale::EnUs, ConflictKind::CaseCollision) => "case-only collision",
         (Locale::EnUs, ConflictKind::ReparsePoint) => "reparse point",
+        (Locale::JaJp, ConflictKind::ExistingFile) => "既存ファイル",
+        (Locale::JaJp, ConflictKind::ExistingDir) => "既存フォルダー",
+        (Locale::JaJp, ConflictKind::CaseCollision) => "大文字・小文字の競合",
+        (Locale::JaJp, ConflictKind::ReparsePoint) => "リパース ポイント",
     };
     match locale {
         Locale::ZhCn => format!("条目 {}：{kind} — {}", conflict.id, conflict.path.display()),
@@ -122,6 +166,7 @@ pub fn conflict(locale: Locale, conflict: &Conflict) -> String {
             conflict.id,
             conflict.path.display()
         ),
+        Locale::JaJp => format!("項目 {}: {kind} — {}", conflict.id, conflict.path.display()),
     }
 }
 
@@ -143,6 +188,7 @@ mod tests {
         };
         assert!(warning(Locale::ZhCn, &bomb).contains("炸弹"));
         assert!(warning(Locale::EnUs, &bomb).contains("zip bomb"));
+        assert!(warning(Locale::JaJp, &bomb).contains("zip 爆弾"));
 
         let unsafe_path = PlanWarning::UnsafePath {
             id: 3,
@@ -150,6 +196,7 @@ mod tests {
         };
         assert!(warning(Locale::ZhCn, &unsafe_path).contains("不安全的路径"));
         assert!(warning(Locale::EnUs, &unsafe_path).contains("Unsafe path"));
+        assert!(warning(Locale::JaJp, &unsafe_path).contains("安全でないパス"));
     }
 
     #[test]
@@ -161,7 +208,9 @@ mod tests {
         };
         let zh = conflict(Locale::ZhCn, &item);
         let en = conflict(Locale::EnUs, &item);
+        let ja = conflict(Locale::JaJp, &item);
         assert!(zh.contains("已存在同名文件"), "{zh}");
         assert!(en.contains("existing file"), "{en}");
+        assert!(ja.contains("既存ファイル"), "{ja}");
     }
 }

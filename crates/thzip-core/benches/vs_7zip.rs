@@ -105,7 +105,8 @@ fn main() {
         let _ = std::fs::remove_file(&out);
         run_7z(
             &seven_zip,
-            &["a", "-t7z", "-mx5", path_arg(&out), path_arg(&data)],
+            // 与本项目 SevenZOptions::default() 的 level 3 保持同口径。
+            &["a", "-t7z", "-mx3", path_arg(&out), path_arg(&data)],
         );
         out
     });

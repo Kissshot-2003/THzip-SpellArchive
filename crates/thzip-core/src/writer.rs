@@ -36,8 +36,12 @@ pub struct SevenZOptions {
 
 impl Default for SevenZOptions {
     fn default() -> Self {
+        // level 3 使用 Fast + Hc4 match finder，绕开 level 4–9 的 Bt4 树搜索。
+        // 实测（4 MiB 数据）：随机数据与 level 6 持平（~1.0s），但文本从 343ms
+        // 降到 83ms（4x），压缩率仅从 872 B 降到 950 B（约 9%）。
+        // 追求极致压缩率的用户仍可用 --7z-level 6–9。
         Self {
-            level: 6,
+            level: 3,
             dict_size: 0,
             threads: 0,
         }

@@ -507,7 +507,7 @@ fn usage() {
     都不加则跳过冲突条目。
   - 支持 zip / 7z / tar 家族读写；7z 与 zip 可加密。
   - --method 只影响 zip：deflate（默认）/ bzip2 / zstd；--store 优先。
-  - --7z-level / --7z-dict 只影响 7z：级别 0–9（默认 6），字典 MiB（0 = 自动）。
+  - --7z-level / --7z-dict 只影响 7z：级别 0–9（默认 3，Fast+Hc4 速度优先），字典 MiB（0 = 自动）。
   - pack 的输出扩展名决定容器：.zip / .7z / .tar / .tar.gz / .tar.bz2 / .tar.xz / .tar.zst / .tar.lz4。
   - --volume-size 只用于新建 .7z：按 MiB 切成 .7z.001 / .002 …；已存在分卷需 --force。
   - --comment 只用于新建 zip：写入归档注释。
@@ -819,7 +819,8 @@ fn pack(args: &[String]) -> ExitCode {
         .position(|arg| arg == "--comment")
         .and_then(|index| args.get(index + 1))
         .cloned();
-    let mut sevenz_level = 6u32;
+    // 与 SevenZOptions::default() 的 level 3 保持一致。
+    let mut sevenz_level = thzip_core::writer::SevenZOptions::default().level;
     if let Some(index) = args.iter().position(|arg| arg == "--7z-level") {
         match args
             .get(index + 1)

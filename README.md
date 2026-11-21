@@ -103,14 +103,15 @@ exe 不再依赖 `VCRUNTIME140.dll` / `MSVCP140.dll`——代价是各自增大 
 | 打开并列出 10k 条目 zip（≤ 8 MiB 包） | ~9 ms |
 | 仅解析 10k 条目中央目录（文件 seek） | ~120 ms |
 | 解压 16 MiB zip 到计数 sink | ~1.8 ms |
-| 打包 4 MiB 随机数据为 7z（LZMA2 L6） | ~1.05 s |
+| 打包 4 MiB 随机数据为 7z（LZMA2 L3） | ~1.0 s |
+| 打包 4 MiB 文本数据为 7z（LZMA2 L3） | ~0.08 s（L6 为 ~0.34 s） |
 
 数字只用于前后对比。8 MiB 以内的 zip 会整包读入内存，避免逐条目 seek；更大的包仍走文件流。
 此前 10k 列表约 340 ms，优化后约 9 ms。
 
-与 7-Zip 26.04 的横向对比（24.2 MiB / 204 条目，三次取最小）用 `cargo bench -p thzip-core --bench vs_7zip`：
-创建 zip 0.58 s ↔ 0.58 s，解压 zip 0.40 s ↔ 0.42 s，创建 7z 3.46 s ↔ 0.88 s。
-第三方 7z 明显更快是纯 Rust LZMA2 编码器与手写汇编的差距，取舍见 `HANDOVER.md` §13 / §16.6。
+与 7-Zip 26.04 的横向对比（24.2 MiB / 204 条目，三次取最小，同压缩级别口径）用 `cargo bench -p thzip-core --bench vs_7zip`：
+创建 zip 0.31 s ↔ 0.39 s，解压 zip 0.26 s ↔ 0.24 s，创建 7z 1.34 s ↔ 3.14 s（L3 / `-mx3`）。
+7z 默认级别从 6 改为 3（Fast + Hc4 match finder，绕开昂贵的 Bt4 树搜索）：文本数据提速约 4 倍、随机数据持平，压缩率仅降约 9%。此前"创建 7z 慢 4 倍"的结论来自不对等口径（本项目 L6 vs 7-Zip `-mx5`），同级别下本项目并不慢。极致压缩率仍可用 `--7z-level 6–9`，取舍见 `HANDOVER.md` §13 / §16.6。
 
 ## 便携模式
 

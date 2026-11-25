@@ -48,7 +48,7 @@ zip = { version = "9.6", default-features = false, features = [
 ] }
 crc32fast = "1"
 sha2 = "0.10"
-sha1 = "0.10"
+sha1 = "0.11"
 md-5 = "0.10"
 hex = "0.4"
 crossbeam-channel = "0.5"

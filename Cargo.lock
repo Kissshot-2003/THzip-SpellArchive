@@ -2715,7 +2715,7 @@ version = "0.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca93e534d1142d1d0dcca6d25fe302508a5dfb40b302802904577725ea0b695b"
 dependencies = [
- "sha2 0.11.0",
+ "sha2",
 ]
 
 [[package]]
@@ -2730,7 +2730,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef1d73c59a56771343712b22ea5615092c612c16ba291c0979e3105dfeec4890"
 dependencies = [
- "sha2 0.11.0",
+ "sha2",
 ]
 
 [[package]]
@@ -4216,7 +4216,7 @@ dependencies = [
  "lz4_flex",
  "lzma-rust2 0.23.0",
  "ppmd-rust",
- "sha2 0.11.0",
+ "sha2",
  "wasm-bindgen",
  "zstd",
 ]
@@ -4241,17 +4241,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "digest 0.11.3",
-]
-
-[[package]]
-name = "sha2"
-version = "0.10.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
 ]
 
 [[package]]
@@ -4643,7 +4632,7 @@ dependencies = [
  "hex",
  "md-5",
  "sha1 0.10.7",
- "sha2 0.10.9",
+ "sha2",
  "thzip-core",
 ]
 
@@ -5037,7 +5026,7 @@ dependencies = [
  "reedsolomon-rs",
  "rmp-serde",
  "serde",
- "sha2 0.11.0",
+ "sha2",
  "subtle",
  "tempfile",
  "thiserror 2.0.21",

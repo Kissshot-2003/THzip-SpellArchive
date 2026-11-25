@@ -47,7 +47,7 @@ zip = { version = "9.6", default-features = false, features = [
     "xz",
 ] }
 crc32fast = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 sha1 = "0.10"
 md-5 = "0.10"
 hex = "0.4"

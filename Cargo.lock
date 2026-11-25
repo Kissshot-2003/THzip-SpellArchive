@@ -4611,7 +4611,7 @@ checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
 
 [[package]]
 name = "thzip-app"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "dhat",
  "eframe",
@@ -4637,7 +4637,7 @@ dependencies = [
 
 [[package]]
 name = "thzip-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crc32fast",
  "hex",
@@ -4649,7 +4649,7 @@ dependencies = [
 
 [[package]]
 name = "thzip-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bzip2",
  "crc32fast",

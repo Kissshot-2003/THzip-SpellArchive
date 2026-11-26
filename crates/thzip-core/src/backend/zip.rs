@@ -3,8 +3,6 @@ use std::io::{BufReader, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use zip::extra_fields::ExtraField;
-
 use crate::backend::NameOptions;
 use crate::backend::common::{detect_conflict, ratio_suspicious};
 use crate::backend::name_codec::{self, NameEncoding, NameOverride};
@@ -90,21 +88,23 @@ impl ZipReader {
             };
 
             let raw_name = file.name_raw().to_vec();
-            // zip crate 9.x 的 name() 已处理 bit 11 与 Info-ZIP Unicode Path（0x7075，
-            // 含严格一致性校验），name_raw() 则保留扩展应用前的原始字节。
-            // 这两路是权威名字，优先于打分判定；只有 raw 强制才绕过。
-            let has_unicode_path = file
-                .extra_data_fields()
-                .any(|field| matches!(field, ExtraField::UnicodePath(_)));
+            // bit 11 与 Info-ZIP Unicode Path（0x7075）是权威名字来源，但它们只能通过
+            // `name_raw()` 是否已是合法 UTF-8 来判定：标志位置位、且扩展 CRC 校验通过时
+            // zip crate 才会把权威 UTF-8 名字回填到 `name_raw()`。
+            //
+            // 反过来，`extra_data_fields()` 只要字段存在就报告 `UnicodePath`，不理会 CRC
+            // 是否正确；此时 `name()` 返回的是原名字的 lossy 结果。若仅凭字段存在就采信
+            // `name()`，坏 CRC 的包会被打上「UTF-8 / 置信 100」，正是需要避免的静默误判。
+            // 因此这里以 `raw_is_utf8` 作为唯一判据，其余情况一律回落到打分。
             let authoritative = file.name().ok().map(|name| name.into_owned());
             let raw_is_utf8 = std::str::from_utf8(&raw_name).is_ok();
             let (display, encoding, confidence) = if options.encoding == NameOverride::Raw {
                 let guess = name_codec::decode_with(&raw_name, NameOverride::Raw);
                 (guess.text, guess.encoding, guess.confidence)
-            } else if let Some(name) = authoritative
-                && (has_unicode_path || raw_is_utf8)
+            } else if let Some(name) = &authoritative
+                && raw_is_utf8
             {
-                (name, NameEncoding::Utf8, 100)
+                (name.clone(), NameEncoding::Utf8, 100)
             } else {
                 let guess = name_codec::decode_with(&raw_name, options.encoding);
                 (guess.text, guess.encoding, guess.confidence)

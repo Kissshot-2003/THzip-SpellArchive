@@ -37,6 +37,24 @@ fn run(args: &[&str]) -> std::process::Output {
     thzip().args(args).output().expect("run thzip")
 }
 
+/// UTF-16 LE + BOM，模拟 Windows 记事本「Unicode」编码。
+fn utf16_le(text: &str) -> Vec<u8> {
+    let mut out = vec![0xFF, 0xFE];
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+/// UTF-16 BE + BOM，模拟「Unicode big endian」编码。
+fn utf16_be(text: &str) -> Vec<u8> {
+    let mut out = vec![0xFE, 0xFF];
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&unit.to_be_bytes());
+    }
+    out
+}
+
 fn stdout(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -111,6 +129,40 @@ fn extract_reads_password_from_file_and_same_dir() {
     assert!(ex1.status.success(), "{}", stdout(&ex1));
     assert_eq!(
         std::fs::read(target1.join("secret.txt")).unwrap(),
+        b"classified"
+    );
+
+    // --password-file，UTF-16 LE BOM（Windows 记事本另存「Unicode」的产物）。
+    let pwfile_le = dir.path().join("pw-le.txt");
+    std::fs::write(&pwfile_le, utf16_le("\nhunter2\n")).unwrap();
+    let target_le = dir.path().join("out-le");
+    let ex_le = run(&[
+        "extract",
+        archive.to_str().unwrap(),
+        target_le.to_str().unwrap(),
+        "--password-file",
+        pwfile_le.to_str().unwrap(),
+    ]);
+    assert!(ex_le.status.success(), "{}", stdout(&ex_le));
+    assert_eq!(
+        std::fs::read(target_le.join("secret.txt")).unwrap(),
+        b"classified"
+    );
+
+    // --password-file，UTF-16 BE BOM（「Unicode big endian」）。
+    let pwfile_be = dir.path().join("pw-be.txt");
+    std::fs::write(&pwfile_be, utf16_be("hunter2\n")).unwrap();
+    let target_be = dir.path().join("out-be");
+    let ex_be = run(&[
+        "extract",
+        archive.to_str().unwrap(),
+        target_be.to_str().unwrap(),
+        "--password-file",
+        pwfile_be.to_str().unwrap(),
+    ]);
+    assert!(ex_be.status.success(), "{}", stdout(&ex_be));
+    assert_eq!(
+        std::fs::read(target_be.join("secret.txt")).unwrap(),
         b"classified"
     );
 

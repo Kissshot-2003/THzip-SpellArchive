@@ -72,7 +72,7 @@ cargo run -p thzip-cli -- extract <归档> <目录>   # 安全解压（--force �
 cargo run -p thzip-cli -- pack <输出> <输入...>   # 格式由扩展名决定
 # sniff / list / test / extract / pack 都支持 --json，输出单行机读结果
 
-cargo test --workspace                           # 212 个单元 / 集成 / 归档格式用例
+cargo test --workspace                           # 232 个单元 / 集成 / 归档格式用例
 cargo bench -p thzip-core                        # 格式嗅探 / 10k 列表 / 解压 / 7z 打包基准
 cargo build --release -p thzip-app --no-default-features   # 精简版：省掉屏幕阅读器与 SVG 文字
 ```

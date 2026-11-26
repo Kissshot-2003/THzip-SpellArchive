@@ -5,10 +5,44 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **zip 名字解码不再采信坏 CRC 的 Unicode Path 扩展**：`0x7075` 的 `name_crc`
+  与原始名字不符时，此前仍按扩展给出的「UTF-8 / 置信 100」采用 `name()` 的
+  lossy 结果，导致名字解成乱码却标着最高可信度。改为以 `name_raw()` 是否已是
+  合法 UTF-8 作为唯一判据，否则回落到打分判定。补 `utf8-flag.zip` /
+  `unicode-path.zip` / `unicode-path-bad-crc.zip` 三个夹具。
+
+### 测试
+
+- 密码文件的 UTF-16 LE / BE BOM 用例（此前只覆盖 UTF-8 BOM）。
+
+## [0.2.2] - 2026-11-25
+
 ### 新增
 
+- **文件名编码判定升级**：`NameGuess { encoding, confidence, alternates }` 取代
+  原先「UTF-8 优先、GBK 与 Shift-JIS 二选一」的二元比较。打分维度含替换字符数、
+  假名占比、CJK 与伪汉字特征、控制字符与私用区、全半角混排；`confidence < 60`
+  时推 `PlanWarning::NameEncodingAmbiguous` 并在界面提示可手动切换。
+  CLI 新增 `--name-encoding auto|utf8|gbk|cp932|raw`，`raw` 输出 `%XX` 转义
+  （`%` 自身转义为 `%25`，保证可逆）。`ExtractReport` 新增 `NameReport`，
+  `--json` 输出 `name_encoding` / `name_confidence` / `name_renamed`。
+- **CLI 密码来源扩展**：`--password-file <path>` 取首个非空行，支持 UTF-8 /
+  UTF-16 LE / BE BOM；未给密码时按约定尝试同目录 `password.txt` /
+  `解压密码.txt`，仅尝试一次，失败静默跳过。自动尝试的密码不写日志、
+  不进 `--json`、不进崩溃报告。
+- **`checksum` / `verify` 子命令**：`checksum` 按相对路径排序输出 `SHA256SUMS`
+  兼容格式，与 `scripts/package.ps1` 产物一致；`verify` 逐条比对并输出
+  `missing` / `extra` / `mismatch`，不一致时退出码非零。`test` 管包内 CRC，
+  `verify` 管对外发布的指纹一致性。
 - **日语界面**：新增第三种界面语言 `日本語`（语言循环：简体中文 → English → 日本語），
   覆盖全部 251 条界面文案、结构化错误原因与预检警告；占位符一致性由测试守护。
+- **主题 `homepage` 字段**：`theme.toml` 的 `[meta]` 支持 `homepage`，设置窗口的
+  主题信息行渲染为可点击链接；不填时静默省略。README 新增「主题作者」致谢区，
+  为开放投稿做准备。
+- **分卷预检**：预检面板显示「共 N 卷 / 已找到 M 卷 / 总大小」，缺卷时主按钮
+  置灰并提示补齐；RAR 多卷单独标记，避免误判为损坏。
 
 ### 变更
 
@@ -16,6 +50,9 @@
   随机数据持平，压缩率仅降约 9%；同压缩级别口径下创建 7z 从「慢 4 倍」变为
   快于 7-Zip 26.04（1.34s ↔ 3.14s，2.35x）。追求极致压缩率可用 `--7z-level 6–9`。
   此前「创建 7z 慢」的结论来自不对等口径（L6 ↔ `-mx5`），基准已统一为 L3 ↔ `-mx3`。
+- `FailReason::VolumeIncomplete` 的 `missing` 由 `String` 改为 `Vec<u32>`，
+  缺卷时一次性列出全部缺失编号；中 / 英 / 日文案同步。
+- `pack` 新增 `--volume-first-index`（默认 1），兼容从 `.000` 起编号的分卷。
 
 ## [0.2.1] - 2026-11-16
 

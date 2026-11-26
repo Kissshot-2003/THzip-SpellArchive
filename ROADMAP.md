@@ -1,8 +1,8 @@
 # THzip-SpellArchive 长任务路线图
 
 > 面向后续接手的开发者和 AI 代理。本文件是可执行的长任务清单，不是宣传文档。
-> 当前基线：`0.2.0`，70 次提交，`cargo test --workspace` 212 通过（core 144 / app 64 / cli 4），clippy / fmt 干净。
-> 最后更新：2026-11-15（Phase 0 启动）。
+> 当前基线：`0.2.2`，98 次提交，`cargo test --workspace` 232 通过，clippy / fmt 干净。
+> 最后更新：2026-11-26（Phase 3–5 收尾与开放投稿前置完成）。
 
 ## 0. 约束（任何阶段都不得破坏）
 

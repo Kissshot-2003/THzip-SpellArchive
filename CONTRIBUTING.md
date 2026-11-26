@@ -10,7 +10,7 @@
 ```powershell
 git clone <仓库地址>
 cd THzip-SpellArchive
-cargo test --workspace          # 212 个测试，约十几秒
+cargo test --workspace          # 232 个测试，约十几秒
 cargo run -p thzip-app          # 启动 GUI
 ```
 

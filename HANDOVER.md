@@ -3,9 +3,14 @@
 > 面向接手的开发者。读完这份文档应能：在当前机器跑起来、验证核心功能、看懂分层与数据流、
 > 知道哪些已实现、哪些是占位、按路线继续开发。
 >
-> 最后更新：2026-11（本次：7 个依赖升级 PR 收口（zstd 0.14 / lz4_flex 0.14 / toml 1.2 /
-> fontdb 0.24 / encoding_rs 0.8.44 / flate2 / crc32fast patch），体积门禁与实测数字对齐
-> check-size.ps1；此前：Win11 右键菜单按扩展名收敛 + 多选 + 经典菜单开关、
+> 最后更新：2026-11-26（本次：0.2.2 收口——文件名编码打分判定与 `--name-encoding`
+> 强制入口、分卷缺卷预检与 `--volume-first-index`、CLI `--password-file` 与同目录
+> 密码约定、`checksum` / `verify` 子命令、主题 `homepage` 字段与 README 致谢区、
+> 日语界面、7z 默认级别降为 3；随后修掉 `0x7075` 坏 CRC 被当成「UTF-8 / 置信 100」
+> 的误判，并把依赖锁文件批量升到最新补丁版；此前：7 个依赖升级 PR 收口
+> （zstd 0.14 / lz4_flex 0.14 / toml 1.2 / fontdb 0.24 / encoding_rs 0.8.44 /
+> flate2 / crc32fast patch），体积门禁与实测数字对齐 check-size.ps1；
+> 更早：Win11 右键菜单按扩展名收敛 + 多选 + 经典菜单开关、
 > RAR 后端换 unrar-rs 实现真流式、代码签名通道、文档漂移修正；
 > 再此前：私有远端 + CI、fuzz/差分/基准、便携模式与 CLI JSON、归档注释、主题导出、
 > 任务模板、文本/图片预览、7z 分卷创建、设置 schema 5、`app.rs` 拆分、
@@ -35,7 +40,7 @@
 - **能做什么**：zip / 7z / tar 家族读写、RAR 读取；多标签页；zip 多方法读写（读写 Deflate64/BZip2/Zstd/PPMd/LZMA 中的大部分，见 4.1）；
   单文件流读取；AES-256；固实 7z；分卷 7z；后台预检；冲突跳过/覆盖/改名/自动编号；
   多选/排序（排序持久化）；删除/重命名/移动/批量改名/正则改名条目；创建/追加；密码；后台主题包导入；主题懒加载；托盘、右键菜单、单实例、设置持久化。
-- **怎么跑**：`cargo test --workspace`（212）；`cargo clippy --workspace --all-targets -- -D warnings`；
+- **怎么跑**：`cargo test --workspace`（232）；`cargo clippy --workspace --all-targets -- -D warnings`；
   `cargo run -p thzip-app`；release 打包用 `scripts/package.ps1`。
 - **分层红线**：`thzip-core` 零 UI 依赖；所有写盘走 `safety`；UI 只通过 Reader/Writer 和 `TaskEvent`。
 - **当前风险**：RAR 只读（UnRAR 许可限制）；exe 未签名；7z 固实包无压缩字节级进度（上游库未暴露回调）。
@@ -98,7 +103,7 @@ THzip-SpellArchive 是一个 Windows 桌面归档管理器，东方 Project 同�
 ```powershell
 cd <仓库根目录>   # 含 Cargo.toml 的那一层
 
-cargo test --workspace                 # 212 个测试
+cargo test --workspace                 # 232 个测试
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 差分测试：先安装固定版 7-Zip，再指向其 exe
@@ -153,7 +158,7 @@ tar 家族忽略。
 9. 归档表点“全选”后解压只处理选中项；点表头可切换排序（名称使用自然序）。
 10. 解压到已有文件时，四种冲突策略（跳过/覆盖/改名/自动编号）行为正确。
 11. 解压出的文件修改时间应等于归档内记录时间。
-12. `cargo test --workspace` 212 通过；clippy 无告警。
+12. `cargo test --workspace` 232 通过；clippy 无告警。
 
 ---
 
@@ -806,7 +811,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-当前共 **212** 个测试（core 144 + app 64 + cli 4）。
+当前共 **232** 个测试。
 
 ### 9.2 测试分布
 
@@ -965,7 +970,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 接手当天逐条勾：
 
 - [ ] 读 README、本文件、`docs/theme_spec.md`、设计文档 v2.1
-- [ ] `cargo test --workspace`（212 通过）
+- [ ] `cargo test --workspace`（232 通过）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo run -p thzip-app` 能开，5 个主题可切换
 - [ ] 打开 zip / 7z / rar / tar.gz / 单文件 gz，条目真实显示
